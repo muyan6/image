@@ -25,6 +25,7 @@ from fastapi import APIRouter, File, HTTPException, Query, Request, Response, Up
 
 from settings_store import SettingsStore, AnnouncementStore
 from templates_store import covers_dir, resolve_cover, resolve_covers
+from community_store import CommunityStore, MEDIA_PREFIX
 
 # 需要打码的密钥字段: (节路径) -> 字段列表
 _MASK_SCHEMA = {
@@ -192,6 +193,7 @@ def make_admin_router(*, settings: SettingsStore,
                       health_fn: Callable[[], Dict[str, Any]],
                       stats_fn: Callable[[], Dict[str, Any]]) -> APIRouter:
     router = APIRouter(prefix="/admin/api")
+    community = CommunityStore(settings)
 
     def _guard(request: Request) -> None:
         if request.headers.get(_CSRF_HEADER) != "1":
@@ -288,11 +290,76 @@ def make_admin_router(*, settings: SettingsStore,
     async def put_settings(request: Request) -> Dict[str, Any]:
         _guard(request)
         patch = _unmask_secrets(await _json_body(request), settings.snapshot())
+        if "community" in patch:
+            raise HTTPException(status_code=400, detail="社区帖子请在侧边栏「社区管理」中操作")
         try:
             updated = settings.update(patch)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _masked_settings(updated)
+
+    @router.get("/community/posts")
+    def community_posts(request: Request, status: str = "all", q: str = "", offset: int = 0, limit: int = 30):
+        _guard(request)
+        try: return community.list(status, q, offset, limit)
+        except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/community/posts")
+    async def create_community_post(request: Request):
+        _guard(request)
+        try: return community.create(await _json_body(request))
+        except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/community/posts/batch")
+    async def batch_community_posts(request: Request):
+        _guard(request)
+        body = await _json_body(request)
+        try: return community.batch(body.get("ids"), body.get("action"))
+        except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except KeyError as exc: raise HTTPException(status_code=404, detail=str(exc.args[0])) from exc
+
+    @router.patch("/community/posts/{post_id}")
+    async def update_community_post(post_id: str, request: Request):
+        _guard(request)
+        try: return community.update(post_id, await _json_body(request))
+        except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except KeyError as exc: raise HTTPException(status_code=404, detail=str(exc.args[0])) from exc
+
+    @router.delete("/community/posts/{post_id}")
+    def delete_community_post(post_id: str, request: Request):
+        _guard(request)
+        try: return community.delete(post_id)
+        except KeyError as exc: raise HTTPException(status_code=404, detail=str(exc.args[0])) from exc
+
+    @router.post("/community/media")
+    def upload_community_media(request: Request, file: UploadFile = File(...)):
+        _guard(request)
+        data = bytearray()
+        try:
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk: break
+                data.extend(chunk)
+                if len(data) > 10 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="社区图片最多 10 MB")
+        finally:
+            file.file.close()
+        try:
+            import io, uuid
+            from PIL import Image, ImageOps
+            with Image.open(io.BytesIO(data)) as image:
+                if image.width * image.height > 40_000_000:
+                    raise ValueError("图片像素过大，请先缩小")
+                image = ImageOps.exif_transpose(image).convert("RGB")
+                image.thumbnail((1600, 1600))
+                output = io.BytesIO(); image.save(output, "JPEG", quality=90)
+            name = uuid.uuid4().hex + ".jpg"
+            os.makedirs(community.media_dir, exist_ok=True)
+            with open(os.path.join(community.media_dir, name), "wb") as fh:
+                fh.write(output.getvalue())
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=400, detail="图片读取失败，请选择 JPG、PNG 或 WebP 图片") from exc
+        return {"url": MEDIA_PREFIX + name}
 
     @router.get("/announcements")
     def list_announcements(request: Request) -> Dict[str, Any]:

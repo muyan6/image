@@ -268,6 +268,8 @@
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
           <path d="M8 2l6 3-6 3-6-3 6-3z"/><path d="M2 8l6 3 6-3"/><path d="M2 11l6 3 6-3"/>
         </svg>模板管理</div>
+      <div class="nav-item" data-page="community" onclick="showPage('community')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2.5h12v8H7L3 14v-3.5H2z"/><path d="M5 5.5h6M5 8h4"/></svg>社区管理</div>
       <div class="nav-item" data-page="ann" onclick="showPage('ann')">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
           <path d="M8 2a4 4 0 0 0-4 4v2.5L2.8 11h10.4L12 8.5V6a4 4 0 0 0-4-4z"/>
@@ -356,6 +358,25 @@
         </div>
       </section>
 
+      <!-- 社区帖子管理 -->
+      <section id="page-community" hidden>
+        <div class="card">
+          <div class="card-head"><h2>社区帖子<small>暂停只隐藏帖子；永久删除会移除帖子记录</small></h2><button class="btn-primary" onclick="openCommunityEditor()">＋ 新增帖子</button></div>
+          <div class="stats" id="community-stats"></div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin:18px 0">
+            <input id="community-search" placeholder="搜索标题、作者、内容或配方" style="flex:1;min-width:220px" onkeydown="if(event.key==='Enter')loadCommunityPosts(true)">
+            <select id="community-status" style="width:150px" onchange="loadCommunityPosts(true)"><option value="all">全部状态</option><option value="published">已发布</option><option value="paused">暂停展示</option></select>
+            <button class="btn-ghost" onclick="loadCommunityPosts(true)">搜索 / 刷新</button>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            <button class="btn-ghost btn-small" onclick="batchCommunity('pause')">暂停所选</button><button class="btn-ghost btn-small" onclick="batchCommunity('resume')">恢复所选</button><button class="btn-danger btn-small" onclick="batchCommunity('delete')">永久删除所选</button>
+            <small class="muted">置顶优先展示，同层按排序值从小到大排列。</small>
+          </div>
+          <div class="table-wrap"><table id="community-table"></table></div>
+          <div style="display:flex;gap:12px;align-items:center;margin-top:14px"><button class="btn-ghost btn-small" id="community-prev" onclick="communityPage(-1)">上一页</button><span class="muted" id="community-page"></span><button class="btn-ghost btn-small" id="community-next" onclick="communityPage(1)">下一页</button></div>
+        </div>
+      </section>
+
       <!-- 公告管理 -->
       <section id="page-ann" hidden>
         <div class="card">
@@ -420,18 +441,6 @@
           <label class="check" style="background:#fffbeb;border:1px dashed #f5d78e;border-radius:8px;padding:8px 12px">
             <span class="switch"><input type="checkbox" id="free-mode"><span class="knob"></span></span>
             调试模式（不限次）：小程序跳过光子扣减，光子显示不限量</label>
-        </div>
-        <div class="card">
-          <div class="card-head"><h2>灵感沙龙（社区）<small>内容完全由这里维护，小程序端不再内置任何展品</small></h2></div>
-          <label class="check"><span class="switch"><input type="checkbox" id="cm-enabled"><span class="knob"></span></span>在底部导航展示「社区」入口</label>
-          <p class="muted" style="margin:10px 0 6px">
-            关闭 = 小程序隐藏社区入口且接口返回空列表。清空下方数组 = 社区页显示空状态。
-            数组每项支持字段：<code>id, title, story, author_name, author_avatar, date,
-            category, category_name, template_id, template_name, quality, result_url,
-            orig_url, likes</code>
-          </p>
-          <div class="field"><label>展品数组（JSON）</label><textarea id="cm-items" rows="10" spellcheck="false" placeholder="[]"></textarea></div>
-          <p style="margin:12px 0 0"><button class="btn-primary" onclick="saveConf()">保存通用设置</button></p>
         </div>
         <div class="card">
           <div class="card-head"><h2>激励视频广告<small>未配置时小程序不显示入口，也不会发放光子</small></h2></div>
@@ -600,6 +609,7 @@ api("/session").then(enterApp).catch(() => {});
 const PAGES = {
   dash:  { title: "仪表盘",        load: loadOverview },
   tpl:   { title: "模板管理",      load: loadTemplates },
+  community: { title: "社区管理", load: () => loadCommunityPosts(true) },
   ann:   { title: "公告管理",      load: loadAnnouncements },
   prov:  { title: "供应商与提示词", load: () => { renderChain(); renderProviderForm(); } },
   conf:  { title: "通用设置",      load: renderConf },
@@ -757,26 +767,12 @@ function renderConf() {
   $("mt-message").value = SETTINGS.maintenance?.message || "";
   $("mt-enabled").checked = SETTINGS.maintenance?.enabled || false;
   $("free-mode").checked = SETTINGS.free_mode || false;
-  $("cm-enabled").checked = SETTINGS.community?.enabled || false;
-  $("cm-items").value = JSON.stringify(SETTINGS.community?.items || [], null, 2);
   $("ad-enabled").checked = SETTINGS.ads?.rewarded_video_enabled || false;
   $("ad-unit").value = SETTINGS.ads?.rewarded_video_unit_id || "";
   $("ad-verifier-url").value = SETTINGS.ads?.rewarded_video_verifier_url || "";
   $("ad-verifier-key").value = SETTINGS.ads?.rewarded_video_verifier_key || "";
 }
 window.saveConf = async () => {
-  let items;
-  const raw = ($("cm-items").value || "").trim();
-  try {
-    items = raw ? JSON.parse(raw) : [];
-  } catch (e) {
-    toast("社区展品不是合法 JSON：" + e.message, "bad");
-    return;
-  }
-  if (!Array.isArray(items)) {
-    toast("社区展品必须是 JSON 数组（[]）", "bad");
-    return;
-  }
   try {
     SETTINGS = await api("/settings", { method: "PUT", body: {
       prices: { light: parseInt($("price-light").value, 10) || 0,
@@ -785,7 +781,6 @@ window.saveConf = async () => {
       maintenance: { enabled: $("mt-enabled").checked,
                      message: $("mt-message").value },
       free_mode: $("free-mode").checked,
-      community: { enabled: $("cm-enabled").checked, items: items },
       ads: { rewarded_video_enabled: $("ad-enabled").checked,
              rewarded_video_unit_id: $("ad-unit").value.trim(),
              rewarded_video_verifier_url: $("ad-verifier-url").value.trim(),
@@ -1324,6 +1319,76 @@ async function loadJobs() {
   } catch (e) { console.error(e); }
 }
 window.jobsPage = (dir) => { JOBS_OFFSET = Math.max(0, JOBS_OFFSET + dir * 50); loadJobs(); };
+
+/* ---------- 社区管理 ---------- */
+let COMMUNITY_ITEMS = [], COMMUNITY_OFFSET = 0;
+const COMMUNITY_CATEGORIES = {all:"其它",portrait:"冷白人像",film:"复古胶片",old_photo:"老照片复苏",anime:"动漫重绘"};
+async function loadCommunityPosts(reset) {
+  if (reset) COMMUNITY_OFFSET = 0;
+  try {
+    const data = await api("/community/posts?limit=30&offset=" + COMMUNITY_OFFSET + "&status=" + $("community-status").value + "&q=" + encodeURIComponent($("community-search").value.trim()));
+    COMMUNITY_ITEMS = data.items;
+    if (!data.items.length && COMMUNITY_OFFSET > 0) { COMMUNITY_OFFSET = Math.max(0, COMMUNITY_OFFSET-30); return loadCommunityPosts(); }
+    const c = data.stats;
+    $("community-stats").innerHTML = stat(c.total,"全部帖子") + stat(c.published,"已发布") + stat(c.paused,"暂停展示") + stat(c.pinned,"置顶帖子");
+    $("community-table").innerHTML = '<thead><tr><th><input type="checkbox" onchange="document.querySelectorAll(\'.community-select\').forEach(x=>x.checked=this.checked)"></th><th>图片</th><th>帖子 / 作者 / 配方</th><th>展示状态</th><th>排序</th><th>更新时间</th><th>操作</th></tr></thead><tbody>' +
+      data.items.map(p => `<tr><td><input type="checkbox" class="community-select" value="${esc(p.id)}"></td><td>${p.result_url ? `<img src="${esc(p.result_url)}" alt="帖子图片" style="width:64px;height:76px;object-fit:cover;border-radius:8px;cursor:pointer" onclick="previewCommunity('${esc(p.id)}')">` : '<span class="muted">尚未配图</span>'}</td>` +
+      `<td><b>${esc(p.title)}</b><br><small class="muted">${esc(p.author_name || '未填作者')} · ${esc(p.category_name || COMMUNITY_CATEGORIES[p.category] || '其它')}</small><br><small class="muted">${esc(p.template_name || '未绑定配方')}</small></td>` +
+      `<td><span class="badge ${p.status==='published'?'green':''}">${p.status==='published'?'已发布':'暂停展示'}</span>${p.pinned?'<br><span class="badge indigo">置顶</span>':''}</td><td>${p.sort}</td><td>${fmtTime(p.updated_at)}</td>` +
+      `<td><div style="display:flex;gap:6px;flex-wrap:wrap;max-width:280px"><button class="btn-ghost btn-small" onclick="openCommunityEditor('${esc(p.id)}')">编辑</button><button class="btn-ghost btn-small" onclick="previewCommunity('${esc(p.id)}')">预览</button>` +
+      `<button class="btn-ghost btn-small" onclick="changeCommunity('${esc(p.id)}',{status:'${p.status==='published'?'paused':'published'}'})">${p.status==='published'?'暂停展示':'恢复展示'}</button><button class="btn-ghost btn-small" onclick="changeCommunity('${esc(p.id)}',{pinned:${!p.pinned}})">${p.pinned?'取消置顶':'置顶'}</button>` +
+      `<button class="btn-danger btn-small" onclick="deleteCommunity('${esc(p.id)}')">永久删除</button></div></td></tr>`).join('') +
+      (data.items.length?'':'<tr><td colspan="7" class="empty">暂无符合条件的帖子。点击「新增帖子」创建，不需要填写JSON。</td></tr>') + '</tbody>';
+    $("community-page").textContent = `共 ${data.total} 条 · 第 ${Math.floor(COMMUNITY_OFFSET/30)+1} 页`;
+    $("community-prev").disabled = COMMUNITY_OFFSET===0; $("community-next").disabled = COMMUNITY_OFFSET+30>=data.total;
+  } catch(e) { toast(e.message,"bad"); }
+}
+window.communityPage = direction => { COMMUNITY_OFFSET=Math.max(0,COMMUNITY_OFFSET+direction*30);loadCommunityPosts(); };
+window.changeCommunity = async (id,patch) => {
+  try { await api('/community/posts/'+encodeURIComponent(id),{method:'PATCH',body:patch});toast('帖子已更新');await loadCommunityPosts(); }
+  catch(e) { toast(e.message,'bad'); }
+};
+window.deleteCommunity = async id => {
+  if (!confirm('永久删除这条帖子？删除后不再展示，帖子记录不可恢复。')) return;
+  try { await api('/community/posts/'+encodeURIComponent(id),{method:'DELETE'});toast('帖子已永久删除');await loadCommunityPosts(); }
+  catch(e) { toast(e.message,'bad'); }
+};
+window.batchCommunity = async action => {
+  const ids=[...document.querySelectorAll('.community-select:checked')].map(x=>x.value);
+  if (!ids.length) {toast('请先选择帖子','bad');return;}
+  if (action==='delete'&&!confirm(`永久删除所选 ${ids.length} 条帖子？`)) return;
+  try {await api('/community/posts/batch',{method:'POST',body:{ids,action}});toast('已完成所选帖子的操作');await loadCommunityPosts();}
+  catch(e) {toast(e.message,'bad');}
+};
+window.previewCommunity = id => {
+  const p=COMMUNITY_ITEMS.find(x=>x.id===id);if(!p)return;
+  openModal(`<div class="modal-head"><h3>${esc(p.title)}</h3><button class="btn-icon" onclick="closeModal()">×</button></div><div class="modal-body"><p class="muted">${p.status==='paused'?'此帖子暂停展示，仅在后台预览。':'此帖子已发布。'} ${p.pinned?'置顶帖子':''}</p><div style="display:flex;gap:12px;flex-wrap:wrap">${[p.result_url,p.orig_url].filter(Boolean).map(u=>`<img src="${esc(u)}" style="max-width:100%;max-height:440px;object-fit:contain;border-radius:8px">`).join('')}</div><p style="white-space:pre-wrap">${esc(p.story||'')}</p><small class="muted">${esc(p.author_name||'')} · ${esc(p.template_name||'未绑定配方')}</small></div>`);
+};
+window.openCommunityEditor = async id => {
+  const p=COMMUNITY_ITEMS.find(x=>x.id===id)||{status:'published',sort:100,likes:0,category:'all',quality:'fine'};
+  let templates=[];try {templates=(await api('/templates')).items||[];}catch(e){}
+  const field=(key,label,type='text',max=1000)=>`<div class="field"><label>${label}</label><input id="post-${key}" type="${type}" maxlength="${max}" value="${esc(p[key]??'')}"></div>`;
+  openModal(`<div class="modal-head"><h3>${id?'编辑帖子':'新增帖子'}</h3><button class="btn-icon" onclick="closeModal()">×</button></div><div class="modal-body">
+    ${field('title','帖子标题 *','text',100)}<div class="field"><label>帖子内容 / 创作故事</label><textarea id="post-story" maxlength="5000" rows="4">${esc(p.story||'')}</textarea></div>
+    <div class="form-grid">${field('author_name','作者名称','text',60)}${field('date','展示日期（可选）','text',30)}</div>
+    <div class="form-grid"><div class="field"><label>分类</label><select id="post-category">${Object.entries(COMMUNITY_CATEGORIES).map(([k,v])=>`<option value="${k}" ${p.category===k?'selected':''}>${v}</option>`).join('')}</select></div><div class="field"><label>绑定配方（可选）</label><select id="post-template"><option value="">不绑定</option>${templates.map(t=>`<option value="${esc(t.id)}" data-name="${esc(t.name)}" ${p.template_id===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}</select></div></div>
+    ${['result_url','orig_url'].map((slot,i)=>`<div class="field"><label>${i?'原图（可选）':'结果图 *'}</label><div style="display:flex;gap:8px">${`<input id="post-${slot}" value="${esc(p[slot]||'')}" placeholder="上传图片或粘贴图片网址" maxlength="1000">`}<label class="btn-ghost" style="white-space:nowrap;cursor:pointer">上传图片<input type="file" accept="image/jpeg,image/png,image/webp" hidden onchange="uploadCommunityImage(this.files[0],'${slot}')"></label></div><small class="muted">仅社区专用图片；上传不会改动用户原作品。</small></div>`).join('')}
+    ${field('author_avatar','作者头像网址（可选）')}
+    <div class="form-grid"><div class="field"><label>展示状态</label><select id="post-status"><option value="published" ${p.status==='published'?'selected':''}>发布展示</option><option value="paused" ${p.status==='paused'?'selected':''}>暂停展示（保留帖子）</option></select></div><div class="field"><label>画质标签</label><select id="post-quality"><option value="fine" ${p.quality==='fine'?'selected':''}>精细</option><option value="light" ${p.quality==='light'?'selected':''}>标准</option></select></div></div>
+    <div class="form-grid">${field('sort','排序值（越小越靠前）','number')}${field('likes','展示点赞数','number')}</div>
+    <label class="check"><input id="post-pinned" type="checkbox" ${p.pinned?'checked':''}>置顶展示</label>
+    </div><div class="modal-foot"><button class="btn-ghost" onclick="closeModal()">取消</button><button class="btn-primary" onclick="saveCommunityPost('${esc(id||'')}')">保存帖子</button></div>`,true);
+};
+window.uploadCommunityImage = async(file,slot)=>{
+  if(!file)return;const form=new FormData();form.append('file',file);
+  try {const r=await fetch('/admin/api/community/media',{method:'POST',headers:{'X-Admin-Request':'1'},body:form});const body=await r.json();if(!r.ok)throw new Error(body.detail||'上传失败');$("post-"+slot).value=body.url;toast('图片上传成功');}catch(e){toast(e.message,'bad');}
+};
+window.saveCommunityPost = async id => {
+  const body={};['title','story','author_name','author_avatar','date','category','quality','result_url','orig_url','status'].forEach(k=>body[k]=$("post-"+k).value.trim());
+  body.sort=parseInt($("post-sort").value,10);body.likes=parseInt($("post-likes").value,10);body.pinned=$("post-pinned").checked;
+  const selected=$("post-template");body.template_id=selected.value;body.template_name=selected.selectedOptions[0]?.dataset.name||'';
+  try {await api('/community/posts'+(id?'/'+encodeURIComponent(id):''),{method:id?'PATCH':'POST',body});closeModal();toast(body.status==='published'?'帖子已发布':'帖子已保存，暂停展示');await loadCommunityPosts();}catch(e){toast(e.message,'bad');}
+};
 
 /* ---------- 用户管理 ---------- */
 async function loadUsers() {

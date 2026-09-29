@@ -37,6 +37,9 @@ commands = [['python', '-u', tests[0].as_posix()], ['node', tests[1].as_posix()]
 identity_test = Path(__file__).with_name('test_user_identity.py')
 if not args.legacy and identity_test.exists():
     commands.append(['python', '-u', identity_test.as_posix()])
+community_test = Path(__file__).with_name('test_community.py')
+if not args.legacy and community_test.exists():
+    commands.append(['python', '-u', community_test.as_posix()])
 executions = []
 for command in commands:
     result = subprocess.run(command, cwd=source, env=environment, capture_output=True, text=True, encoding='utf-8')
@@ -54,6 +57,8 @@ for name in ('backend_results.json', 'frontend_results.json'):
     rows.extend(json.loads(path.read_text(encoding='utf-8')))
 if not args.legacy and identity_test.exists():
     rows.extend(json.loads((output / 'identity_results.json').read_text(encoding='utf-8'))['cases'])
+if not args.legacy and community_test.exists():
+    rows.extend(json.loads((output / 'community_results.json').read_text(encoding='utf-8'))['cases'])
 errors = [r for r in rows if 'harness_error' in r]
 failed = sum(not r['passed'] for r in rows)
 summary = {'total': len(rows), 'passed': len(rows) - failed, 'failed': failed, 'harness_errors': len(errors)}

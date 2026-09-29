@@ -332,6 +332,18 @@ class SettingsStore:
             self._data = candidate
             return copy.deepcopy(self._data)
 
+    def mutate_community(self, mutate) -> Dict[str, Any]:
+        """Atomic post edits: another settings save cannot overwrite a read snapshot."""
+        with self._lock:
+            community = copy.deepcopy(self._data.get("community") or {"enabled": True, "items": []})
+            mutate(community)
+            candidate = copy.deepcopy(self._data)
+            candidate["community"] = community
+            _validate(candidate)
+            self._save_locked(candidate)
+            self._data = candidate
+            return copy.deepcopy(community)
+
     # ------------------------------------------------------------------ #
     # 常用读取便捷方法(全部现读,保证后台改动立即生效)
     # ------------------------------------------------------------------ #

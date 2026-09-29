@@ -44,6 +44,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from admin_api import ensure_admin_password, make_admin_router
 from cleanup_store import CleanupStore
+from community_store import CommunityStore
 from cos_store import (CosError, get_object as cos_get,
                        head_exists as cos_head, presign as cos_presign,
                        put_object as cos_put)
@@ -1368,7 +1369,7 @@ def get_available_styles() -> Dict[str, Any]:
 def public_config() -> Dict[str, Any]:
     """小程序启动时拉取：价格、维护状态、风格表、调试免扣费开关、社区与广告开关。"""
     ads = settings.ads()
-    community = settings.community()
+    community = CommunityStore(settings)._normalize()
     return {
         "prices": settings.prices(),
         "free_mode": settings.free_mode(),
@@ -1388,16 +1389,9 @@ def public_config() -> Dict[str, Any]:
 
 @app.get("/api/community")
 def public_community() -> Dict[str, Any]:
-    """灵感沙龙展品。内容全部来自后台配置，未开启或没有内容时返回空列表。
-
-    小程序端不再内置任何硬编码展品 —— 后台没配就是空页面，
-    不会再出现"社区里全是测试文字"的情况。
-    """
-    conf = settings.community()
-    if not conf["enabled"]:
-        return {"enabled": False, "items": []}
+    """Only published posts are returned; pause/delete operate per post."""
     items = []
-    for idx, raw in enumerate(conf["items"]):
+    for idx, raw in enumerate(CommunityStore(settings).list(status="published", limit=200)["items"]):
         items.append({
             "id": str(raw.get("id") or "c%d" % (idx + 1)),
             "title": str(raw.get("title") or ""),
@@ -1414,8 +1408,19 @@ def public_community() -> Dict[str, Any]:
             "origUrl": str(raw.get("orig_url") or ""),
             "likes": _community_likes(raw.get("likes")),
             "liked": False,
+            "pinned": bool(raw.get("pinned")),
         })
     return {"enabled": True, "items": items}
+
+
+@app.get("/api/community/media/{filename}")
+def community_media(filename: str):
+    if not re.fullmatch(r"[0-9a-f]{32}\.jpg", filename):
+        raise HTTPException(status_code=404, detail="图片不存在")
+    path = os.path.join(CommunityStore(settings).media_dir, filename)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="图片不存在")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
 
 
 def _community_likes(value: Any) -> int:

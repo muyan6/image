@@ -4,9 +4,9 @@ const api = require('../../utils/api.js');
 /**
  * 灵感沙龙（社区）
  *
- * 展品全部来自后端 GET /api/community —— 内容在 /admin「通用设置」里维护，
+ * 帖子来自 GET /api/community，在 /admin「社区管理」中逐帖维护，
  * 前端不再内置任何示例/测试文案（此前是 4 条写死的假展品）。
- * 后端 community.enabled = false 时沙龙暂停开放，页面显示暂停态。
+ * 暂停展示和已删除的帖子不会返回；置顶与排序由服务端决定。
  */
 Page({
   data: {
@@ -28,6 +28,10 @@ Page({
     this.loadCommunity();
   },
 
+  onShow() {
+    if (this._communityLoaded) this.loadCommunity();
+  },
+
   onPullDownRefresh() {
     this.loadCommunity().then(() => wx.stopPullDownRefresh());
   },
@@ -36,7 +40,11 @@ Page({
   loadCommunity() {
     return api.request('/api/community', { timeout: 8000 })
       .then((d) => {
-        const items = (d && d.items) || [];
+        this._communityLoaded = true;
+        const items = ((d && d.items) || []).map(item => Object.assign({}, item, {
+          resultUrl: api.absolute(item.resultUrl), origUrl: api.absolute(item.origUrl),
+          authorAvatar: item.authorAvatar ? api.absolute(item.authorAvatar) : ''
+        }));
         this.setData({
           enabled: !!(d && d.enabled),
           items: items,
