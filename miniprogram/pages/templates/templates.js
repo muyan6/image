@@ -8,12 +8,19 @@ Page({
       { id: 'all', name: '全部风格', count: 0 }
     ],
     activeCategory: 'all',
+    freeMode: false,
+    priceLight: 1,
+    priceFine: 3,
     allTemplates: [],
     filteredTemplates: [],
     selectedItem: null
   },
 
   onLoad() {
+    // tabBar 页面每次回到前台都需刷新，不在 onLoad 再重复请求一次。
+  },
+
+  onShow() {
     this.fetchTemplates();
   },
 
@@ -24,7 +31,12 @@ Page({
   },
 
   fetchTemplates(callback) {
+    const version = (this._fetchVersion || 0) + 1;
+    this._fetchVersion = version;
     this.setData({ loading: true });
+    if (this.data.freeMode !== !!app.globalData.freeMode && !this._latestRawItems) {
+      this.setData({ freeMode: !!app.globalData.freeMode });
+    }
 
     // 1. 尝试读本地缓存，秒开
     try {
@@ -35,8 +47,23 @@ Page({
     } catch (e) {}
 
     // 2. 异步请求后端
+    // 模板目录与价格分开获取；任意一方先回来都用最新两份数据重新渲染。
+    api.config().then((config) => {
+      if (version !== this._fetchVersion || !config) return;
+      const prices = config.prices || {};
+      app.globalData.freeMode = !!config.free_mode;
+      this.setData({ freeMode: !!config.free_mode,
+        priceLight: prices.light != null ? prices.light : this.data.priceLight,
+        priceFine: prices.fine != null ? prices.fine : this.data.priceFine });
+      if (this._latestRawItems) this._renderData(this._latestGroups, this._latestRawItems);
+    }).catch(() => {});
+
     api.templates()
       .then((data) => {
+        if (version !== this._fetchVersion) {
+          if (typeof callback === 'function') callback();
+          return;
+        }
         const groups = (data && data.groups) || [];
         const rawItems = (data && data.items) || [];
         try { wx.setStorageSync('cached_templates_data', data); } catch (e) {}
@@ -45,6 +72,10 @@ Page({
         if (typeof callback === 'function') callback();
       })
       .catch((err) => {
+        if (version !== this._fetchVersion) {
+          if (typeof callback === 'function') callback();
+          return;
+        }
         console.warn('获取模板列表失败', err);
         this.setData({ loading: false });
         if (typeof callback === 'function') callback();
@@ -52,8 +83,12 @@ Page({
   },
 
   _renderData(groups, rawItems) {
+    this._latestGroups = groups;
+    this._latestRawItems = rawItems;
     const items = rawItems.map((item) => {
-      const cost = item.price > 0 ? ('✦ ' + item.price + ' 光子') : (item.engine === 'fine' ? '✦ 3 光子' : '✦ 1 光子');
+      const amount = item.price > 0 ? item.price :
+        (item.engine === 'fine' ? this.data.priceFine : this.data.priceLight);
+      const cost = this.data.freeMode ? '免扣费' : ('✦ ' + amount + ' 光子');
       const rawCovers = Array.isArray(item.covers) && item.covers.length > 0
         ? item.covers
         : (item.cover ? [item.cover] : []);
@@ -78,12 +113,14 @@ Page({
       });
     });
 
+    const category = cats.some((c) => c.id === this.data.activeCategory) ? this.data.activeCategory : 'all';
     this.setData({
       allTemplates: items,
-      categories: cats
+      categories: cats,
+      activeCategory: category
     });
 
-    this.filterByCategory(this.data.activeCategory);
+    this.filterByCategory(category);
   },
 
   onSelectCategory(e) {

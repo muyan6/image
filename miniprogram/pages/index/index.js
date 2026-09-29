@@ -25,12 +25,12 @@ Page({
       try { wx.setStorageSync('pendingInvite', options.invite); } catch (e) {}
     }
     this.loadNotice();
-    this.loadConfig();
     this.loadTemplates();
     this.bindPendingInvite();
   },
 
   onShow() {
+    this.loadConfig();
     this.setData({
       lightPoints: app.globalData.lightPoints,
       freeMode: app.globalData.freeMode,
@@ -69,6 +69,7 @@ Page({
     try {
       const cached = wx.getStorageSync('cached_templates_items');
       if (Array.isArray(cached) && cached.length > 0) {
+        this._lastTemplates = cached;
         this._renderFeatured(cached);
       }
     } catch (e) {}
@@ -77,6 +78,7 @@ Page({
     api.templates()
       .then((d) => {
         const items = (d && d.items) || [];
+        this._lastTemplates = items;
         try { wx.setStorageSync('cached_templates_items', items); } catch (e) {}
         this._renderFeatured(items);
       })
@@ -149,6 +151,7 @@ Page({
           priceFine: (p.fine != null) ? p.fine : this.data.priceFine,
           freeMode: !!c.free_mode
         });
+        if (this._lastTemplates) this._renderFeatured(this._lastTemplates);
       })
       .catch(() => {});
     // 光子余额以服务端为准

@@ -132,7 +132,7 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}) {
 
   await test('empty_template_response_clears_cached_items',async()=>{
     const cached={id:'deleted-template',name:'old',engine:'light',price:1};
-    const api={templates:async()=>({groups:[],items:[]}),absolute:x=>x};
+    const api={templates:async()=>({groups:[],items:[]}),config:async()=>({free_mode:false,prices:{light:1,fine:3}}),absolute:x=>x};
     const {page}=loadPage('templates',api,appFixture(),{getStorageSync:()=>({groups:[],items:[cached]})});
     page.fetchTemplates();await tick();
     return [page.data.allTemplates.length===0,{templates_after_empty_response:page.data.allTemplates.map(t=>t.id)}];
@@ -179,6 +179,44 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}) {
       uploadFile(o){uploads++;o.success(o.header.Authorization==='Bearer renewed'?{statusCode:200,data:JSON.stringify({code:0,job_id:'abcdef123456',balance:87})}:{statusCode:401,data:JSON.stringify({detail:'expired'})});}};
     const data=await apiModule(wx,app).submitJob('fixture.jpg',{});
     return [data.code===0&&logins===1&&uploads===2&&app.globalData.lightPoints===87,{logins,uploads,balance:app.globalData.lightPoints}];
+  });
+
+  await test('catalog_respects_free_mode_and_current_server_prices',async()=>{
+    const data={groups:[],items:[{id:'light',engine:'light',price:0},{id:'fine',engine:'fine',price:0},{id:'custom',engine:'fine',price:7}]};
+    const app=appFixture();
+    const {page}=loadPage('templates',{templates:async()=>data,config:async()=>({free_mode:true,prices:{light:2,fine:5}})},app);
+    page.onLoad();page.onShow();await tick();await tick();
+    const free=page.data.filteredTemplates.map(t=>t.costText);
+    return [free.every(c=>c==='免扣费'),{free_labels:free}];
+  });
+
+  await test('home_reprices_cached_templates_after_late_config',async()=>{
+    let resolveConfig;const pending=new Promise(r=>resolveConfig=r);
+    const {page}=loadPage('index',{templates:async()=>({items:[{id:'fine',engine:'fine',price:0}]}),
+      config:()=>pending,me:async()=>({balance:90}),announcements:async()=>({items:[]})});
+    page.onLoad({});page.onShow();await tick();
+    resolveConfig({free_mode:true,prices:{light:2,fine:5}});await tick();await tick();
+    return [page.data.featuredTemplates[0]?.costText==='免扣费',
+      {label:page.data.featuredTemplates[0]?.costText,free_mode:page.data.freeMode}];
+  });
+
+  await test('removed_catalog_group_falls_back_to_all',async()=>{
+    const {page}=loadPage('templates');page.data.activeCategory='removed';
+    page._renderData([],[{id:'kept',engine:'light',group_id:'new'}]);
+    return [page.data.activeCategory==='all'&&page.data.filteredTemplates.length===1,
+      {category:page.data.activeCategory,shown:page.data.filteredTemplates.length}];
+  });
+
+  await test('superseded_catalog_request_ends_pull_to_refresh',async()=>{
+    const pending=[];let stopped=0;
+    const {page}=loadPage('templates',{templates:()=>new Promise(resolve=>pending.push(resolve)),
+      config:async()=>({free_mode:false,prices:{light:1,fine:3}}),absolute:x=>x},appFixture(),
+      {stopPullDownRefresh:()=>stopped++});
+    page.onPullDownRefresh();page.onShow();
+    pending[0]({groups:[],items:[{id:'stale'}]});await tick();
+    pending[1]({groups:[],items:[{id:'current',engine:'light'}]});await tick();
+    return [stopped===1&&page.data.filteredTemplates.map(t=>t.id).join()==='current',
+      {stopped,shown:page.data.filteredTemplates.map(t=>t.id)}];
   });
 
   await test('concurrent_login_single_flight',async()=>{
