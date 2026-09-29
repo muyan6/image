@@ -22,40 +22,7 @@ Page({
     showCreditModal: false,
     showHistoryModal: false,
     saving: false,
-    featuredTemplates: [
-      {
-        id: 't_clarity',
-        name: '冷白通透',
-        subtitle: '去黄除暗，高光清爽，冷白质感',
-        engine: 'light',
-        price: 0,
-        coverUrl: 'http://127.0.0.1:8000/api/covers/t_clarity_v1.jpg?v=1'
-      },
-      {
-        id: 't_fuji',
-        name: '富士经典',
-        subtitle: '经典胶片颗粒，墨绿暗部与暖调光影',
-        engine: 'fine',
-        price: 3,
-        coverUrl: 'http://127.0.0.1:8000/api/covers/t_fuji_v1.jpg?v=1'
-      },
-      {
-        id: 't_ghibli',
-        name: '吉卜力童话',
-        subtitle: '水彩手绘，温暖治愈动漫质感重塑',
-        engine: 'light',
-        price: 0,
-        coverUrl: 'http://127.0.0.1:8000/api/covers/t_ghibli_v1.jpg?v=1'
-      },
-      {
-        id: 't_master',
-        name: '质感超分',
-        subtitle: '2K发丝级细节修复，除噪点与模糊',
-        engine: 'fine',
-        price: 3,
-        coverUrl: 'http://127.0.0.1:8000/api/covers/t_master_v1.jpg?v=1'
-      }
-    ],
+    featuredTemplates: [],
     activeTemplate: null
   },
 

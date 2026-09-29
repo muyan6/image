@@ -28,27 +28,23 @@
       <text class="subhead">修复光影 · 留住真实 · 细节重构</text>
     </view>
 
-    <!-- 核心选图横向艺术卡片 (紧凑典雅，留出足够画卷展示空间) -->
-    <view class="upload-portal-strip gallery-card" bindtap="onPickImage">
-      <view class="washi-tape washi-tape-mini"></view>
-      <view class="strip-left">
-        <image class="strip-emblem" src="/images/logo.jpg" mode="aspectFit"></image>
-        <view class="strip-text-group">
-          <view class="strip-title-row">
-            <text class="strip-title">选择待拯救照片</text>
-            <text class="strip-specs-tag">超清修复</text>
-          </view>
-          <text class="strip-desc">点击从相册选择或现场拍摄 · 自动适配 2K 超清</text>
+    <!-- 核心选图卡片 (带艺术纸质与和纸胶带) -->
+    <view class="upload-portal gallery-card" bindtap="onPickImage">
+      <view class="washi-tape"></view>
+      <view class="portal-body">
+        <image class="portal-emblem" src="/images/logo.jpg" mode="aspectFit"></image>
+        <view class="portal-btn">
+          <text class="portal-btn-title">选择待拯救照片</text>
+          <text class="portal-btn-arrow">→</text>
         </view>
-      </view>
-      <view class="strip-arrow-box">
-        <text class="strip-arrow">→</text>
+        <text class="portal-desc">点击从手机相册选择，或现场拍照</text>
+        <text class="portal-specs">支持 JPG / PNG / WebP · 自动适配超清</text>
       </view>
     </view>
 
-    <!-- 过往修复记录微型入口 (若有) -->
+    <!-- 底部历史记录轻量入口 (不堆砌) -->
     <view
-      class="history-entry-mini"
+      class="history-entry"
       wx:if="{{ historyList.length > 0 }}"
       bindtap="onOpenHistory"
     >
@@ -91,7 +87,7 @@
             <text class="showcase-desc">{{ item.subtitle }}</text>
             <view class="showcase-foot">
               <text class="showcase-cost">{{ freeMode ? '免扣费' : (item.price > 0 ? (item.price + ' 算力') : '免费体验') }}</text>
-              <text class="showcase-action">使用此风格 ›</text>
+              <text class="showcase-action">使用风格 ›</text>
             </view>
           </view>
         </view>
