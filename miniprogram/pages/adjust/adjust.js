@@ -367,6 +367,17 @@ Page({
         });
         return;
       }
+      // 内容安全审核拦截提示
+      if (err && err.message && (err.message.includes('安全审核') || err.message.includes('审核'))) {
+        wx.showModal({
+          title: '内容安全提示',
+          content: err.message,
+          showCancel: false,
+          confirmText: '我知道了'
+        });
+        return;
+      }
+
       wx.showModal({
         title: '生成未完成',
         content: err.message || '网络连接超时，请重试',

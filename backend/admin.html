@@ -415,12 +415,15 @@
       <!-- 平台与安全 -->
       <section id="page-sec" hidden>
         <div class="card">
-          <div class="card-head"><h2>微信小程序<small>wx.login 登录用</small></h2></div>
+          <div class="card-head">
+            <h2>微信小程序<small>wx.login 登录与官方免费安全审核共用</small></h2>
+            <button class="btn-subtle" onclick="testWechat()" style="font-size:12px;padding:4px 10px;">测试微信凭证</button>
+          </div>
           <div class="form-grid">
             <div class="field"><label>AppID</label><input type="text" id="wx-appid" placeholder="wx..."></div>
             <div class="field"><label>AppSecret <small>打码=未改动</small></label><input type="text" id="wx-secret"></div>
           </div>
-          <p class="muted" style="margin:0">填好后小程序才能登录；小程序后台需把本服务域名加进 request 合法域名</p>
+          <p class="muted" style="margin:0">填好后小程序才能正常登录，且才能调用微信官方免费内容安全审核接口（mediaCheckAsync）</p>
         </div>
         <div class="card">
           <div class="card-head"><h2>腾讯云<small>内容审核 + COS 对象存储共用</small></h2></div>
@@ -434,14 +437,15 @@
           <p class="muted" style="margin:0">前三项+地域齐全即启用直传与封面 COS 存储；填了自定义域名后，所有签名直链都走它（小程序 request/downloadFile 白名单里加这一个域名即可）</p>
         </div>
         <div class="card">
-          <div class="card-head"><h2>内容审核</h2></div>
+          <div class="card-head"><h2>内容安全审核</h2></div>
           <label class="check"><span class="switch"><input type="checkbox" id="mod-enabled"><span class="knob"></span></span>
             启用图片机审（上传与结果各查一道：≤10M 走微信免费接口，超限/不可用走腾讯云 ≈¥0.0015/张）</label><br>
           <label class="check"><span class="switch"><input type="checkbox" id="mod-strict"><span class="knob"></span></span>
-            审核服务异常时也拦截（默认放行并记日志，生产建议开启）</label>
+            审核服务异常时也拦截（建议提审时务必开启！防止因网络超时放行违规图导致提审被打回）</label>
           <div class="form-grid" style="margin-top:10px">
-            <div class="field"><label>微信消息推送 Token <small>公众平台「消息推送」里填的 Token（明文模式+JSON），免费审核必填</small></label><input type="text" id="mod-wx-token" placeholder="如 myPushToken123"></div>
+            <div class="field"><label>微信消息推送 Token <small>公众平台「开发管理」-「消息推送」里的 Token（明文模式+JSON），免费审核必填</small></label><input type="text" id="mod-wx-token" placeholder="如 myPushToken123"></div>
           </div>
+          <div id="mod-status-box" style="margin-top:12px;padding:12px 14px;border-radius:8px;background:var(--card-sub, #f8f6f0);border:1px solid var(--border, #eee);font-size:13px;line-height:1.7;"></div>
         </div>
         <div class="card">
           <div class="card-head"><h2>频控与配额</h2></div>
@@ -594,10 +598,21 @@ async function loadOverview() {
     $("chain-line").textContent = "降级链：" + o.chain.join(" → ") +
       (o.free_mode ? "　【调试模式】" : "");
     const NAMES = { worldcodes: "中转网关", fal: "fal.ai", baidu: "百度 AI", local: "本地引擎" };
+    const mod = o.moderation_detail || {};
+    let modBadge = '<span class="badge">机审关闭</span>';
+    if (mod.enabled) {
+      if (mod.wechat_sec_ready) {
+        modBadge = '<span class="badge green">✓ 微信免费机审就绪</span>';
+      } else if (mod.tencent_ims_ready) {
+        modBadge = '<span class="badge green">✓ 腾讯云机审就绪</span>';
+      } else {
+        modBadge = '<span class="badge red">⚠ 机审未就绪(缺密钥)</span>';
+      }
+    }
     $("prov-chips").innerHTML = Object.entries(o.configured).map(([k, v]) =>
       `<span class="badge ${v ? "green" : "red"}">${v ? "✓" : "✗"} ${NAMES[k] || k}</span>`).join("") +
       (o.cos_ready ? `<span class="badge indigo">COS 直传就绪</span>` : `<span class="badge">COS 未配置</span>`) +
-      (o.moderation?.enabled ? `<span class="badge indigo">机审开启</span>` : "");
+      modBadge;
     $("mt-quick").checked = o.maintenance.enabled;
     $("mt-msg").textContent = "当前文案：" + (o.maintenance.message || "（空）");
     const chip = $("topbar-chip");
@@ -729,7 +744,62 @@ function renderSec() {
   $("mod-wx-token").value = SETTINGS.moderation?.wechat_push_token || "";
   $("quota-daily").value = SETTINGS.quota?.daily ?? 20;
   $("quota-minute").value = SETTINGS.quota?.per_minute ?? 3;
+
+  const modEnabled = !!SETTINGS.moderation?.enabled;
+  const hasAppId = !!(SETTINGS.wechat?.app_id);
+  const hasSecret = !!(SETTINGS.wechat?.app_secret);
+  const hasToken = !!(SETTINGS.moderation?.wechat_push_token);
+  const hasCos = !!(SETTINGS.tencent?.secret_id && SETTINGS.tencent?.cos_bucket);
+  const wxReady = modEnabled && hasAppId && hasSecret && hasToken && hasCos;
+  const tcReady = modEnabled && !!(SETTINGS.tencent?.secret_id && SETTINGS.tencent?.secret_key);
+
+  const missing = [];
+  if (!hasAppId || !hasSecret) missing.push("小程序 AppID / AppSecret");
+  if (!hasToken) missing.push("消息推送 Token");
+  if (!hasCos) missing.push("COS 存储配置");
+
+  let html = `<div><b>🔍 内容安全审核就绪诊断：</b></div>`;
+  if (!modEnabled) {
+    html += `<div style="color:var(--text-sub, #666);margin-top:4px">⚠️ 机审总开关已关闭，任何上传图片均直接放行（提审必被驳回）。</div>`;
+  } else {
+    if (wxReady) {
+      html += `<div style="color:#10b981;margin-top:4px">✅ <b>微信官方免费审核已就绪</b>（mediaCheckAsync 异步推送生效）</div>`;
+    } else {
+      html += `<div style="color:#ef4444;margin-top:4px">❌ <b>微信免费审核未就绪</b>：缺少 ${missing.join("、")}</div>`;
+    }
+    if (tcReady) {
+      html += `<div style="color:#10b981;margin-top:4px">✅ <b>腾讯云 IMS 备用审核已配置</b></div>`;
+    } else {
+      html += `<div style="color:var(--text-sub, #666);margin-top:4px">⚪ 腾讯云 IMS 备用审核未配置（可选）</div>`;
+    }
+    if (SETTINGS.moderation?.block_on_error) {
+      html += `<div style="color:#10b981;margin-top:4px">🛡️ <b>严格模式已开启</b>：审核异常或超时坚决拦截，保证微信审核团队无法上传敏感图。</div>`;
+    } else {
+      html += `<div style="color:#f59e0b;margin-top:4px">⚠️ <b>异常放行模式</b>：若接口未配好或网络超时会自动放行（提审极易被打回，建议勾选上方“审核服务异常时也拦截”）。</div>`;
+    }
+    html += `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border, #ddd);color:var(--text-sub, #666);font-size:12px;">💡 微信公众平台配置（开发 ➔ 开发管理 ➔ 开发设置 ➔ 消息推送）：<br>
+    - URL：<code>${location.origin}/api/wxpush</code><br>
+    - Token：<code>${SETTINGS.moderation?.wechat_push_token || '（请在上方填入后保存）'}</code><br>
+    - 模式：<b>明文模式</b> ｜ 数据格式：<b>JSON</b></div>`;
+  }
+  const box = $("mod-status-box");
+  if (box) box.innerHTML = html;
 }
+
+window.testWechat = async () => {
+  try {
+    toast("正在验证微信凭证...");
+    const res = await api("/test_wechat", { method: "POST" });
+    if (res.ok) {
+      toast("✓ " + res.message);
+    } else {
+      toast("✗ 验证失败：" + (res.error || "请检查 AppID 与 AppSecret"), "bad");
+    }
+  } catch (e) {
+    toast("✗ 请求异常：" + e.message, "bad");
+  }
+};
+
 window.saveSec = async () => {
   try {
     SETTINGS = await api("/settings", { method: "PUT", body: {

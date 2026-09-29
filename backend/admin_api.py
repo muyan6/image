@@ -246,11 +246,37 @@ def make_admin_router(*, settings: SettingsStore,
             "maintenance": snapshot["maintenance"],
             "free_mode": bool(snapshot.get("free_mode")),
             "moderation": snapshot.get("moderation", {}),
+            "moderation_detail": {
+                "enabled": bool(snapshot.get("moderation", {}).get("enabled")),
+                "block_on_error": bool(snapshot.get("moderation", {}).get("block_on_error")),
+                "wechat_sec_ready": settings.wechat_sec_ready() if hasattr(settings, "wechat_sec_ready") else bool(
+                    snapshot.get("moderation", {}).get("enabled")
+                    and snapshot.get("moderation", {}).get("wechat_push_token")
+                    and snapshot.get("wechat", {}).get("app_id")
+                    and snapshot.get("wechat", {}).get("app_secret")
+                    and settings.cos_ready()
+                ),
+                "tencent_ims_ready": settings.moderation_ready(),
+                "wechat_has_appid": bool(snapshot.get("wechat", {}).get("app_id")),
+                "wechat_has_secret": bool(snapshot.get("wechat", {}).get("app_secret")),
+                "wechat_has_token": bool(snapshot.get("moderation", {}).get("wechat_push_token")),
+                "cos_ready": settings.cos_ready(),
+            },
             "cos_ready": bool(snapshot.get("tencent", {}).get("secret_id")
                               and snapshot.get("tencent", {}).get("secret_key")
                               and snapshot.get("tencent", {}).get("cos_bucket")),
             "configured": configured,
         }
+
+    @router.post("/test_wechat")
+    def test_wechat(request: Request) -> Dict[str, Any]:
+        _guard(request)
+        import wechat_sec
+        try:
+            token = wechat_sec.get_access_token(settings, force_refresh=True)
+            return {"ok": True, "message": "微信 access_token 获取成功！（前缀：%s...）" % token[:10]}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     @router.get("/settings")
     def get_settings(request: Request) -> Dict[str, Any]:

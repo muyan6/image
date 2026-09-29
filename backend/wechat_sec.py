@@ -64,19 +64,24 @@ def wechat_sec_ready(settings: SettingsStore) -> bool:
                 and settings.cos_ready())
 
 
-def get_access_token(settings: SettingsStore) -> str:
+def get_access_token(settings: SettingsStore, force_refresh: bool = False) -> str:
     """取小程序全局 access_token（stable_token，缓存到过期前 5 分钟）。"""
     with _token_lock:
-        if _token_cache["token"] and time.time() < _token_cache["expires_at"]:
+        if not force_refresh and _token_cache["token"] and time.time() < _token_cache["expires_at"]:
             return _token_cache["token"]
 
         conf = settings.wechat()
+        appid = str(conf.get("app_id") or "").strip()
+        secret = str(conf.get("app_secret") or "").strip()
+        if not appid or not secret:
+            raise WechatSecError("未配置微信 AppID 或 AppSecret", code="NO_CREDENTIALS")
+
         try:
             resp = requests.post(_TOKEN_URL, json={
                 "grant_type": "client_credential",
-                "appid": conf.get("app_id"),
-                "secret": conf.get("app_secret"),
-                "force_refresh": False,
+                "appid": appid,
+                "secret": secret,
+                "force_refresh": force_refresh,
             }, timeout=(10, 15))
         except requests.RequestException as exc:
             raise WechatSecError("获取 access_token 网络错误: %s"
@@ -117,8 +122,6 @@ def check_image(settings: SettingsStore, image_bytes: bytes, openid: str
         raise WechatSecError("送审图传 COS 失败: %s" % exc, code="COS") from exc
 
     token = get_access_token(settings)
-    trace_id = uuid.uuid4().hex
-    pending = register_pending(trace_id)
     try:
         try:
             resp = requests.post(_CHECK_URL, params={"access_token": token}, json={
@@ -139,42 +142,59 @@ def check_image(settings: SettingsStore, image_bytes: bytes, openid: str
             raise WechatSecError("mediaCheckAsync 失败(%s): %s"
                                  % (data.get("errcode"), data.get("errmsg", "")),
                                  code="API_%s" % data.get("errcode"))
-        if not data.get("trace_id"):
+        wx_trace_id = str(data.get("trace_id") or "").strip()
+        if not wx_trace_id:
             raise WechatSecError("微信未返回 trace_id: %s" % str(data)[:150],
                                  code="BAD_RESPONSE")
 
-        # 微信推送通常 1~3 秒内到达；到了推送端点会 set 这个 event
-        if not pending["event"].wait(WAIT_VERDICT_SECONDS):
-            raise WechatSecError("等待微信审核推送超时（%ds）" % int(WAIT_VERDICT_SECONDS),
-                                 code="TIMEOUT")
-        return pending["verdict"]
-    finally:
-        discard_pending(trace_id)
+        # 用微信返回的真实 trace_id 登记等待（支持早到推送直接命中）
+        pending = register_pending(wx_trace_id)
+        try:
+            # 微信推送通常 1~3 秒内到达；到了推送端点会 set 这个 event
+            if not pending["event"].wait(WAIT_VERDICT_SECONDS):
+                raise WechatSecError("等待微信审核推送超时（%ds）" % int(WAIT_VERDICT_SECONDS),
+                                     code="TIMEOUT")
+            return pending["verdict"]
+        finally:
+            discard_pending(wx_trace_id)
+    except Exception:
+        raise
 
 
 # --------------------------------------------------------------------------- #
 # 推送端点使用的登记表：trace_id -> (event, verdict)
 # --------------------------------------------------------------------------- #
 _pending: Dict[str, Dict[str, Any]] = {}
+_early_verdicts: Dict[str, Tuple[float, Tuple[str, str, int]]] = {}
 _pending_lock = threading.Lock()
 
 
 def register_pending(trace_id: str) -> Dict[str, Any]:
-    entry = {"event": threading.Event(),
-             "verdict": ("review", "timeout", 0)}
     with _pending_lock:
-        # 顺手清掉 5 分钟前残留的（未被丢弃的异常路径）
+        # 清理 5 分钟前残留项
         cutoff = time.time() - 300
-        for tid in [k for k, v in _pending.items() if v["ts"] < cutoff]:
+        for tid in [k for k, v in list(_pending.items()) if v["ts"] < cutoff]:
             _pending.pop(tid, None)
-        entry["ts"] = time.time()
+        for tid in [k for k, (ts, _) in list(_early_verdicts.items()) if ts < cutoff]:
+            _early_verdicts.pop(tid, None)
+
+        entry = {
+            "event": threading.Event(),
+            "verdict": ("review", "timeout", 0),
+            "ts": time.time()
+        }
+        # 如果微信推送已提前到达，直接设置结果并不再等待
+        if trace_id in _early_verdicts:
+            _, entry["verdict"] = _early_verdicts.pop(trace_id)
+            entry["event"].set()
         _pending[trace_id] = entry
-    return entry
+        return entry
 
 
 def discard_pending(trace_id: str) -> None:
     with _pending_lock:
         _pending.pop(trace_id, None)
+        _early_verdicts.pop(trace_id, None)
 
 
 def resolve_pending(trace_id: str, suggestion: str, label: str, score: int) -> bool:
@@ -182,6 +202,8 @@ def resolve_pending(trace_id: str, suggestion: str, label: str, score: int) -> b
     with _pending_lock:
         entry = _pending.get(trace_id)
         if entry is None:
+            # 微信推送比主线程 register 早到了几毫秒，存入早到池
+            _early_verdicts[trace_id] = (time.time(), (suggestion, label, score))
             return False
         entry["verdict"] = (suggestion, label, score)
     entry["event"].set()

@@ -317,6 +317,30 @@ def _check_quota(openid: str) -> Optional[str]:
     return None
 
 
+_WX_SEC_LABELS = {
+    "100": "正常",
+    "10001": "广告导流",
+    "20001": "时政敏感",
+    "20002": "色情低俗",
+    "20003": "辱骂恶俗",
+    "20006": "违禁违法",
+    "20008": "欺诈骗局",
+    "20012": "低俗不良",
+    "20013": "版权侵权",
+    "21000": "其他违规",
+    "Porn": "色情低俗",
+    "Terror": "暴恐违禁",
+    "Polity": "时政敏感",
+    "Politics": "时政敏感",
+    "Disgusting": "令人不适",
+}
+
+
+def _sec_label_desc(label: Any) -> str:
+    s = str(label or "").strip()
+    return _WX_SEC_LABELS.get(s, s)
+
+
 def _moderate_or_reject(image_bytes: bytes, job_ctx: str, openid: str) -> Optional[str]:
     """内容审核（分级省钱）。返回拒绝原因，None = 放行。
 
@@ -325,7 +349,7 @@ def _moderate_or_reject(image_bytes: bytes, job_ctx: str, openid: str) -> Option
     - 否则若腾讯云密钥齐全 -> 腾讯云 IMS（≈ ¥0.0015/张，同步 1~2 秒）；
     - 两级都不可用：放行（机审开关本身关闭时也放行）。
 
-    微信 suggest pass/review/risk 与腾讯 Block/Review 映射为同一判定：
+    微信 suggest pass/review/risky 与腾讯 Pass/Review/Block 映射为同一判定：
     非 pass/Pass 一律拦截。审核服务异常按 block_on_error 策略（默认放行大声记日志）。
     """
     mod = settings.moderation()
@@ -346,6 +370,9 @@ def _moderate_or_reject(image_bytes: bytes, job_ctx: str, openid: str) -> Option
 
     if suggestion is None:
         if not settings.moderation_ready():
+            if mod.get("block_on_error"):
+                users.audit(openid, "moderation_unconfigured", "机审已开启但未就绪")
+                return "安全审核服务未就绪，已按安全策略拦截"
             return None  # 腾讯云也没配密钥：放行
         try:
             suggestion, label, score = moderate_image_bytes(image_bytes, settings)
@@ -356,11 +383,12 @@ def _moderate_or_reject(image_bytes: bytes, job_ctx: str, openid: str) -> Option
             log.warning("[%s] 审核服务异常(%s)，本次放行: %s", job_ctx, exc.code, exc)
             return None
 
-    if str(suggestion).lower() in ("block", "review", "risk"):
+    if str(suggestion).lower() != "pass":
         users.audit(openid, "blocked",
-                    "label=%s score=%s" % (label, score))
+                    "label=%s score=%s suggest=%s" % (label, score, suggestion))
         users.inc_blocked(openid)
-        return "图片内容未通过安全审核(%s)" % label
+        desc = _sec_label_desc(label)
+        return "图片内容未通过安全审核（%s）" % desc if desc and desc != "100" else "图片内容未通过安全审核"
     return None
 
 
@@ -1025,6 +1053,9 @@ def health() -> Dict[str, Any]:
             cos_info = check_internal(settings)
         except Exception as e:
             cos_info = {"ok": False, "error": str(e)}
+    mod = settings.moderation()
+    wx_ready = wechat_sec.wechat_sec_ready(settings)
+    tc_ready = settings.moderation_ready()
     return {
         "ok": True,
         "gateway": gateway_ok,
@@ -1033,6 +1064,13 @@ def health() -> Dict[str, Any]:
         "local": True,
         "configured": gateway_ok or fal_conf or baidu_conf,
         "cos_network": cos_info,
+        "moderation": {
+            "enabled": bool(mod.get("enabled")),
+            "block_on_error": bool(mod.get("block_on_error")),
+            "wechat_sec_ready": wx_ready,
+            "tencent_ims_ready": tc_ready,
+            "active_engine": "wechat_free" if wx_ready else ("tencent_ims" if tc_ready else "none"),
+        },
         "chain": settings.chain(),
         "maintenance": settings.maintenance().get("enabled", False),
         "normalize_long_side": settings.normalize_long_side(),
