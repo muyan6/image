@@ -4,6 +4,11 @@
     "pages/templates/templates",
     "pages/community/community",
     "pages/my/my",
+    "pages/credits/credits",
+    "pages/invite/invite",
+    "pages/privacy/privacy",
+    "pages/retention/retention",
+    "pages/works/works",
     "pages/compare/compare"
   ],
   "window": {

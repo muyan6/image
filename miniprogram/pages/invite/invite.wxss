@@ -1,0 +1,206 @@
+.page-container {
+  background-color: var(--paper-bg);
+  min-height: 100vh;
+  padding: 30rpx 32rpx 160rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 28rpx;
+}
+
+/* 顶部黑曜石奖励卡 */
+.reward-card {
+  background: #1a1917;
+  color: #f7f4ed;
+  border: 1rpx solid #33302b;
+  padding: 36rpx 32rpx;
+  box-shadow: 0 6rpx 24rpx rgba(26, 25, 23, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.card-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 20rpx;
+  letter-spacing: 2rpx;
+  color: #aba496;
+}
+
+.reward-num-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6rpx;
+}
+
+.reward-plus {
+  font-size: 38rpx;
+  color: #deb87b;
+  font-weight: 700;
+}
+
+.reward-number {
+  font-family: var(--font-serif);
+  font-size: 64rpx;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1;
+}
+
+.reward-unit {
+  font-size: 22rpx;
+  color: #aba496;
+  margin-left: 6rpx;
+}
+
+.reward-sub {
+  font-size: 22rpx;
+  color: #aba496;
+  line-height: 1.45;
+  margin-top: 4rpx;
+}
+
+.code-pill {
+  margin-top: 14rpx;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1rpx dashed rgba(255, 255, 255, 0.2);
+  padding: 14rpx 20rpx;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.code-text {
+  font-family: var(--font-mono);
+  font-size: 26rpx;
+  letter-spacing: 2rpx;
+  color: #f7f4ed;
+}
+
+.code-copy-btn {
+  font-size: 20rpx;
+  color: #deb87b;
+  padding: 2rpx 8rpx;
+}
+
+/* 统计条 */
+.stats-row {
+  background: #ffffff;
+  border: 1rpx solid var(--paper-border);
+  padding: 28rpx 0;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+}
+
+.stat-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rpx;
+}
+
+.stat-val {
+  font-family: var(--font-serif);
+  font-size: 38rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+  line-height: 1;
+}
+
+.stat-lbl {
+  font-size: 22rpx;
+  color: var(--ink-muted);
+}
+
+.stat-sep {
+  width: 1rpx;
+  height: 48rpx;
+  background: var(--paper-border);
+}
+
+/* 邀请明细 */
+.section-box {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.section-title {
+  font-family: var(--font-serif);
+  font-size: 32rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+  padding: 0 4rpx;
+}
+
+.invite-list {
+  background: #ffffff;
+  border: 1rpx solid var(--paper-border);
+}
+
+.invite-item {
+  padding: 24rpx 28rpx;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.inv-user-box {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.inv-avatar {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 8rpx;
+  background: #f0ece3;
+}
+
+.inv-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+}
+
+.inv-name {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: var(--ink-title);
+}
+
+.inv-date {
+  font-size: 20rpx;
+  color: var(--ink-faint);
+}
+
+.inv-status-tag {
+  font-size: 22rpx;
+  color: var(--ink-muted);
+}
+
+.rule-hint {
+  font-size: 20rpx;
+  color: var(--ink-faint);
+  line-height: 1.5;
+  padding: 0 6rpx;
+}
+
+/* 底部操作固定条 */
+.bottom-action-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 20rpx 32rpx 40rpx;
+  background: rgba(245, 242, 235, 0.95);
+  backdrop-filter: blur(8px);
+  border-top: 1rpx solid var(--paper-border);
+  z-index: 100;
+}
+
+.invite-main-btn {
+  width: 100%;
+}

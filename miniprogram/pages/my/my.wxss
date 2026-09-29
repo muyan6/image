@@ -287,17 +287,21 @@
   color: var(--ink-title);
 }
 
-.section-subtitle {
-  font-size: 20rpx;
-  color: var(--ink-muted);
+.section-more-link {
+  display: flex;
+  align-items: center;
+  gap: 4rpx;
+  font-size: 22rpx;
+  color: var(--ink-title);
+  font-weight: 500;
 }
 
-.section-clear-btn {
-  font-size: 20rpx;
-  color: var(--accent-rust);
+.more-arrow {
+  font-size: 24rpx;
+  color: var(--accent-gold);
 }
 
-.works-grid {
+.works-preview-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16rpx;
@@ -413,101 +417,4 @@
 }
 
 /* 算力补给模态框 */
-.modal-backdrop {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(26, 25, 23, 0.6);
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 40rpx 36rpx;
-  backdrop-filter: blur(4px);
-}
 
-.credit-modal-box {
-  width: 100%;
-  max-width: 600rpx;
-  padding: 40rpx 32rpx;
-  display: flex;
-  flex-direction: column;
-}
-
-.modal-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24rpx;
-}
-
-.modal-head-title {
-  font-family: var(--font-serif);
-  font-size: 32rpx;
-  font-weight: 700;
-  color: var(--ink-title);
-}
-
-.modal-close {
-  font-size: 32rpx;
-  color: var(--ink-muted);
-  padding: 4rpx 12rpx;
-}
-
-.modal-body {
-  display: flex;
-  flex-direction: column;
-  gap: 24rpx;
-}
-
-.credit-stat {
-  padding: 24rpx;
-  background: var(--paper-card-subtle);
-  border: 1rpx solid var(--paper-border);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8rpx;
-}
-
-.stat-caption {
-  font-size: 20rpx;
-  color: var(--ink-muted);
-}
-
-.stat-number-large {
-  font-family: var(--font-serif);
-  font-size: 44rpx;
-  font-weight: 700;
-  color: var(--ink-title);
-}
-
-.credit-info-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12rpx;
-}
-
-.info-row {
-  display: flex;
-  align-items: baseline;
-  gap: 12rpx;
-}
-
-.info-dot {
-  font-size: 16rpx;
-  color: var(--accent-gold);
-}
-
-.info-text {
-  font-size: 22rpx;
-  color: var(--ink-body);
-  line-height: 1.5;
-}
-
-.modal-claim-btn {
-  width: 100%;
-  margin-top: 8rpx;
-}

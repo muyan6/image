@@ -1,0 +1,61 @@
+<view class="page-container">
+  <!-- 顶部导语 -->
+  <view class="privacy-header">
+    <text class="header-eyebrow">PRIVACY AT A GLANCE · 隐私守则</text>
+    <text class="header-headline">只处理完成服务所需的数据</text>
+    <text class="header-desc">照片绝不自动公开到社区。每次拯救与风格重构前，均需用户主动确认授权。</text>
+  </view>
+
+  <!-- 3 条核心条款卡片 -->
+  <view class="terms-card gallery-card">
+    <view class="term-item">
+      <view class="term-num">01</view>
+      <view class="term-content">
+        <text class="term-title">账户资料</text>
+        <text class="term-desc">微信开放平台身份标识仅用于免密安全登录；头像与昵称用于个人档案与专属作品留存展示。</text>
+      </view>
+    </view>
+    <view class="term-divider"></view>
+
+    <view class="term-item">
+      <view class="term-num">02</view>
+      <view class="term-content">
+        <text class="term-title">上传的照片</text>
+        <text class="term-desc">仅用于内容合规安全机审、AI 算力引擎执行修复并向您返回结果；绝不用于模型二次训练或任何公开商业传播。</text>
+      </view>
+    </view>
+    <view class="term-divider"></view>
+
+    <view class="term-item">
+      <view class="term-num">03</view>
+      <view class="term-content">
+        <text class="term-title">算力与创作记录</text>
+        <text class="term-desc">用于积分结算、故障排查、防止并发重复扣费以及保障您的作品找回权益。</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 用户控制权卡片 -->
+  <view class="control-card gallery-card">
+    <text class="control-head">你的控制权</text>
+    <view class="control-item">
+      <text class="control-title">主动删除单件作品</text>
+      <text class="control-desc">在“我的作品”中点击单件删除，图片即刻从界面剥离，云端临时缓存将在滚动清理任务中销毁。</text>
+    </view>
+    <view class="term-divider"></view>
+    <view class="control-item">
+      <text class="control-title">清空数据与退出</text>
+      <text class="control-desc">在档案中心使用“清理缓存数据”，即可清空本地临时图片与授权数据。</text>
+    </view>
+  </view>
+
+  <!-- 版本说明 -->
+  <text class="version-tip">当前隐私协议指引版本：2.4。废片新生所遵循国家网络安全与个人信息保护合规标准。</text>
+
+  <!-- 底部固定确认按钮 -->
+  <view class="bottom-action-bar">
+    <button class="btn-ink" bindtap="onConfirmPrivacy">
+      我已充分悉知隐私条款
+    </button>
+  </view>
+</view>

@@ -1,0 +1,46 @@
+<view class="page-container">
+  <!-- 顶部导语 -->
+  <view class="works-header">
+    <view class="header-left">
+      <text class="header-eyebrow">STUDIO ARCHIVE · 典藏作品集</text>
+      <text class="header-headline">我的拯救作品</text>
+      <text class="header-sub">共装裱留存 {{ works.length }} 件作品</text>
+    </view>
+    <view wx:if="{{ works.length > 0 }}" class="header-actions">
+      <text class="clear-all-btn" bindtap="onClearAllWorks">清空</text>
+    </view>
+  </view>
+
+  <!-- 作品网格 (双列画廊装裱框) -->
+  <view wx:if="{{ works.length > 0 }}" class="works-waterfall">
+    <view
+      wx:for="{{ works }}"
+      wx:key="jobId"
+      class="work-card gallery-card"
+      bindtap="onTapWork"
+      data-index="{{ index }}"
+    >
+      <view class="work-photo-box">
+        <image class="work-img" src="{{ item.result }}" mode="aspectFill" lazy-load></image>
+        <view class="work-quality-tag">
+          <text>{{ item.quality === 'fine' ? '2K精细' : '1.5K' }}</text>
+        </view>
+      </view>
+      <view class="work-info">
+        <text class="work-date">{{ item.time || '近期拯救' }}</text>
+        <view class="work-more-btn">···</view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 空状态 -->
+  <view wx:else class="empty-state gallery-card">
+    <view class="washi-tape"></view>
+    <text class="empty-symbol">◌</text>
+    <text class="empty-title">暂无留存作品</text>
+    <text class="empty-desc">在创作页完成一次拯救或风格重绘后，作品将自动装裱典藏在此展厅中。</text>
+    <button class="btn-ink empty-btn" bindtap="onGoCreate">
+      去创作第一张照片 →
+    </button>
+  </view>
+</view>

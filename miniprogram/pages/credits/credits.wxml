@@ -1,0 +1,122 @@
+<view class="page-container">
+  <!-- 1. 可用积分主卡片 (Museum Mat Board) -->
+  <view class="balance-card gallery-card">
+    <view class="washi-tape"></view>
+    <view class="balance-head">
+      <text class="balance-label">可用积分</text>
+      <text class="rate-badge">轻量生成 · 1 积分/张</text>
+    </view>
+    <view class="balance-main">
+      <text class="balance-number">{{ fishTokens }}</text>
+      <text class="balance-unit">积分</text>
+    </view>
+    <text class="balance-desc">按轻量生成计算，当前约可拯救 {{ fishTokens }} 张照片</text>
+
+    <view class="checkin-row" bindtap="onCheckIn">
+      <view class="checkin-status">
+        <text class="check-icon">✓</text>
+        <text class="check-text">{{ checkedIn ? '今日已签到' : '点击签到领积分' }}</text>
+      </view>
+      <text class="checkin-link">签到日历 ›</text>
+    </view>
+  </view>
+
+  <!-- 2. 充值积分 -->
+  <view class="section-box">
+    <view class="section-head">
+      <text class="section-title">充值积分</text>
+      <text class="section-tip">成功支付后即刻到账</text>
+    </view>
+
+    <view class="package-list gallery-card">
+      <view class="package-item" bindtap="onSelectPackage" data-name="600 积分" data-price="6.9">
+        <view class="pkg-info">
+          <text class="pkg-name">600 积分</text>
+          <text class="pkg-sub">按轻量生成约可生成 600 张</text>
+        </view>
+        <view class="pkg-price-box">
+          <text class="pkg-price">¥6.9</text>
+          <text class="pkg-arrow">›</text>
+        </view>
+      </view>
+      <view class="item-divider"></view>
+
+      <view class="package-item" bindtap="onSelectPackage" data-name="2000 积分" data-price="19.9">
+        <view class="pkg-info">
+          <view class="pkg-title-row">
+            <text class="pkg-name">2000 积分</text>
+            <text class="badge-rec">推荐</text>
+          </view>
+          <text class="pkg-sub">按轻量生成约可生成 2000 张</text>
+        </view>
+        <view class="pkg-price-box">
+          <text class="pkg-price">¥19.9</text>
+          <text class="pkg-arrow">›</text>
+        </view>
+      </view>
+      <view class="item-divider"></view>
+
+      <view class="package-item" bindtap="onSelectPackage" data-name="4500 积分" data-price="39.9">
+        <view class="pkg-info">
+          <text class="pkg-name">4500 积分</text>
+          <text class="pkg-sub">按轻量生成约可生成 4500 张</text>
+        </view>
+        <view class="pkg-price-box">
+          <text class="pkg-price">¥39.9</text>
+          <text class="pkg-arrow">›</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 3. 邀请好友得积分卡片 -->
+  <view class="invite-banner gallery-card" bindtap="onGoInvite">
+    <view class="banner-badge">+50</view>
+    <view class="banner-content">
+      <text class="banner-title">邀请好友</text>
+      <text class="banner-desc">好友首次成功生成后，你得 50 积分，对方得 30 积分。</text>
+    </view>
+    <button class="btn-ink banner-btn">邀请</button>
+  </view>
+
+  <!-- 4. 积分明细 -->
+  <view class="section-box">
+    <view class="section-head">
+      <text class="section-title">积分明细</text>
+    </view>
+    <view class="history-list gallery-card">
+      <view class="history-item" wx:for="{{ records }}" wx:key="id">
+        <view class="hist-info">
+          <text class="hist-title">{{ item.title }}</text>
+          <text class="hist-time">{{ item.time }}</text>
+        </view>
+        <text class="hist-gain">+{{ item.amount }}</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 5. 使用说明 -->
+  <view class="section-box">
+    <view class="section-head">
+      <text class="section-title">使用说明</text>
+    </view>
+    <view class="notice-card gallery-card">
+      <view class="notice-row">
+        <view class="notice-icon">✓</view>
+        <view class="notice-text">
+          <text class="notice-h">失败不扣积分</text>
+          <text class="notice-p">技术失败、超时或内容审核未通过，冻结积分会自动退回。</text>
+        </view>
+      </view>
+      <view class="item-divider"></view>
+      <view class="notice-row">
+        <view class="notice-icon info-icon">i</view>
+        <view class="notice-text">
+          <text class="notice-h">生成效果退款规则</text>
+          <text class="notice-p">明显技术异常可申诉；仅因主观不喜欢不支持退款。</text>
+        </view>
+      </view>
+    </view>
+    <text class="disclaimer-text">积分为虚拟权益，仅用于本小程序内的图片生成与风格重塑服务。</text>
+  </view>
+</view>

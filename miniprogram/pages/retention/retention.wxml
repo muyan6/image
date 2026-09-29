@@ -1,0 +1,47 @@
+<view class="page-container">
+  <!-- 顶部导语 -->
+  <view class="retention-header">
+    <text class="header-eyebrow">PHOTO RETENTION · 留存规范</text>
+    <text class="header-headline">照片不会无限期保存</text>
+    <text class="header-desc">原图仅为本次生成短暂保留，结果图留出充裕的下载装裱时间，到期后沙盒自动销毁。</text>
+  </view>
+
+  <!-- 两个保存期限核心指标卡片 -->
+  <view class="retention-card gallery-card">
+    <text class="card-caption">上传原图</text>
+    <view class="time-row">
+      <text class="time-num">24</text>
+      <text class="time-unit">小时内</text>
+    </view>
+    <text class="card-desc">拯救任务处理完毕后即进入滚动清理周期。期间仅用于算法推理、合规审核与故障恢复重试。</text>
+  </view>
+
+  <view class="retention-card gallery-card">
+    <text class="card-caption">生成结果</text>
+    <view class="time-row">
+      <text class="time-num">30</text>
+      <text class="time-unit">天</text>
+    </view>
+    <text class="card-desc">从生成完成起计算。请在到期前将满意的拯救作品保存到手机相册中，过期后云端文件无法物理复原。</text>
+  </view>
+
+  <!-- 提示与说明条目 -->
+  <view class="tips-box gallery-card">
+    <view class="tip-item">
+      <text class="tip-h">主动删除更快</text>
+      <text class="tip-p">进入“我的作品”页面，点击作品即可自主删除单件作品，无需等待系统自动到期。</text>
+    </view>
+    <view class="tip-divider"></view>
+    <view class="tip-item">
+      <text class="tip-h">容灾与安全机制</text>
+      <text class="tip-p">网络抖动或存储服务短暂异常时，删除指令会自动重试，确保彻底清除残留缓存。</text>
+    </view>
+  </view>
+
+  <!-- 底部固定管理按钮 -->
+  <view class="bottom-action-bar">
+    <button class="btn-ink" bindtap="onGoManageWorks">
+      管理我的作品
+    </button>
+  </view>
+</view>

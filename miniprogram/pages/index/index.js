@@ -387,9 +387,11 @@ Page({
     });
   },
 
-  /** 算力中心模态框 */
+  /** 积分中心页面 */
   onOpenCreditModal() {
-    this.setData({ showCreditModal: true });
+    wx.navigateTo({
+      url: '/pages/credits/credits'
+    });
   },
 
   onCloseCreditModal() {
@@ -405,9 +407,11 @@ Page({
     wx.showToast({ title: '已领取 +3 算力', icon: 'success' });
   },
 
-  /** 历史记录抽屉 */
+  /** 我的作品管理页面 */
   onOpenHistory() {
-    this.setData({ showHistoryModal: true });
+    wx.navigateTo({
+      url: '/pages/works/works'
+    });
   },
 
   onCloseHistory() {

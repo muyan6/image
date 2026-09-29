@@ -1,0 +1,136 @@
+.page-container {
+  background-color: var(--paper-bg);
+  min-height: 100vh;
+  padding: 30rpx 32rpx 160rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 28rpx;
+}
+
+.privacy-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.header-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 20rpx;
+  letter-spacing: 2rpx;
+  color: var(--accent-gold);
+}
+
+.header-headline {
+  font-family: var(--font-serif);
+  font-size: 38rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+  letter-spacing: 1rpx;
+}
+
+.header-desc {
+  font-size: 22rpx;
+  color: var(--ink-muted);
+  line-height: 1.45;
+  margin-top: 4rpx;
+}
+
+.terms-card, .control-card {
+  background: #ffffff;
+  border: 1rpx solid var(--paper-border);
+  padding: 24rpx 28rpx;
+}
+
+.term-item {
+  display: flex;
+  gap: 20rpx;
+  padding: 16rpx 0;
+}
+
+.term-num {
+  font-family: var(--font-mono);
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--accent-gold);
+  background: var(--paper-bg);
+  padding: 4rpx 14rpx;
+  border: 1rpx solid var(--paper-border-dark);
+  align-self: flex-start;
+}
+
+.term-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.term-title {
+  font-family: var(--font-serif);
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+}
+
+.term-desc {
+  font-size: 22rpx;
+  color: var(--ink-body);
+  line-height: 1.5;
+}
+
+.term-divider {
+  height: 1rpx;
+  background: var(--paper-border);
+  margin: 6rpx 0;
+}
+
+.control-head {
+  font-family: var(--font-serif);
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+  display: block;
+  margin-bottom: 12rpx;
+}
+
+.control-item {
+  padding: 14rpx 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.control-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: var(--ink-title);
+}
+
+.control-desc {
+  font-size: 22rpx;
+  color: var(--ink-muted);
+  line-height: 1.45;
+}
+
+.version-tip {
+  font-size: 20rpx;
+  color: var(--ink-faint);
+  line-height: 1.4;
+  padding: 0 4rpx;
+}
+
+.bottom-action-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 20rpx 32rpx 40rpx;
+  background: rgba(245, 242, 235, 0.95);
+  backdrop-filter: blur(8px);
+  border-top: 1rpx solid var(--paper-border);
+  z-index: 100;
+}
+
+.bottom-action-bar .btn-ink {
+  width: 100%;
+}

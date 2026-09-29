@@ -8,11 +8,11 @@ Page({
     fishTokens: 0,
     freeMode: false,
     historyList: [],
+    previewWorks: [],
     processingCount: 0,
     creditRecordCount: 2,
     videoTasksToday: 0,
-    maxVideoTasks: 3,
-    showCreditModal: false
+    maxVideoTasks: 3
   },
 
   onLoad() {
@@ -29,10 +29,12 @@ Page({
   },
 
   refreshUserData() {
+    const list = app.globalData.historyList || [];
     this.setData({
       userId: app.globalData.userId || 'PX-8A2F90B1',
       fishTokens: app.globalData.fishTokens || 0,
-      historyList: app.globalData.historyList || [],
+      historyList: list,
+      previewWorks: list.slice(0, 3),
       videoTasksToday: app.globalData.videoTasksToday || 0,
       maxVideoTasks: app.globalData.maxVideoTasks || 3
     });
@@ -57,23 +59,40 @@ Page({
     });
   },
 
-  onOpenCreditModal() {
-    this.setData({ showCreditModal: true });
-  },
-
-  onCloseCreditModal() {
-    this.setData({ showCreditModal: false });
-  },
-
-  onFreeClaim() {
-    const total = app.addToken(5);
-    this.setData({
-      fishTokens: total,
-      showCreditModal: false
+  /* 二级页面跳转 */
+  onGoCredits() {
+    wx.navigateTo({
+      url: '/pages/credits/credits'
     });
-    wx.showToast({
-      title: '已领取 +5 算力',
-      icon: 'success'
+  },
+
+  onGoWorks() {
+    wx.navigateTo({
+      url: '/pages/works/works'
+    });
+  },
+
+  onGoInvite() {
+    wx.navigateTo({
+      url: '/pages/invite/invite'
+    });
+  },
+
+  onGoPrivacy() {
+    wx.navigateTo({
+      url: '/pages/privacy/privacy'
+    });
+  },
+
+  onGoRetention() {
+    wx.navigateTo({
+      url: '/pages/retention/retention'
+    });
+  },
+
+  onGoCreate() {
+    wx.switchTab({
+      url: '/pages/index/index'
     });
   },
 
@@ -88,7 +107,6 @@ Page({
 
     wx.showLoading({ title: '正在调取补给影像…' });
 
-    // 模拟广告播放体验 (2 秒后完成并发放奖励)
     setTimeout(() => {
       wx.hideLoading();
       const success = app.recordVideoTask();
@@ -96,115 +114,30 @@ Page({
         this.refreshUserData();
         wx.showModal({
           title: '补给完成',
-          content: '已成功注入 +10 算力！今日已观看 ' + this.data.videoTasksToday + '/' + this.data.maxVideoTasks,
+          content: '已成功注入 +10 积分！今日已观看 ' + this.data.videoTasksToday + '/' + this.data.maxVideoTasks,
           showCancel: false,
           confirmText: '太棒了'
         });
       }
-    }, 1800);
-  },
-
-  onScrollToWorks() {
-    // 聚焦或查看作品
-    if (this.data.historyList.length === 0) {
-      this.onGoCreate();
-    }
-  },
-
-  onGoCreate() {
-    wx.switchTab({
-      url: '/pages/index/index'
-    });
-  },
-
-  onPreviewWork(e) {
-    const index = e.currentTarget.dataset.index;
-    const item = this.data.historyList[index];
-    if (!item) return;
-
-    const urls = [];
-    if (item.result) urls.push(item.result);
-    if (item.original) urls.push(item.original);
-
-    wx.previewImage({
-      current: item.result,
-      urls: urls.length ? urls : [item.result]
-    });
-  },
-
-  onClearWorks() {
-    wx.showModal({
-      title: '清空作品记录',
-      content: '确定要清除所有本地已保存的作品留存记录吗？',
-      confirmText: '清空',
-      confirmColor: '#9e4b3c',
-      cancelText: '保留',
-      success: (res) => {
-        if (res.confirm) {
-          app.clearHistory();
-          this.refreshUserData();
-          wx.showToast({ title: '已清空作品', icon: 'success' });
-        }
-      }
-    });
-  },
-
-  onOpenOrders() {
-    wx.showModal({
-      title: '积分与订单档案',
-      content: `当前可用算力：${this.data.fishTokens} 点\n已累计创作：${this.data.historyList.length} 次\n\n废片新生所遵循透明算力机制，每一次修复均有迹可循。`,
-      showCancel: false,
-      confirmText: '我知道了'
-    });
-  },
-
-  onOpenInvite() {
-    wx.showModal({
-      title: '邀请好友得算力',
-      content: '分享小程序给好友，好友首次创作，双方各获赠 20 点新生算力。',
-      confirmText: '立即分享',
-      cancelText: '暂不',
-      success: (r) => {
-        if (r.confirm) {
-          wx.showToast({ title: '请点击右上角【···】分享', icon: 'none' });
-        }
-      }
-    });
-  },
-
-  onOpenPrivacy() {
-    wx.showModal({
-      title: '隐私与安全保障',
-      content: '【严守隐私底线】\n1. 上传的照片仅用于本次 AI 修复与微调处理；\n2. 处理完成后图片在临时沙盒中仅留存必要缓存；\n3. 绝不会将您的原始照片用于公开展示或模型二次训练。',
-      showCancel: false,
-      confirmText: '确认悉知'
-    });
-  },
-
-  onOpenRetention() {
-    wx.showModal({
-      title: '照片保存期限说明',
-      content: '为保障存储安全与隐私合规：\n\n• 服务端生成的结果图片将在 24 小时后自动滚动清除；\n• 请在生成完毕后及时将满意的拯救照片保存到手机相册中。',
-      showCancel: false,
-      confirmText: '明白'
-    });
+    }, 1500);
   },
 
   onContactSupport() {
     wx.showActionSheet({
-      itemList: ['在线客服', '意见与风格定制反馈', '常见问题解答'],
+      itemList: ['在线客服咨询', '意见与风格定制反馈', '照片保存期限说明'],
+      itemColor: '#1a1917',
       success: (res) => {
         if (res.tapIndex === 0) {
           wx.showModal({
             title: '专属客服',
-            content: '客服工作时间：工作日 09:30 - 21:00\n如有问题或技术支持，可随时留言反馈。',
+            content: '客服服务时间：09:30 - 21:00\n如有问题或技术支持，可随时联系。',
             showCancel: false,
             confirmText: '我知道了'
           });
         } else if (res.tapIndex === 1) {
           wx.showToast({ title: '感谢您的支持与反馈', icon: 'success' });
         } else {
-          this.onOpenRetention();
+          this.onGoRetention();
         }
       }
     });
@@ -212,8 +145,8 @@ Page({
 
   onClearStorage() {
     wx.showModal({
-      title: '清理缓存',
-      content: '将清除本地临时图像缓存，但会保留您的算力余额。确定清理吗？',
+      title: '清理缓存数据',
+      content: '将清除本地临时图像缓存，但会保留您的积分余额。确定清理吗？',
       confirmText: '确认清理',
       confirmColor: '#9e4b3c',
       cancelText: '取消',
@@ -221,7 +154,6 @@ Page({
         if (res.confirm) {
           wx.clearStorage({
             success: () => {
-              // 恢复基础数据
               app.onLaunch();
               this.refreshUserData();
               wx.showToast({ title: '缓存清理完毕', icon: 'success' });

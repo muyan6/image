@@ -1,0 +1,125 @@
+.page-container {
+  background-color: var(--paper-bg);
+  min-height: 100vh;
+  padding: 30rpx 32rpx 160rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 28rpx;
+}
+
+.retention-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.header-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 20rpx;
+  letter-spacing: 2rpx;
+  color: var(--accent-gold);
+}
+
+.header-headline {
+  font-family: var(--font-serif);
+  font-size: 38rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+  letter-spacing: 1rpx;
+}
+
+.header-desc {
+  font-size: 22rpx;
+  color: var(--ink-muted);
+  line-height: 1.45;
+  margin-top: 4rpx;
+}
+
+.retention-card {
+  background: #ffffff;
+  border: 1rpx solid var(--paper-border);
+  padding: 36rpx 32rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.card-caption {
+  font-size: 24rpx;
+  color: var(--ink-muted);
+}
+
+.time-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8rpx;
+  margin: 6rpx 0;
+}
+
+.time-num {
+  font-family: var(--font-serif);
+  font-size: 64rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+  line-height: 1;
+}
+
+.time-unit {
+  font-size: 24rpx;
+  color: var(--ink-body);
+  font-weight: 600;
+}
+
+.card-desc {
+  font-size: 22rpx;
+  color: var(--ink-muted);
+  line-height: 1.45;
+}
+
+.tips-box {
+  background: #ffffff;
+  border: 1rpx solid var(--paper-border);
+  padding: 24rpx 28rpx;
+}
+
+.tip-item {
+  padding: 16rpx 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.tip-h {
+  font-family: var(--font-serif);
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+}
+
+.tip-p {
+  font-size: 22rpx;
+  color: var(--ink-body);
+  line-height: 1.45;
+}
+
+.tip-divider {
+  height: 1rpx;
+  background: var(--paper-border);
+  margin: 4rpx 0;
+}
+
+.bottom-action-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 20rpx 32rpx 40rpx;
+  background: rgba(245, 242, 235, 0.95);
+  backdrop-filter: blur(8px);
+  border-top: 1rpx solid var(--paper-border);
+  z-index: 100;
+}
+
+.bottom-action-bar .btn-ink {
+  width: 100%;
+}
