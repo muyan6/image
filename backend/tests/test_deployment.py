@@ -95,6 +95,13 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn('UPDATE_LIST_OK',r.stdout)
         self.assertLessEqual(r.stdout.count('\n')+1,6)
 
+    def test_systemd_probe_does_not_short_circuit_list_under_pipefail(self):
+        source=(ROOT/'.update').read_text(encoding='utf-8')
+        self.assertNotIn('systemctl list-unit-files 2>/dev/null | grep -q',source)
+        self.assertIn('systemctl cat "${SERVICE_NAME}.service"',source)
+        self.assertIn('if has_systemd_service; then',source)
+        self.assertEqual(source.count('if has_systemd_service; then'),2)
+
 
 if __name__=='__main__':
     suite=unittest.defaultTestLoader.loadTestsFromTestCase(DeploymentTests)
