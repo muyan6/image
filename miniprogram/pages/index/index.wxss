@@ -1,9 +1,10 @@
 .page-container {
   background-color: var(--paper-bg);
   min-height: 100vh;
-  padding: 24rpx 32rpx 60rpx;
+  padding: 16rpx 32rpx 40rpx;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
 }
 
 /* 顶部极简中文栏 */
@@ -104,116 +105,154 @@
 }
 
 /* ================= 状态 1：空白待选图 (EMPTY) ================= */
+/* ================= 状态 1：空白待选图 (EMPTY) ================= */
 .state-empty-wrap {
   flex: 1;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  padding: 60rpx 0 30rpx;
-  gap: 52rpx;
+  justify-content: flex-start;
+  align-items: stretch;
+  padding: 16rpx 0 20rpx;
+  width: 100%;
 }
 
 .intro-section {
-  text-align: center;
+  text-align: left;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 14rpx;
+  align-items: flex-start;
+  gap: 6rpx;
+  margin-bottom: 24rpx;
 }
 
 .eyebrow {
-  font-size: 24rpx;
+  font-size: 20rpx;
   color: var(--accent-gold);
   font-weight: 600;
-  letter-spacing: 4rpx;
+  letter-spacing: 2rpx;
 }
 
 .headline {
   font-family: var(--font-serif);
-  font-size: 54rpx;
+  font-size: 42rpx;
   font-weight: 700;
   color: var(--ink-title);
-  letter-spacing: 4rpx;
+  letter-spacing: 2rpx;
+  line-height: 1.25;
 }
 
 .subhead {
-  font-size: 24rpx;
+  font-size: 22rpx;
   color: var(--ink-muted);
-  letter-spacing: 2rpx;
-  margin-top: 4rpx;
+  letter-spacing: 1rpx;
+  margin-top: 2rpx;
 }
 
-.upload-portal {
+/* 核心选图横向艺术卡片 */
+.upload-portal-strip {
   width: 100%;
-  max-width: 620rpx;
   background: #ffffff;
   border: 1rpx solid var(--paper-border);
-  padding: 56rpx 40rpx 44rpx;
+  padding: 24rpx 28rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   position: relative;
-  box-shadow: 0 8rpx 32rpx rgba(40, 35, 25, 0.05);
-  transition: all 0.2s ease;
+  box-shadow: 0 4rpx 20rpx rgba(40, 35, 25, 0.05);
+  transition: transform 0.15s ease, background-color 0.15s ease;
 }
 
-.upload-portal:active {
+.upload-portal-strip:active {
   transform: translateY(2rpx);
+  background: #faf8f4;
 }
 
-.portal-body {
+.washi-tape-mini {
+  top: -12rpx;
+  height: 24rpx;
+  width: 80rpx;
+}
+
+.strip-left {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  flex: 1;
+  overflow: hidden;
+}
+
+.strip-emblem {
+  width: 76rpx;
+  height: 76rpx;
+  border-radius: 8rpx;
+  border: 1rpx solid var(--paper-border);
+  background: #f7f4ed;
+  flex-shrink: 0;
+}
+
+.strip-text-group {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 20rpx;
+  gap: 6rpx;
+  flex: 1;
+  overflow: hidden;
 }
 
-.portal-emblem {
-  width: 110rpx;
-  height: 110rpx;
-  border-radius: 50%;
-  box-shadow: 0 4rpx 16rpx rgba(40, 35, 25, 0.08);
-  margin-bottom: 8rpx;
-}
-
-.portal-btn {
-  width: 100%;
-  background: var(--ink-title);
-  color: #f7f4ed;
-  padding: 26rpx;
+.strip-title-row {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 16rpx;
-  box-shadow: 0 6rpx 20rpx rgba(26, 25, 23, 0.15);
+  gap: 12rpx;
 }
 
-.portal-btn-title {
+.strip-title {
   font-family: var(--font-serif);
   font-size: 30rpx;
   font-weight: 700;
-  letter-spacing: 3rpx;
+  color: var(--ink-title);
 }
 
-.portal-btn-arrow {
-  font-size: 32rpx;
-  line-height: 30rpx;
+.strip-specs-tag {
+  font-size: 18rpx;
+  background: var(--paper-bg);
+  border: 1rpx solid var(--paper-border-dark);
+  padding: 2rpx 8rpx;
+  color: var(--accent-gold);
+  font-weight: 600;
+  border-radius: 2rpx;
 }
 
-.portal-desc {
-  font-size: 22rpx;
-  color: var(--ink-body);
-  margin-top: 4rpx;
-}
-
-.portal-specs {
+.strip-desc {
   font-size: 20rpx;
-  color: var(--ink-faint);
+  color: var(--ink-muted);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.history-entry {
-  font-size: 22rpx;
+.strip-arrow-box {
+  width: 54rpx;
+  height: 54rpx;
+  background: var(--ink-title);
+  color: #f7f4ed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+  margin-left: 16rpx;
+  flex-shrink: 0;
+}
+
+.history-entry-mini {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14rpx;
+  padding-right: 4rpx;
+}
+
+.history-entry-mini text {
+  font-size: 20rpx;
   color: var(--ink-muted);
-  padding: 12rpx 24rpx;
   text-decoration: underline;
 }
 
@@ -626,16 +665,17 @@
 
 /* ================= 最近上新 · 风格精选展 ================= */
 .showcase-section {
-  margin-top: 36rpx;
-  padding-top: 24rpx;
+  margin-top: 24rpx;
+  padding-top: 20rpx;
   border-top: 1rpx solid var(--paper-border);
+  width: 100%;
 }
 
 .showcase-header {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  margin-bottom: 20rpx;
+  margin-bottom: 16rpx;
 }
 
 .showcase-title-wrap {
@@ -646,7 +686,7 @@
 
 .showcase-title {
   font-family: var(--font-serif);
-  font-size: 28rpx;
+  font-size: 30rpx;
   font-weight: 700;
   color: var(--ink-title);
   letter-spacing: 1rpx;
@@ -663,8 +703,8 @@
   display: flex;
   align-items: center;
   gap: 4rpx;
-  font-weight: 500;
-  padding: 6rpx 10rpx;
+  font-weight: 600;
+  padding: 4rpx 8rpx;
 }
 
 .showcase-link .link-arrow {
@@ -677,17 +717,20 @@
   flex-direction: row;
   white-space: nowrap;
   width: 100%;
-  padding-bottom: 12rpx;
+  height: 480rpx;
+  padding-bottom: 8rpx;
 }
 
 .showcase-card {
   display: inline-block;
-  width: 280rpx;
+  width: 290rpx;
+  height: 460rpx;
   margin-right: 22rpx;
   vertical-align: top;
   overflow: hidden;
   background: #ffffff;
   border: 1rpx solid var(--paper-border);
+  box-shadow: 0 4rpx 16rpx rgba(40, 35, 25, 0.04);
   transition: transform 0.15s ease;
 }
 
@@ -698,7 +741,7 @@
 .showcase-cover-wrap {
   position: relative;
   width: 100%;
-  height: 250rpx;
+  height: 290rpx;
   background: #ece7de;
   overflow: hidden;
 }
