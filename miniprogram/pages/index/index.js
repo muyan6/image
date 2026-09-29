@@ -175,8 +175,7 @@ Page({
         const file = res.tempFiles[0];
         if (!file || !file.tempFilePath) return;
         const pending = this.data.activeTemplate;
-        const defaultTid = pending ? pending.id
-          : (this.data.featuredTemplates.length > 0 ? this.data.featuredTemplates[0].id : 't_anime_dots');
+        const defaultTid = pending ? pending.id : '';
         if (pending) this.setData({ activeTemplate: null });
 
         wx.navigateTo({

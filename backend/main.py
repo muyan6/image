@@ -1017,6 +1017,7 @@ def health() -> Dict[str, Any]:
     fal_conf = bool(settings.provider("fal").get("api_key")) \
         or bool(os.environ.get("FAL_KEY", "").strip())
     bd = settings.provider("baidu")
+    baidu_conf = bool(bd.get("api_key") and bd.get("secret_key"))
     cos_info = None
     if settings.cos_ready():
         try:

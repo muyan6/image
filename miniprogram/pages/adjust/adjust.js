@@ -96,14 +96,21 @@ Page({
         coverUrl: t.cover ? api.absolute(t.cover) : '/images/logo.jpg'
       }));
 
-      let current = list.find((t) => t.id === selectedTid);
-      if (!current && list.length > 0) {
-        current = list[0];
-      }
+      // 首位增加【原片修复】基础选项（画质超分与去噪，不改变面部特征与风格）
+      const restoreOption = {
+        id: '',
+        name: '原片修复',
+        subtitle: '原片画质修复增强，不改变风格与面貌',
+        coverUrl: '/images/logo.jpg'
+      };
+      const fullList = [restoreOption].concat(list);
+
+      let current = selectedTid ? list.find((t) => t.id === selectedTid) : null;
 
       this.setData({
-        allTemplates: list,
-        selectedTemplate: current
+        allTemplates: fullList,
+        selectedTemplate: current || null,
+        templateId: current ? current.id : ''
       });
       if (current) this.applyTemplateTextDefaults(current);
       this.refreshCurrentCost();
@@ -172,10 +179,25 @@ Page({
     });
   },
 
-  /** 切换风格（档位跟模板走） */
+  /** 切换风格（选了模板时档位跟模板走，选【原片修复】进入纯修复自由档位） */
   onSelectTemplate(e) {
     const tpl = e.currentTarget.dataset.template;
-    if (!tpl || tpl.id === this.data.templateId) return;
+    if (!tpl) return;
+    const targetId = tpl.id || '';
+    if (targetId === this.data.templateId) return;
+
+    if (!targetId) {
+      // 切换回【原片修复】基础模式
+      this.setData({
+        selectedTemplate: null,
+        templateId: '',
+        textValues: {}
+      });
+      this.refreshCurrentCost();
+      try { wx.vibrateShort({ type: 'light' }); } catch (err) {}
+      return;
+    }
+
     this.setData({
       selectedTemplate: tpl,
       templateId: tpl.id

@@ -20,7 +20,7 @@
         <!-- 底部水印标识 -->
         <view class="preview-bottom-bar">
           <text class="tag-left">输出预览</text>
-          <text class="tag-right">{{ selectedTemplate.name || '日漫错彩网点' }}</text>
+          <text class="tag-right">{{ selectedTemplate ? selectedTemplate.name : '原片修复' }}</text>
         </view>
       </view>
     </view>
@@ -61,7 +61,7 @@
         <view
           wx:for="{{ allTemplates }}"
           wx:key="id"
-          class="style-item {{ selectedTemplate.id === item.id ? 'style-item-active' : '' }}"
+          class="style-item {{ (!selectedTemplate && !item.id) || (selectedTemplate && selectedTemplate.id === item.id) ? 'style-item-active' : '' }}"
           bindtap="onSelectTemplate"
           data-template="{{ item }}"
         >
