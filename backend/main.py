@@ -405,6 +405,52 @@ def _refund_charged(openid: str, job_id: str, price: int) -> None:
         log.exception("[%s] 退还光子失败", job_id)
 
 
+def _crop_aspect_ratio(img: Any, aspect_ratio: str = "") -> Any:
+    """按画幅比例做居中裁剪。空或 original/auto 则不裁剪。"""
+    if not aspect_ratio or img is None:
+        return img
+    ar = str(aspect_ratio).strip().lower()
+    if ar in ("original", "auto", "none", ""):
+        return img
+
+    ratio_map = {
+        "1:1": 1.0,
+        "3:4": 3.0 / 4.0,
+        "4:3": 4.0 / 3.0,
+        "9:16": 9.0 / 16.0,
+        "16:9": 16.0 / 9.0,
+        "2:3": 2.0 / 3.0,
+        "3:2": 3.0 / 2.0,
+    }
+    target_ratio = ratio_map.get(ar)
+    if target_ratio is None:
+        try:
+            parts = ar.split(":")
+            if len(parts) == 2:
+                target_ratio = float(parts[0]) / float(parts[1])
+        except Exception:
+            target_ratio = None
+
+    if not target_ratio or target_ratio <= 0:
+        return img
+
+    h, w = img.shape[:2]
+    if h == 0 or w == 0:
+        return img
+    cur_ratio = w / float(h)
+    if abs(cur_ratio - target_ratio) < 0.008:
+        return img
+
+    if cur_ratio > target_ratio:
+        new_w = max(1, int(round(h * target_ratio)))
+        offset_x = max(0, (w - new_w) // 2)
+        return img[:, offset_x:offset_x + new_w]
+    else:
+        new_h = max(1, int(round(w / target_ratio)))
+        offset_y = max(0, (h - new_h) // 2)
+        return img[offset_y:offset_y + new_h, :]
+
+
 def _register_job(openid: str, quality: str, style: str,
                   orig_tmp_path: str, ext: str,
                   template: Optional[Dict[str, Any]] = None,
@@ -432,6 +478,23 @@ def _register_job(openid: str, quality: str, style: str,
         orig_file = "orig_%s%s" % (job_id, ext)
         orig_path = os.path.join(UPLOAD_DIR, orig_file)
         shutil.move(orig_tmp_path, orig_path)
+
+        # 若指定了非原图画幅比例裁剪，原图同步按相同画幅居中裁剪，
+        # 保证原画与重构图画幅、构图与像素级视差 100% 对齐（彻底消除对比滑块错位重影问题）
+        ar = str(aspect_ratio).strip().lower()
+        if ar and ar not in ("original", "auto", "none", ""):
+            try:
+                import cv2
+                _img = cv2.imread(orig_path, cv2.IMREAD_COLOR)
+                if _img is not None:
+                    _cropped = _crop_aspect_ratio(_img, ar)
+                    _target_ext = ext if ext.lower() in (".jpg", ".jpeg", ".png") else ".jpg"
+                    _ok, _buf = cv2.imencode(_target_ext, _cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+                    if _ok:
+                        _buf.tofile(orig_path)
+            except Exception as _exc:
+                log.warning("[%s] 原图居中裁剪同步失败: %s", job_id, _exc)
+
         result_file = "result_%s.jpg" % job_id
 
         if template:
@@ -704,52 +767,6 @@ def _validate_image(path: str) -> None:
             status_code=413,
             detail="图片像素过大（上限 %d 万像素），请先缩小。" % (MAX_PIXELS // 10_000),
         )
-
-
-def _crop_aspect_ratio(img: Any, aspect_ratio: str = "") -> Any:
-    """按画幅比例做居中裁剪。空或 original/auto 则不裁剪。"""
-    if not aspect_ratio or img is None:
-        return img
-    ar = str(aspect_ratio).strip().lower()
-    if ar in ("original", "auto", "none", ""):
-        return img
-
-    ratio_map = {
-        "1:1": 1.0,
-        "3:4": 3.0 / 4.0,
-        "4:3": 4.0 / 3.0,
-        "9:16": 9.0 / 16.0,
-        "16:9": 16.0 / 9.0,
-        "2:3": 2.0 / 3.0,
-        "3:2": 3.0 / 2.0,
-    }
-    target_ratio = ratio_map.get(ar)
-    if target_ratio is None:
-        try:
-            parts = ar.split(":")
-            if len(parts) == 2:
-                target_ratio = float(parts[0]) / float(parts[1])
-        except Exception:
-            target_ratio = None
-
-    if not target_ratio or target_ratio <= 0:
-        return img
-
-    h, w = img.shape[:2]
-    if h == 0 or w == 0:
-        return img
-    cur_ratio = w / float(h)
-    if abs(cur_ratio - target_ratio) < 0.008:
-        return img
-
-    if cur_ratio > target_ratio:
-        new_w = max(1, int(round(h * target_ratio)))
-        offset_x = max(0, (w - new_w) // 2)
-        return img[:, offset_x:offset_x + new_w]
-    else:
-        new_h = max(1, int(round(w / target_ratio)))
-        offset_y = max(0, (h - new_h) // 2)
-        return img[offset_y:offset_y + new_h, :]
 
 
 def _normalize_long_side(src: str, dst: str, target: int = 0,

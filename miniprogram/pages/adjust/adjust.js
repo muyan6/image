@@ -8,14 +8,14 @@ Page({
     selectedTemplate: null,
     allTemplates: [],
 
-    // 画幅设置
-    currentRatioKey: '1:1',
-    currentRatioLabel: '1:1',
+    // 画幅设置：默认保持原图画幅与比例，绝不强制裁剪
+    currentRatioKey: 'original',
+    currentRatioLabel: '保持原图',
     previewStyle: 'height: 694rpx;',
     showRatioModal: false,
     ratioOptions: [
-      { key: '1:1', label: '1:1', desc: '经典方形构图，社交分享与人像首选', rec: true },
-      { key: 'original', label: '保持原图', desc: '保留原始拍摄长宽比例，不进行裁剪', rec: false },
+      { key: 'original', label: '保持原图', desc: '保留原始拍摄长宽比例，不进行裁剪', rec: true },
+      { key: '1:1', label: '1:1', desc: '经典方形构图，社交分享与人像首选', rec: false },
       { key: '3:4', label: '3:4', desc: '复古肖像与半身人像经典比例', rec: false },
       { key: '4:3', label: '4:3', desc: '传统横版构图与风景纪实', rec: false },
       { key: '9:16', label: '9:16', desc: '全屏手机壁纸与竖版视觉', rec: false },

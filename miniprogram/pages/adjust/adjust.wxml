@@ -36,7 +36,7 @@
         <text class="ratio-label">当前比例</text>
         <view class="ratio-val-group">
           <text class="ratio-val">{{ currentRatioLabel }}</text>
-          <text class="pill-rec" wx:if="{{ currentRatioKey === '1:1' }}">推荐</text>
+          <text class="pill-rec" wx:if="{{ currentRatioKey === 'original' }}">推荐</text>
           <text class="ratio-change-link">更改 ›</text>
         </view>
       </view>
