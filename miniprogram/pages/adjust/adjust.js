@@ -389,9 +389,14 @@ Page({
       const resUrl = api.absolute(job.result_url || created.result_url);
       const bustUrl = resUrl + (resUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
 
+      // 提取最新的原图直链（服务端可能已同步居中裁剪）
+      const finalOrigUrl = api.absolute(job.orig_url || created.orig_url || origUrl);
+      const isOriginalRatio = this.data.currentRatioKey === 'original';
+      const compareOrig = (isOriginalRatio && path) ? path : finalOrigUrl;
+
       // 更新历史记录为完成状态
       const finishedItem = {
-        original: origUrl,
+        original: finalOrigUrl,
         result: bustUrl,
         status: 'succeeded',
         quality: created.quality || this.data.quality,
@@ -408,7 +413,7 @@ Page({
 
       // 跳转至全屏拖拽滑块对比页
       wx.redirectTo({
-        url: `/pages/compare/compare?original=${encodeURIComponent(origUrl)}&result=${encodeURIComponent(bustUrl)}&quality=${finishedItem.quality}&job=${encodeURIComponent(jobId)}`
+        url: `/pages/compare/compare?original=${encodeURIComponent(compareOrig)}&result=${encodeURIComponent(bustUrl)}&quality=${finishedItem.quality}&job=${encodeURIComponent(jobId)}`
       });
 
     } catch (err) {

@@ -128,7 +128,14 @@ Page({
   },
 
   onOrigError() {
-    console.warn('原图加载失败');
+    console.warn('原图加载失败，尝试换取有效直链重试');
+    const url = this.data.originalUrl;
+    if (!url || this.data.demo || /[?&]retry=/.test(url)) return;
+    this.refreshUrls().then((ok) => {
+      if (ok) return;
+      const sep = url.indexOf('?') >= 0 ? '&' : '?';
+      this.setData({ originalUrl: url + sep + 'retry=' + Date.now() });
+    });
   },
 
   /** 保存高清修复照片到系统相册 */

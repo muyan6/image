@@ -542,6 +542,13 @@ def _register_job(openid: str, quality: str, style: str,
                    aspect_ratio or "-", price))
     pool.submit(_run_pipeline, job_id, quality, style,
                 copy_template(template), dict(text_values or {}), aspect_ratio)
+    orig_url_val = "/api/images/%s" % orig_file
+    if orig_cos and settings.cos_ready():
+        try:
+            orig_url_val = cos_presign(settings, "get", orig_cos, ttl_seconds=7200)
+        except Exception:
+            pass
+
     return {
         "code": 0,
         "job_id": job_id,
@@ -552,7 +559,7 @@ def _register_job(openid: str, quality: str, style: str,
         "aspect_ratio": aspect_ratio,
         "price": price,
         "balance": balance,
-        "orig_url": "/api/images/%s" % orig_file,
+        "orig_url": orig_url_val,
         "result_url": "/api/images/%s" % result_file,
     }
 

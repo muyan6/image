@@ -83,7 +83,6 @@ page {
   height: 100%;
   pointer-events: none;
   z-index: 10;
-  background-color: #11100f;
   transition: clip-path 0.05s linear;
 }
 
