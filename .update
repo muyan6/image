@@ -44,7 +44,8 @@ fi
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 git fetch origin "$BRANCH" || die "git fetch 失败：检查服务器能否访问 gitee.com"
 
-INCOMING="$(git log --oneline "HEAD..origin/$BRANCH" | head -5)"
+# `head` 提前关闭管道会令 git log 在 pipefail 下返回 141，进而让脚本在 fetch 后静默退出。
+INCOMING="$(git log --oneline -n 5 "HEAD..origin/$BRANCH")"
 if [ -z "$INCOMING" ]; then
     ok "已经是最新代码（$BRANCH）"
 else

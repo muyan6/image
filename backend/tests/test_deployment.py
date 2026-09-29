@@ -82,6 +82,19 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn('EXPECTED_REVISION="$(git rev-parse HEAD)"',source)
         self.assertIn('--public "$PUBLIC_API_BASE"',source)
 
+    def test_more_than_five_incoming_commits_do_not_abort_update(self):
+        """With pipefail, `git log | head -5` exits 141 before git pull."""
+        bash=os.environ.get('BASH_PATH','C:/Program Files/Git/bin/bash.exe')
+        line=next(s for s in (ROOT/'.update').read_text(encoding='utf-8').splitlines()
+                  if s.startswith('INCOMING='))
+        # Use the actual checked-in history where 05fdc71..6745f9c has six commits.
+        command=line.replace('HEAD..origin/$BRANCH','05fdc71..6745f9c')
+        r=subprocess.run([bash,'-lc','set -euo pipefail; cd /f/Project/image; '
+                          +command+'; printf UPDATE_LIST_OK'],capture_output=True,text=True)
+        self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+        self.assertIn('UPDATE_LIST_OK',r.stdout)
+        self.assertLessEqual(r.stdout.count('\n')+1,6)
+
 
 if __name__=='__main__':
     suite=unittest.defaultTestLoader.loadTestsFromTestCase(DeploymentTests)
