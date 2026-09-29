@@ -36,7 +36,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -58,7 +58,8 @@ from reward_verifier import verify_video
 import wechat_sec
 from wechat_sec import WechatSecError
 from wechat_auth import (WechatAuthError, bearer_of, code2session,
-                         make_token as user_token, verify_token as verify_user_token)
+                         make_token as user_token, verify_token as verify_user_token,
+                         make_web_identity, verify_web_identity, WEB_IDENTITY_TTL)
 from fal_ai import FalImageEnhance
 
 try:
@@ -297,7 +298,16 @@ def _current_user(request) -> Dict[str, Any]:
     openid = verify_user_token(token) if token else None
     if not openid:
         raise HTTPException(status_code=401, detail="请先登录")
-    return users.get_user(openid) or users.ensure_user(openid)
+    user = users.get_user(openid)
+    if not user:
+        raise HTTPException(status_code=401, detail="账号记录不存在，请重新登录")
+    active_app_id = settings.wechat().get("app_id") or ""
+    if user.get("account_type") == "wechat" and user.get("app_id") and active_app_id \
+            and user["app_id"] != active_app_id:
+        raise HTTPException(status_code=401, detail="小程序配置已变更，请重新登录")
+    if user["last_seen"] < time.time() - 300:
+        users.touch_user(openid)
+    return user
 
 
 # 直传登记：upload_id -> 登记，1 小时未完成自动作废
@@ -1616,6 +1626,7 @@ def _safe_remove(path: str) -> bool:
 
 class _LoginBody(BaseModel):
     code: str = ""
+    app_id: str = ""
 
 
 class _EarnBody(BaseModel):
@@ -1642,13 +1653,19 @@ class _RescueByUploadBody(BaseModel):
     aspect_ratio: str = ""
 
 
-def _login_response(openid: str) -> Dict[str, Any]:
-    user = users.ensure_user(openid)
-    users.audit(openid, "login")
+def _login_response(openid: str, account_type: str = "wechat", app_id: str = "") -> Dict[str, Any]:
+    try:
+        user = users.ensure_user(openid, account_type=account_type, app_id=app_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    users.audit(openid, "login", "source=%s app_id=%s" % (account_type, app_id))
     return {
         "token": user_token(openid),
         "user": {"openid_masked": openid[:6] + "***",
-                 "total_jobs": user["total_jobs"]},
+                 "total_jobs": user["total_jobs"], "user_id": user["user_id"],
+                 "account_type": account_type, "app_id": app_id},
+        "user_id": user["user_id"],
+        "account_type": account_type,
         "balance": user["balance"],
         "invite_code": user["invite_code"],
         "free_mode": settings.free_mode(),
@@ -1666,24 +1683,37 @@ def wechat_login(body: _LoginBody):
     code = (body.code or "").strip()
     if not code:
         raise HTTPException(status_code=400, detail="缺少 code")
+    app_id = str(settings.wechat().get("app_id") or "")
+    if body.app_id and app_id and body.app_id != app_id:
+        raise HTTPException(status_code=400, detail="小程序 AppID 与后端配置不一致")
     try:
         openid = code2session(code, settings)
     except WechatAuthError as exc:
         raise HTTPException(status_code=401 if exc.code != "NOT_CONFIGURED" else 503,
                             detail=str(exc)) from exc
-    return _login_response(openid)
+    if app_id != str(settings.wechat().get("app_id") or ""):
+        raise HTTPException(status_code=409, detail="登录期间配置发生变化，请重新登录")
+    return _login_response(openid, account_type="wechat", app_id=app_id)
 
 
 @app.post("/api/auth/web")
-def web_login(request: Request):
-    """网页控制台登录：按来源 IP 派生稳定访客身份，发同样的会话 token。
-
-    网页端做不了 wx.login，用 IP 哈希当 openid 即可接入同一套
-    配额 / 光子 / 任务归属体系（同 IP 共享配额与余额）。
-    """
-    ip = request.client.host if request.client else "unknown"
-    openid = "web-" + hashlib.sha256(("web:" + ip).encode("utf-8")).hexdigest()[:12]
-    return _login_response(openid)
+def web_login(request: Request, response: Response):
+    """A browser session is a web visitor, never a WeChat user or an IP account."""
+    token = bearer_of({k.lower(): v for k, v in request.headers.items()})
+    bearer_user = verify_user_token(token) if token else None
+    existing = users.get_user(bearer_user) if bearer_user else None
+    if existing and existing.get("account_type") == "web":
+        openid = bearer_user  # Preserve an authenticated legacy account and balance.
+    else:
+        openid = verify_web_identity(request.cookies.get("rescue_web_identity", ""))
+        stored = users.get_user(openid) if openid else None
+        if stored and stored.get("account_type") != "web":
+            openid = None
+        openid = openid or "web-" + uuid.uuid4().hex
+    data = _login_response(openid, account_type="web")
+    response.set_cookie("rescue_web_identity", make_web_identity(openid), max_age=WEB_IDENTITY_TTL,
+                        httponly=True, secure=request.url.scheme == "https", samesite="lax", path="/api/auth/web")
+    return data
 
 
 @app.get("/api/me")
@@ -1693,6 +1723,8 @@ def get_me(request: Request):
     openid = user["openid"]
     return {
         "openid_masked": openid[:6] + "***",
+        "user_id": user["user_id"],
+        "account_type": user["account_type"],
         "balance": user["balance"],
         "total_jobs": user["total_jobs"],
         "invite_code": user["invite_code"],

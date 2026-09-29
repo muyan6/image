@@ -46,15 +46,9 @@ App({
     const history = wx.getStorageSync(STORAGE_HISTORY);
     this.globalData.historyList = Array.isArray(history) ? history : [];
 
-    // 用户唯一 ID（本地档案编号，仅展示用；服务端身份是 openid）
-    let uid = wx.getStorageSync(STORAGE_USER_ID);
-    if (!uid) {
-      const randStr = Math.random().toString(36).substring(2, 8).toUpperCase() +
-                      Math.random().toString(36).substring(2, 6).toUpperCase();
-      uid = 'PX-' + randStr;
-      wx.setStorageSync(STORAGE_USER_ID, uid);
-    }
-    this.globalData.userId = uid;
+    // The display ID comes from the server's OpenID record, never Math.random().
+    const uid = wx.getStorageSync(STORAGE_USER_ID);
+    this.globalData.userId = typeof uid === 'string' && /^(WX|WEB)-[0-9A-F]{16}$/.test(uid) ? uid : '';
   },
 
   onHide() {
@@ -71,6 +65,12 @@ App({
   },
 
   /** 用服务端返回的余额覆盖本地展示值 */
+  setUserIdentity(uid) {
+    if (typeof uid !== 'string' || !/^(WX|WEB)-[0-9A-F]{16}$/.test(uid)) return;
+    this.globalData.userId = uid;
+    try { wx.setStorageSync(STORAGE_USER_ID, uid); } catch (e) {}
+  },
+
   setBalance(n) {
     const val = typeof n === 'number' && n >= 0 ? n : 0;
     this.globalData.lightPoints = val;

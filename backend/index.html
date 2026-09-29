@@ -477,14 +477,21 @@
   const stage = document.getElementById('stage');
   const balanceBadge = document.getElementById('balanceBadge');
 
-  // ---- 访客登录：网页端做不了 wx.login，用 /api/auth/web 按 IP 换会话 token ----
-  // 同一 IP 共享配额与光子余额（服务端记账），提交与轮询都必须带 token。
+  // ---- 网页访客：签名浏览器Cookie保留身份；IP不参与身份生成 ----
   let webToken = '';
   try { webToken = localStorage.getItem('pr_web_token') || ''; } catch (e) {}
+  let webLoginPromise = null;
 
   async function ensureWebToken(force) {
+    if (webLoginPromise) return webLoginPromise;
     if (webToken && !force) return webToken;
-    const r = await fetch('/api/auth/web', { method: 'POST' });
+    webLoginPromise = refreshWebToken();
+    try { return await webLoginPromise; }
+    finally { webLoginPromise = null; }
+  }
+
+  async function refreshWebToken() {
+    const r = await fetch('/api/auth/web', { method: 'POST', credentials: 'same-origin', headers: authHeaders() });
     const d = await r.json().catch(() => ({}));
     if (!r.ok || !d.token) throw new Error(d.detail || '访客登录失败');
     webToken = d.token;
@@ -502,7 +509,8 @@
     if (balanceBadge) balanceBadge.textContent = '✦ ' + n + ' 光子';
   }
 
-  ensureWebToken().catch(err => console.warn('访客登录失败:', err.message));
+  // Establish the browser cookie while a cached legacy token is still valid.
+  ensureWebToken(true).catch(err => console.warn('访客登录失败:', err.message));
   const btnDownload = document.getElementById('btnDownload');
 
   portalCard.onclick = () => fileInput.click();

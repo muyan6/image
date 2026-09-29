@@ -513,7 +513,12 @@
       <section id="page-users" hidden>
         <div class="card">
           <div class="card-head">
-            <h2>用户（最近活跃）</h2>
+            <h2>账号管理<small id="users-summary">微信账号与网页访客分别统计</small></h2>
+            <select id="users-source" onchange="loadUsers()" style="width:auto;margin-left:auto;margin-right:12px">
+              <option value="wechat">微信小程序账号</option>
+              <option value="web">网页访客</option>
+              <option value="all">全部账号</option>
+            </select>
             <button class="btn-ghost btn-small" onclick="loadUsers()">刷新</button>
           </div>
           <div class="table-wrap"><table id="users-table"></table></div>
@@ -629,7 +634,9 @@ async function loadOverview() {
       stat(s.today_total, "今日任务") + stat(s.today_succeeded, "今日成功") +
       stat(s.today_failed, "今日失败") + stat(s.running, "进行中") +
       stat("¥" + (s.today_cost_cny ?? 0).toFixed(2), "今日网关成本") +
-      stat("$" + (s.today_cost_usd ?? 0).toFixed(3), "今日 fal 成本");
+      stat("$" + (s.today_cost_usd ?? 0).toFixed(3), "今日 fal 成本") +
+      stat(s.wechat_users_total ?? s.users_total ?? 0, "微信小程序账号") +
+      stat(s.web_users_total ?? 0, "网页访客（单独统计）");
     $("chain-line").textContent = "降级链：" + o.chain.join(" → ") +
       (o.free_mode ? "　【调试模式】" : "");
     const NAMES = { worldcodes: "中转网关", fal: "fal.ai", baidu: "百度 AI", local: "本地引擎" };
@@ -1321,13 +1328,21 @@ window.jobsPage = (dir) => { JOBS_OFFSET = Math.max(0, JOBS_OFFSET + dir * 50); 
 /* ---------- 用户管理 ---------- */
 async function loadUsers() {
   try {
-    const data = await api("/users?limit=30");
+    const source = $("users-source").value || "wechat";
+    const data = await api("/users?limit=30&account_type=" + encodeURIComponent(source));
+    const counts = data.stats || {};
+    $("users-summary").textContent = "微信账号 " + (counts.wechat_users_total ?? 0) +
+      " · 网页访客 " + (counts.web_users_total ?? 0) + "（旧记录保留，按来源区分）";
     const t = $("users-table");
-    t.innerHTML = "<thead><tr><th>用户</th><th>首次使用</th><th>最近活跃</th><th>已修图</th><th>被拦截</th><th>光子余额</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody>";
+    t.innerHTML = "<thead><tr><th>固定账号编号</th><th>来源 / AppID</th><th>首次使用</th><th>最近活跃</th><th>已修图</th><th>被拦截</th><th>光子余额</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody>";
     const tbody = t.tBodies[0];
     data.items.forEach((u) => {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td><code>${esc(u.openid.slice(0, 8))}…</code></td>` +
+      const identity = u.user_id || u.openid;
+      const masked = u.openid.slice(0, 6) + "…" + u.openid.slice(-4);
+      const sourceLabel = u.account_type === "web" ? "网页访客" : "微信小程序";
+      tr.innerHTML = `<td><code title="${esc(u.openid)}">${esc(identity)}</code><br><small class="muted">${esc(masked)}</small></td>` +
+        `<td><span class="badge">${sourceLabel}</span><br><small class="muted">${esc(u.app_id || (u.account_type === "web" ? "独立浏览器身份" : "历史 AppID 未记录"))}</small></td>` +
         `<td>${fmtTime(u.created_at)}</td><td>${fmtTime(u.last_seen)}</td>` +
         `<td>${u.total_jobs}</td><td>${u.blocked}</td><td>✦ ${u.balance ?? 0}</td>` +
         `<td>${u.banned ? '<span class="badge red">已封禁</span>' : '<span class="badge">正常</span>'}</td>` +
@@ -1335,7 +1350,7 @@ async function loadUsers() {
         `<button class="btn-danger" data-act="ban" style="padding:3px 10px;font-size:12px" data-oid="${esc(u.openid)}" data-banned="${u.banned ? 1 : 0}">${u.banned ? "解封" : "封禁"}</button></td>`;
       tbody.appendChild(tr);
     });
-    if (!data.items.length) tbody.innerHTML = '<tr><td colspan="8" class="empty">还没有用户</td></tr>';
+    if (!data.items.length) tbody.innerHTML = '<tr><td colspan="9" class="empty">该来源下还没有账号</td></tr>';
   } catch (e) { console.error(e); }
 }
 

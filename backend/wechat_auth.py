@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import time
 from typing import Any, Dict, Optional
 
@@ -19,6 +20,7 @@ import requests
 from settings_store import SettingsStore
 
 SESSION_TTL = 12 * 3600
+WEB_IDENTITY_TTL = 30 * 24 * 3600
 _JSCODE_URL = "https://api.weixin.qq.com/sns/jscode2session"
 
 
@@ -91,6 +93,24 @@ def verify_token(token: str) -> Optional[str]:
             return None
         return openid
     except (ValueError, TypeError):
+        return None
+
+
+def make_web_identity(identity: str) -> str:
+    expiry = str(int(time.time()) + WEB_IDENTITY_TTL)
+    payload = identity + "." + expiry
+    signature = hmac.new(_secret(), ("web-browser:" + payload).encode("utf-8"), hashlib.sha256).hexdigest()
+    return payload + "." + signature
+
+
+def verify_web_identity(token: str) -> Optional[str]:
+    try:
+        identity, expiry, signature = token.split(".", 2)
+        if not re.fullmatch(r"web-[0-9a-f]{12,32}", identity) or int(expiry) <= time.time():
+            return None
+        expected = hmac.new(_secret(), ("web-browser:" + identity + "." + expiry).encode("utf-8"), hashlib.sha256).hexdigest()
+        return identity if hmac.compare_digest(signature, expected) else None
+    except (ValueError, TypeError, AttributeError):
         return None
 
 

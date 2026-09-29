@@ -60,6 +60,7 @@ function syncAccount(data) {
   const app = getApp();
   if (!app || !data) return;
   if (typeof data.balance === 'number') app.setBalance(data.balance);
+  if (typeof data.user_id === 'string' && typeof app.setUserIdentity === 'function') app.setUserIdentity(data.user_id);
   if (typeof data.free_mode === 'boolean') app.globalData.freeMode = data.free_mode;
 }
 
@@ -84,10 +85,12 @@ function ensureLogin(force) {
     wx.login({
       success: (r) => {
         if (!r.code) { reject(new Error('微信登录失败')); return; }
+        let appId = '';
+        try { appId = wx.getAccountInfoSync().miniProgram.appId || ''; } catch (e) {}
         wx.request({
           url: apiBase() + '/api/auth/login',
           method: 'POST',
-          data: { code: r.code },
+          data: { code: r.code, app_id: appId },
           header: { 'content-type': 'application/json' },
           timeout: REQUEST_TIMEOUT,
           success(res) {

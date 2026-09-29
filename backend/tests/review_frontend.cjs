@@ -161,7 +161,8 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}) {
       localStorage:{getItem:()=> 'valid-token'},URL:{createObjectURL:()=> 'blob:fixture'},
       FormData:class{append(){}},Date:{now:()=>nowCall++===0?0:180001},
       setTimeout:fn=>queueMicrotask(fn),alert:message=>alerts.push(message),
-      fetch:async url=>({ok:true,status:200,json:async()=>url==='/api/rescue'?{code:0,job_id:'abcdef123456'}:{status:'processing'}})};
+      fetch:async url=>({ok:true,status:200,json:async()=>url==='/api/auth/web'?{token:'valid-token'}:
+        url==='/api/rescue'?{code:0,job_id:'abcdef123456'}:{status:'processing'}})};
     vm.runInNewContext(script,sandbox);
     el('fileInput').files=[{name:'fixture.jpg',size:700}];
     el('fileInput').onchange();
@@ -238,6 +239,60 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}) {
     const {page}=loadPage('compare',{request:async()=>({status:'succeeded',orig_url:null,result_url:'result',provider:'local',width:1536,height:1024}),absolute:x=>x});
     page._jobId='abcdef123456';await page.refreshUrls();
     return [page.data.originalUnavailable&&page.data.originalUrl==='result'&&page.data.label.includes('1536'),{label:page.data.label,originalUnavailable:page.data.originalUnavailable}];
+  });
+
+  await test('account_display_id_survives_relogin_after_cache_clear',async()=>{
+    let app;
+    const storage={'studioUserId':'PX-OLD-RANDOM'};
+    const uid='WX-0123456789ABCDEF';
+    const wx={getStorageSync:k=>storage[k]||'',setStorageSync:(k,v)=>storage[k]=v,
+      getAccountInfoSync:()=>({miniProgram:{appId:'wx_test_a'}}),
+      login:o=>o.success({code:'same-user-code'}),
+      request:o=>o.success({statusCode:200,data:o.url.endsWith('/api/auth/login')?{token:'session',user_id:uid,balance:90}:{user_id:uid,balance:90}})};
+    vm.runInNewContext(fs.readFileSync(path.join(ROOT,'miniprogram/app.js'),'utf8'),{App:a=>app=a,wx,console:silent});
+    app.onLaunch();const before=app.globalData.userId;
+    await apiModule(wx,app).me();const first=app.globalData.userId;
+    Object.keys(storage).forEach(k=>delete storage[k]);app.onLaunch();
+    await apiModule(wx,app).me();const second=app.globalData.userId;
+    return [before===''&&first===uid&&second===uid,{legacy_random_id_discarded:before==='',first,second}];
+  });
+
+  await test('wechat_login_sends_real_appid_and_syncs_server_id',async()=>{
+    let payload;const app=appFixture();
+    app.setUserIdentity=id=>app.globalData.userId=id;
+    const wx={getStorageSync:()=>'',setStorageSync(){},getAccountInfoSync:()=>({miniProgram:{appId:'wx_real_app'}}),
+      login:o=>o.success({code:'code'}),request:o=>{payload=o.data;o.success({statusCode:200,data:{token:'t',user_id:'WX-0123456789ABCDEF',balance:90}});}};
+    await apiModule(wx,app).ensureLogin();
+    return [payload.app_id==='wx_real_app'&&app.globalData.userId==='WX-0123456789ABCDEF',{app_id:payload.app_id,user_id:app.globalData.userId}];
+  });
+
+  await test('web_bootstrap_preserves_legacy_auth_token_for_cookie',async()=>{
+    const html=fs.readFileSync(path.join(ROOT,'backend/index.html'),'utf8');
+    const script=[...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)][0][1];
+    const elements={};const el=id=>elements[id]||= {style:{},classList:{add(){},remove(){}},files:[],click(){}};
+    let options;
+    const sandbox={document:{getElementById:el},window:{},console:silent,
+      localStorage:{getItem:()=> 'old-valid-token',setItem(){}},URL:{createObjectURL:()=> 'blob:fixture'},
+      FormData:class{append(){}},Date,setTimeout,
+      fetch:async(url,opts)=>{options=opts;return {ok:true,status:200,json:async()=>({token:'renewed',balance:245})};}};
+    vm.runInNewContext(script,sandbox);await sandbox.ensureWebToken();
+    return [options.headers.Authorization==='Bearer old-valid-token'&&options.credentials==='same-origin',
+      {legacy_authorization:options.headers.Authorization,credentials:options.credentials}];
+  });
+
+  await test('admin_users_default_wechat_filter_shows_fixed_id_and_counts',async()=>{
+    const html=fs.readFileSync(path.join(ROOT,'backend/admin.html'),'utf8');
+    const start=html.indexOf('async function loadUsers() {');
+    const end=html.indexOf('/* ---------- 用户操作',start);
+    const script=html.slice(start,end);
+    const elements={'users-source':{value:'wechat'},'users-summary':{},'users-table':{tBodies:[{rows:[],appendChild(row){this.rows.push(row);}}]}};
+    let requested;
+    const sandbox={$:id=>elements[id],console:silent,esc:v=>String(v),fmtTime:()=> 'time',document:{createElement:()=>({})},
+      api:async url=>{requested=url;return {stats:{wechat_users_total:1,web_users_total:8},items:[{openid:'o_real_wechat_user',user_id:'WX-0123456789ABCDEF',account_type:'wechat',app_id:'wx_test',total_jobs:2,blocked:0,balance:110}]};}};
+    vm.runInNewContext(script,sandbox);await sandbox.loadUsers();
+    const row=elements['users-table'].tBodies[0].rows[0].innerHTML;
+    return [requested.includes('account_type=wechat')&&row.includes('WX-0123456789ABCDEF')&&elements['users-summary'].textContent.includes('网页访客 8'),
+      {request:requested,summary:elements['users-summary'].textContent,fixed_id_displayed:row.includes('WX-0123456789ABCDEF')}];
   });
 
   const failed=results.filter(x=>!x.passed).length;

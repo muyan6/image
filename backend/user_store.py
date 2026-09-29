@@ -22,6 +22,13 @@ from typing import Any, Dict, List, Optional, Tuple
 # 光子经济常量
 WELCOME_BALANCE = 90
 INVITE_REWARD = 30
+ACCOUNT_TYPES = ("wechat", "web")
+
+
+def public_user_id(openid: str, account_type: str = "wechat") -> str:
+    """Stable display ID derived from the server identity, not client storage."""
+    prefix = "WEB-" if account_type == "web" else "WX-"
+    return prefix + hashlib.sha256(("rescue-user:" + openid).encode("utf-8")).hexdigest()[:16].upper()
 
 
 class AdmissionError(ValueError):
@@ -100,6 +107,15 @@ class UserStore:
             if "banned" not in cols:
                 self._conn.execute(
                     "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0")
+            if "account_type" not in cols:
+                self._conn.execute("ALTER TABLE users ADD COLUMN account_type TEXT NOT NULL DEFAULT ''")
+            if "app_id" not in cols:
+                self._conn.execute("ALTER TABLE users ADD COLUMN app_id TEXT NOT NULL DEFAULT ''")
+            # Historical auth had exactly two namespaces. Keep every balance/job;
+            # split IP-derived web visitors from mini-program accounts, don't merge.
+            self._conn.execute("UPDATE users SET account_type='web' WHERE account_type='' AND openid LIKE 'web-%'")
+            self._conn.execute("UPDATE users SET account_type='wechat' WHERE account_type=''")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_users_source_active ON users(account_type,last_seen)")
             self._conn.commit()
 
     def reserve_job(self, openid: str, job_id: str, amount: int,
@@ -235,24 +251,34 @@ class UserStore:
             return True, int(balance) + reward, count + 1
 
     _USER_COLS = ("openid, created_at, last_seen, total_jobs, blocked, "
-                  "balance, invite_code, banned")
+                  "balance, invite_code, banned, account_type, app_id")
 
     @staticmethod
     def _user_row(row) -> Dict[str, Any]:
         return {"openid": row[0], "created_at": row[1], "last_seen": row[2],
                 "total_jobs": row[3], "blocked": row[4],
                 "balance": int(row[5] or 0), "invite_code": row[6] or "",
-                "banned": bool(row[7])}
+                "banned": bool(row[7]), "account_type": row[8], "app_id": row[9],
+                "user_id": public_user_id(row[0], row[8])}
 
-    def ensure_user(self, openid: str) -> Dict[str, Any]:
+    def ensure_user(self, openid: str, account_type: Optional[str] = None,
+                    app_id: str = "") -> Dict[str, Any]:
         now = time.time()
         code = invite_code_of(openid)
-        with self._lock:
+        kind = account_type or ("web" if openid.startswith("web-") else "wechat")
+        if kind not in ACCOUNT_TYPES:
+            raise ValueError("未知的账号来源")
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            existing = self._conn.execute("SELECT account_type,app_id FROM users WHERE openid=?", (openid,)).fetchone()
+            if existing and (existing[0] != kind or (app_id and existing[1] and existing[1] != app_id)):
+                raise ValueError("账号身份与小程序归属不一致，请核对 AppID")
             self._conn.execute(
-                "INSERT INTO users(openid, created_at, last_seen, balance, invite_code) "
-                "VALUES(?,?,?,?,?) "
-                "ON CONFLICT(openid) DO UPDATE SET last_seen=excluded.last_seen",
-                (openid, now, now, WELCOME_BALANCE, code))
+                "INSERT INTO users(openid, created_at, last_seen, balance, invite_code,account_type,app_id) "
+                "VALUES(?,?,?,?,?,?,?) "
+                "ON CONFLICT(openid) DO UPDATE SET last_seen=excluded.last_seen,"
+                "app_id=CASE WHEN users.app_id='' THEN excluded.app_id ELSE users.app_id END",
+                (openid, now, now, WELCOME_BALANCE, code, kind, app_id))
             # 老用户补发邀请码（一次迁移）
             self._conn.execute(
                 "UPDATE users SET invite_code=? WHERE openid=? AND invite_code=''",
@@ -262,6 +288,12 @@ class UserStore:
                 "SELECT %s FROM users WHERE openid=?" % self._USER_COLS,
                 (openid,)).fetchone()
         return self._user_row(row)
+
+    def touch_user(self, openid: str) -> None:
+        """Activity is not registration; cap writes to one per five minutes."""
+        now = time.time()
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE users SET last_seen=? WHERE openid=? AND last_seen<?", (now, openid, now - 300))
 
     def get_user(self, openid: str) -> Optional[Dict[str, Any]]:
         with self._lock:
@@ -420,23 +452,31 @@ class UserStore:
         return [{"ts": r[0], "openid": r[1], "action": r[2], "detail": r[3]}
                 for r in rows]
 
-    def list_users(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def list_users(self, limit: int = 50, account_type: str = "wechat") -> List[Dict[str, Any]]:
+        if account_type not in (*ACCOUNT_TYPES, "all"):
+            raise ValueError("账号来源只能是 wechat、web 或 all")
         with self._lock:
+            where = "" if account_type == "all" else " WHERE account_type=?"
+            params = (limit,) if account_type == "all" else (account_type, limit)
             rows = self._conn.execute(
-                "SELECT %s FROM users ORDER BY last_seen DESC LIMIT ?" % self._USER_COLS,
-                (limit,)).fetchall()
+                "SELECT %s FROM users%s ORDER BY last_seen DESC LIMIT ?" % (self._USER_COLS, where), params).fetchall()
         return [self._user_row(r) for r in rows]
 
     def stats(self) -> Dict[str, Any]:
         midnight = _local_midnight()
         with self._lock:
-            users_total = self._conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-            users_today = self._conn.execute(
-                "SELECT COUNT(*) FROM users WHERE created_at>=?", (midnight,)).fetchone()[0]
+            counts = {kind: (count, today) for kind, count, today in self._conn.execute(
+                "SELECT account_type,COUNT(*),SUM(CASE WHEN created_at>=? THEN 1 ELSE 0 END) "
+                "FROM users GROUP BY account_type", (midnight,)).fetchall()}
+            wechat_total, wechat_today = counts.get("wechat", (0, 0))
+            web_total, web_today = counts.get("web", (0, 0))
             blocked_today = self._conn.execute(
                 "SELECT COUNT(*) FROM audit WHERE action='blocked' AND ts>=?",
                 (midnight,)).fetchone()[0]
-        return {"users_total": users_total, "users_today": users_today,
+        return {"users_total": wechat_total, "users_today": wechat_today,
+                "wechat_users_total": wechat_total, "wechat_users_today": wechat_today,
+                "web_users_total": web_total, "web_users_today": web_today,
+                "accounts_total": wechat_total + web_total,
                 "blocked_today": blocked_today}
 
     def close(self) -> None:

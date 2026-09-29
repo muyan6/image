@@ -49,7 +49,7 @@ Page({
   refreshUserData() {
     const list = app.globalData.historyList || [];
     this.setData({
-      userId: app.globalData.userId || 'PX-8A2F90B1',
+      userId: app.globalData.userId || '登录后显示',
       lightPoints: app.globalData.lightPoints || 0,
       freeMode: !!app.globalData.freeMode,
       historyList: list,
@@ -68,6 +68,7 @@ Page({
       if (!d) return;
       if (typeof d.balance === 'number') app.setBalance(d.balance);
       this.setData({
+        userId: d.user_id || app.globalData.userId || '登录后显示',
         lightPoints: app.globalData.lightPoints,
         videoTasksToday: (d.earn && d.earn.video_today) || 0
       });
@@ -75,6 +76,10 @@ Page({
   },
 
   onCopyUserId() {
+    if (!this.data.userId || this.data.userId === '登录后显示') {
+      wx.showToast({title: '正在获取账号编号，请稍后重试', icon: 'none'});
+      return;
+    }
     wx.setClipboardData({
       data: this.data.userId,
       success: () => {

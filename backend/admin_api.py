@@ -331,9 +331,13 @@ def make_admin_router(*, settings: SettingsStore,
         return {"ok": True}
 
     @router.get("/users")
-    def list_users(request: Request, limit: int = 30) -> Dict[str, Any]:
+    def list_users(request: Request, limit: int = 30, account_type: str = "wechat") -> Dict[str, Any]:
         _guard(request)
-        return {"items": users.list_users(min(max(1, limit), 200))}
+        try:
+            items = users.list_users(min(max(1, limit), 200), account_type=account_type)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"items": items, "account_type": account_type, "stats": users.stats()}
 
     @router.put("/users/{openid}/balance")
     async def set_user_balance(openid: str, request: Request) -> Dict[str, Any]:
