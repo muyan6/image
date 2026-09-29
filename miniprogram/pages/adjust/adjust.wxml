@@ -1,0 +1,192 @@
+<view class="container">
+  <scroll-view class="scroll-content" scroll-y enable-flex>
+    <!-- 顶部输出预览大图 (截图2) -->
+    <view class="preview-stage-wrap">
+      <view
+        class="preview-stage ratio-{{ currentRatioKey }}"
+        style="{{ previewStyle }}"
+      >
+        <image
+          class="preview-img"
+          src="{{ imagePath }}"
+          mode="aspectFill"
+        ></image>
+        
+        <!-- 比例角标 (右上角) -->
+        <view class="badge-ratio">
+          <text>{{ currentRatioLabel }}</text>
+        </view>
+
+        <!-- 底部水印标识 -->
+        <view class="preview-bottom-bar">
+          <text class="tag-left">输出预览</text>
+          <text class="tag-right">{{ selectedTemplate.name || '日漫错彩网点' }}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 卡片 1：画幅 (截图2) -->
+    <view class="card-section">
+      <view class="section-header">
+        <text class="section-title">画幅</text>
+        <text class="section-headline">保持原图，或重新取景</text>
+      </view>
+
+      <view class="ratio-bar" bindtap="onOpenRatioModal">
+        <text class="ratio-label">当前比例</text>
+        <view class="ratio-val-group">
+          <text class="ratio-val">{{ currentRatioLabel }}</text>
+          <text class="pill-rec" wx:if="{{ currentRatioKey === '1:1' }}">推荐</text>
+          <text class="ratio-change-link">更改 ›</text>
+        </view>
+      </view>
+
+      <text class="section-hint">选择非原图比例后，可以拖动照片调整裁切。</text>
+    </view>
+
+    <!-- 卡片 2：风格 / 选择表达方式 (截图3) -->
+    <view class="card-section">
+      <view class="section-header section-header-split">
+        <view class="header-left">
+          <text class="section-title">风格</text>
+          <text class="section-headline">选择表达方式</text>
+        </view>
+        <view class="header-right">
+          <text class="pill-tag">适用照片</text>
+          <text class="price-range">{{ priceRangeText }}</text>
+        </view>
+      </view>
+
+      <scroll-view class="styles-scroll" scroll-x enable-flex show-scrollbar="{{ false }}">
+        <view
+          wx:for="{{ allTemplates }}"
+          wx:key="id"
+          class="style-item {{ selectedTemplate.id === item.id ? 'style-item-active' : '' }}"
+          bindtap="onSelectTemplate"
+          data-template="{{ item }}"
+        >
+          <view class="style-cover-wrap">
+            <image
+              class="style-cover"
+              src="{{ item.coverUrl || '/images/logo.jpg' }}"
+              mode="aspectFill"
+            ></image>
+          </view>
+          <text class="style-name">{{ item.name }}</text>
+        </view>
+      </scroll-view>
+    </view>
+
+    <!-- 卡片 3：生成档位 / 选择这次的生成方式 (截图3) -->
+    <view class="card-section">
+      <view class="section-header section-header-split">
+        <view class="header-left">
+          <text class="section-title">生成档位</text>
+          <text class="section-headline">选择这次的生成方式</text>
+        </view>
+        <view class="header-right">
+          <text class="current-cost-text">{{ currentQualityCost }} 积分</text>
+        </view>
+      </view>
+
+      <view class="tier-grid">
+        <!-- 轻量生成 -->
+        <view
+          class="tier-card {{ quality === 'light' ? 'tier-card-active' : '' }}"
+          bindtap="onSelectQuality"
+          data-quality="light"
+        >
+          <view class="tier-card-top">
+            <text class="tier-name">轻量生成</text>
+            <text class="tier-price">{{ costLight }} 积分</text>
+          </view>
+          <text class="tier-desc">低质量，速度更快，适合日常创作</text>
+        </view>
+
+        <!-- 精细生成 -->
+        <view
+          class="tier-card {{ quality === 'fine' ? 'tier-card-active' : '' }}"
+          bindtap="onSelectQuality"
+          data-quality="fine"
+        >
+          <view class="tier-card-top">
+            <text class="tier-name">精细生成</text>
+            <text class="tier-price">{{ costFine }} 积分</text>
+          </view>
+          <text class="tier-desc">中等质量，细节更丰富</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 版权与使用权勾选 (截图3) -->
+    <view class="rights-card">
+      <view class="rights-row" bindtap="onToggleRights">
+        <view class="custom-checkbox {{ rightsOk ? 'checkbox-checked' : '' }}">
+          <text class="checkbox-symbol" wx:if="{{ rightsOk }}">✓</text>
+        </view>
+        <view class="rights-text-col">
+          <text class="rights-main">我拥有这张照片的使用权</text>
+          <text class="rights-sub">请勿上传未经许可的私人照片或受限制内容。</text>
+          <view class="protocol-links">
+            <text class="link-item" catchtap="onOpenProtocol" data-type="service">服务协议</text>
+            <text class="link-item" catchtap="onOpenProtocol" data-type="privacy">隐私指引</text>
+            <text class="link-item" catchtap="onOpenProtocol" data-type="auth">照片授权</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 底部撑开空间 -->
+    <view class="bottom-spacer"></view>
+  </scroll-view>
+
+  <!-- 底部固定吸底操作栏 (截图2、截图3) -->
+  <view class="fixed-bar">
+    <view class="bar-credit-info">
+      <text class="bar-balance">余额 {{ freeMode ? '∞' : fishTokens }}</text>
+      <text class="bar-deduct">{{ freeMode ? '体验免扣' : ('成功后扣 ' + currentQualityCost) }}</text>
+    </view>
+    <button class="btn-generate" bindtap="onStartGenerate" loading="{{ processing }}" disabled="{{ processing }}">
+      开始生成
+    </button>
+  </view>
+
+  <!-- 画幅比例选择弹窗抽屉 -->
+  <view class="modal-mask" wx:if="{{ showRatioModal }}" bindtap="onCloseRatioModal">
+    <view class="ratio-sheet" catchtap="true">
+      <view class="sheet-head">
+        <text class="sheet-title">选择画幅比例</text>
+        <text class="sheet-close" bindtap="onCloseRatioModal">✕</text>
+      </view>
+      <view class="ratio-options-list">
+        <view
+          wx:for="{{ ratioOptions }}"
+          wx:key="key"
+          class="ratio-option-item {{ currentRatioKey === item.key ? 'ratio-option-active' : '' }}"
+          bindtap="onSelectRatioOption"
+          data-key="{{ item.key }}"
+          data-label="{{ item.label }}"
+        >
+          <view class="option-left">
+            <text class="option-name">{{ item.label }}</text>
+            <text class="option-desc">{{ item.desc }}</text>
+          </view>
+          <view class="option-badge" wx:if="{{ item.rec }}">
+            <text>推荐</text>
+          </view>
+          <text class="option-check" wx:if="{{ currentRatioKey === item.key }}">✓</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 处理中遮罩/动画 -->
+  <view class="processing-mask" wx:if="{{ processing }}">
+    <view class="processing-box">
+      <view class="loading-ring"></view>
+      <text class="processing-title">AI 重构进行中</text>
+      <text class="processing-sub">{{ processingText }}</text>
+      <text class="processing-tip">采用深度神经网络运算，耗时约 15~25 秒</text>
+    </view>
+  </view>
+</view>

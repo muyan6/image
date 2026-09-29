@@ -58,20 +58,25 @@ def _seed_groups() -> List[Dict[str, Any]]:
 
 
 def _seed_templates() -> List[Dict[str, Any]]:
-    """提示词即产品：每条都可后台继续调，覆盖本地引擎不认识的新风格。"""
+    """提示词即产品：每条都可后台继续调，覆盖本地引擎不认识的新风格。
+    guide 是模板详情页的选图指南（建议/适合/不适合/上传提示），
+    与提示词一样属于运营内容，全部后台可改。
+    """
     now = time.time()
 
     def tpl(tid: str, group: str, name: str, subtitle: str, prompt: str,
             engine: str = "light", price: int = 0, sort: int = 1,
             output_size: int = 0, gateway_size: str = "",
             model_override: str = "", layout: str = "",
-            text_fields: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+            text_fields: Optional[List[Dict[str, Any]]] = None,
+            guide: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         return {
             "id": tid, "group_id": group, "name": name, "subtitle": subtitle,
             "cover": "", "prompt": prompt, "engine": engine, "price": price,
             "output_size": output_size, "gateway_size": gateway_size,
             "model_override": model_override, "layout": layout,
             "text_fields": text_fields or [],
+            "guide": _norm_guide(guide or {}),
             "sort": sort, "enabled": True, "usage_count": 0,
             "cover_v": 0, "created_at": now, "updated_at": now,
         }
@@ -83,40 +88,146 @@ def _seed_templates() -> List[Dict[str, Any]]:
             "提升清晰度与通透感；肤色向干净冷白微调，高光清爽不溢出。"
             "色彩必须忠实于原始色调与真实氛围，不要过度饱和，不要HDR风格。"
             "严格保持画面内容、构图与人物特征不变，不添加或删除物体，不加文字与水印。",
-            engine="light", sort=1),
+            engine="light", sort=1,
+            guide={
+                "advice": "适合日常自拍、街拍与人像的通用修复。原图信息越完整，修复越自然——它做的是\"还原本来的样子\"，不是换一张脸。",
+                "suitable": ["人物清晰、光线正常的日常照", "轻微欠曝、偏色或发灰的照片", "自拍、街拍、合影皆可"],
+                "unsuitable": ["重度模糊或像素过低的图片", "强逆光只剩剪影的照片", "已经精修过度的图"],
+                "tips": ["优先选原图导出的照片，聊天软件转发的图压缩损失大", "脸上有反光或过曝时，换一张光线柔和的"],
+            }),
         tpl("t_fuji", "restore", "富士胶片", "微暖复古，温润通透，街拍人像百搭",
             "把这张照片调成富士经典胶片色调：微暖的复古色温，温润的绿色与奶油色高光，"
             "细腻的胶片颗粒，通透不油腻。保持画面内容、构图与人物特征不变，"
             "色彩过渡自然，不过度饱和，不加文字与水印。",
-            engine="light", sort=2),
+            engine="light", sort=2,
+            guide={
+                "advice": "胶片色调对光线层次最敏感，晨昏、街景与绿植场景出片最稳。",
+                "suitable": ["街拍、旅行、静物", "画面里有天空、光影或植物层次", "暖调或中性光线的场景"],
+                "unsuitable": ["纯白背景的证件照类图片", "夜间极暗光的手机直出图"],
+                "tips": ["画面里带一点绿色植物或暖色灯光，胶片感更强", "阴天灰蒙的照片先走一次冷白通透再上胶片色更干净"],
+            }),
         tpl("t_gym", "restore", "力量高反差", "强化轮廓线条，低饱和冷黑金",
             "对这张照片做力量感高反差调色：强化肌肉轮廓与边缘线条，"
             "低饱和冷调，黑金质感，突出立体感与皮肤纹理细节。"
             "保持画面内容与构图不变，避免死黑与过曝，不加文字与水印。",
-            engine="light", sort=3),
+            engine="light", sort=3,
+            guide={
+                "advice": "需要清晰的肌肉线条或轮廓结构才能体现反差质感，平光自拍效果会打折。",
+                "suitable": ["健身、运动、游泳等力量场景", "侧光或顶光拍摄的轮廓分明的人像"],
+                "unsuitable": ["远景大全身、主体太小", "美颜磨皮过度的照片（线条已被抹平）"],
+                "tips": ["拍摄时光源在侧上方最出效果", "深色背景比浅色背景更衬托黑金质感"],
+            }),
         tpl("t_master", "restore", "深度超分", "生成式细节重构，发丝纤毫毕现",
             "以专业修图师的标准对这张照片做自然的高级优化：修复曝光、白平衡、"
             "噪点与瑕疵，提升清晰度与细节层次，呈现通透、真实的质感。"
             "色彩保持克制与忠实——保留原始色调倾向与氛围，避免过度饱和、"
             "避免浓艳滤镜与HDR感。保持主体、构图与人物特征可辨认，不加文字与水印。",
-            engine="fine", sort=4),
-        # ---- 动漫手办：近年验证过的三大爆款方向 ----
+            engine="fine", sort=4,
+            guide={
+                "advice": "万能修复档：生成式重构微观细节，对老照片和压缩图收益最大。",
+                "suitable": ["老照片翻新", "聊天记录里被压缩的图", "模糊但五官可辨认的人像"],
+                "unsuitable": ["原图本来就非常清晰时提升有限"],
+                "tips": ["手里有原文件就直接传原文件，别传二次截图", "老照片有折痕破损也能一并修复"],
+            }),
+        # ---- 动漫手办与流行艺术：热门风格 ----
+        tpl("t_anime_dots", "anime", "日漫错彩网点", "把真人照片重绘成复古日漫彩页肖像",
+            "把真人照片重绘成复古日漫彩页肖像风格：保留原照片中人物的五官、表情、发型和姿态，"
+            "用荧光专色、漫画网点、粗墨线与轻微套色错位，制作一张鲜明、复古又有冲击力的流行艺术肖像。"
+            "画面具有强烈的复古波普与日漫插画质感，色彩鲜活，不加文字与水印。",
+            engine="fine", sort=1,
+            guide={
+                "advice": "保留原照片中人物的五官、表情、发型和姿态，用荧光专色、漫画网点、粗墨线与轻微套色错位，制作一张鲜明、复古又有冲击力的流行艺术肖像。",
+                "suitable": [
+                    "单人正脸、侧脸或半身人像",
+                    "人物五官清楚、脸部没有严重遮挡",
+                    "发型轮廓明显，头发细节丰富",
+                    "带有眼镜、发箍、耳饰等辨识度配件",
+                    "表情自然或具有明显情绪"
+                ],
+                "unsuitable": [
+                    "多人合照或远景全身照",
+                    "口罩、手掌遮挡严重的面部",
+                    "过暗、严重欠曝的照片"
+                ],
+                "tips": [
+                    "优先选择脸部清晰、发型完整、表情有特点的单人人像",
+                    "带有眼镜、耳饰或发饰等配饰能大幅丰富漫画细节"
+                ]
+            }),
+        tpl("t_felt", "anime", "毛毡旅行档案", "手工立体羊毛毡刺绣定格质感",
+            "把照片重绘成温暖的手工羊毛毡与刺绣定格动画质感：画面呈现圆润毛绒的毛毡织物纹理，"
+            "边缘带有细密柔软的纤维毛刺感，色彩温润治愈，微缩定格景深。保持人物五官特征与构图不变，不加文字与水印。",
+            engine="fine", sort=2,
+            guide={
+                "advice": "羊毛毡质感能赋予照片手作童话的温度，日常风景、街景和萌宠尤其生动。",
+                "suitable": ["旅行街拍、风景与萌宠", "半身人像或大头特写", "色彩鲜明的场景"],
+                "unsuitable": ["画面元素过度繁杂的群像"],
+                "tips": ["鲜艳温暖的光线能更好凸显羊毛绒感"]
+            }),
+        tpl("t_ink_wash", "restore", "柔墨纸绘", "清透水墨宣纸晕染，东方美学留白",
+            "把照片创作成东方意境的宣纸水墨淡彩画：淡雅的墨色线条勾勒轮廓，细腻的宣纸吸墨晕染纹理，"
+            "虚实相生的留白意境，色彩清透脱俗。保持主体神韵与主要轮廓，不加文字与水印。",
+            engine="light", sort=5,
+            guide={
+                "advice": "东方水墨意境重在神韵与留白，自然风光、古风汉服和植物出片最有意境。",
+                "suitable": ["汉服国风、自然山水、植物与静物", "姿态舒展的人物人像"],
+                "unsuitable": ["极度杂乱的现代工业场景"],
+                "tips": ["画面留白较多的照片最具艺术呼吸感"]
+            }),
+        tpl("t_marker", "anime", "马克笔小人像", "二次元手绘插画，明快马克笔笔触",
+            "把照片绘制成手绘二次元插画风格：明快的马克笔渐变笔触、清晰的深色线稿、高光点缀与卡通大眼神韵，"
+            "生动可爱。保持人物发型五官特征与服饰色彩，不加文字与水印。",
+            engine="fine", sort=3,
+            guide={
+                "advice": "手绘马克笔风格赋予人像青春明亮的动漫画风，人物肖像、自拍、二次元爱好者首选。",
+                "suitable": ["单人半身、自拍与特写", "五官清晰、表情生动的人像"],
+                "unsuitable": ["远景大全身、模糊无光照的自拍"],
+                "tips": ["发型完整、服饰有细节的照片出片最惊艳"]
+            }),
+        tpl("t_childhood", "restore", "童年高清", "胶片颗粒与暖阳质感，童年回忆重现",
+            "对照片进行童年老照片风格的高清质感重塑：细腻温暖的柯达暖阳胶片色调，"
+            "真实自然的微观皮肤细节与发丝超分重构，抚平模糊噪点，留住原初温度。严格保持面部特征与真实神态，不加文字与水印。",
+            engine="fine", sort=6,
+            guide={
+                "advice": "专注于老旧、泛黄、模糊儿童照与怀旧照的真实高保真重现，保留岁月温情。",
+                "suitable": ["童年旧照、家庭胶卷老相片", "翻拍老相册、轻度受损模糊旧照"],
+                "unsuitable": ["面部已经大面积撕裂缺失的照片"],
+                "tips": ["平整翻拍相册，避免强反光"]
+            }),
         tpl("t_ghibli", "anime", "吉卜力童话", "手绘水彩暖阳，宫崎骏式自然场景",
             "把这张照片转绘成吉卜力工作室手绘动画风格：柔和的水彩天空、"
             "明快的暖色阳光、细腻的手绘笔触；人物保留原有姿态与可辨识的五官特征，"
             "背景演绎成宫崎骏式的自然场景（层叠云朵、草原或森林）。"
             "画面干净治愈，色彩明亮通透，不加文字与水印。",
-            engine="fine", sort=1),
+            engine="fine", sort=4,
+            guide={
+                "advice": "保留原照片中人物的五官、表情、发型和姿态，用水彩手绘质感重绘；人物的可辨识度取决于原图清晰度。",
+                "suitable": ["单人正脸、侧脸或半身人像", "人物五官清楚、脸部没有严重遮挡", "发型轮廓明显，头发细节丰富"],
+                "unsuitable": ["多人合照或人群照片", "人物距离太远的全身照", "脸部严重模糊、过曝或欠曝", "口罩、手掌、头发大面积遮住五官"],
+                "tips": ["优先选择脸部清晰、发型完整、表情有特点的单人人像", "正脸、侧脸和夸张表情都可以，但要确保眼睛、鼻子、嘴部和下颌轮廓能够看清"],
+            }),
         tpl("t_clay", "anime", "粘土小屋", "定格动画黏土质感，圆润可爱",
             "把这张照片变成黏土定格动画质感：画面主体变成圆润可爱的黏土材质，"
             "保留五官特征与姿态，表面有细微的手工指纹与捏塑痕迹，"
             "背景是微缩黏土布景，柔和的影棚灯光，轻微浅景深。不加文字与水印。",
-            engine="fine", sort=2),
+            engine="fine", sort=5,
+            guide={
+                "advice": "黏土质感会放大面部特征，走可爱系；大头照和宠物照效果最好。",
+                "suitable": ["单人大头照、表情生动", "宠物猫狗正面照", "头肩比例大的构图"],
+                "unsuitable": ["全身远景（脸部细节不够）", "画面元素过多、背景杂乱"],
+                "tips": ["表情越夸张越有定格动画的喜感", "正面平视角度比俯拍仰拍更稳"],
+            }),
         tpl("t_figure", "anime", "3D手办盲盒", "收藏级PVC手办，立在底座上",
             "把照片里的主体变成收藏级3D手办盲盒：Q版比例、光滑PVC材质、"
             "精细涂装与分色，站在圆形展示底座上，旁边是半透明亚克力包装盒，"
             "影棚打光，浅景深。保持人物五官与发型特征可辨识。不加文字与水印。",
-            engine="fine", sort=3),
+            engine="fine", sort=6,
+            guide={
+                "advice": "手办化需要完整的人物轮廓来生成立体感与底座透视，大头特写撑不起构图。",
+                "suitable": ["半身或全身单人，姿势明确", "穿着有辨识度（制服、特色服装加分）"],
+                "unsuitable": ["只有大头特写", "多人重叠遮挡"],
+                "tips": ["背景干净的照片，底座和亚克力包装盒会更真实", "手部姿势自然的手办完成度更高"],
+            }),
         # ---- 海报日签：AI 底图 + 代码排版中文 ----
         tpl("t_poster", "poster", "复古电影海报", "戏剧光影底图 + 中文标题排版",
             "把这张照片创作成复古电影海报的底图：强烈的戏剧化光影，"
@@ -129,7 +240,13 @@ def _seed_templates() -> List[Dict[str, Any]]:
                  "default": "盛夏光年", "max_len": 10},
                 {"key": "subtitle", "label": "副标题", "role": "subtitle",
                  "default": "A SUMMER TALE", "max_len": 30},
-            ]),
+            ],
+            guide={
+                "advice": "底图走戏剧化光影，标题文字由排版引擎叠加，保证汉字绝对正确。主体在中下部、上部有留白的照片最配这套排版。",
+                "suitable": ["有明确主体的横竖构图皆可", "光影对比强、氛围感强的照片"],
+                "unsuitable": ["平淡顺光的风景照", "主体太小、画面太碎"],
+                "tips": ["先生成再看效果，主标题建议 2~6 个字", "想换文案不用重新生成底图——但本版本会整体重排"],
+            }),
         # ---- 明信片贺卡：印刷级 2K 输出 ----
         tpl("t_postcard", "postcard", "旅行明信片", "版画风底图 + 落款排版，可冲印",
             "把这张照片转绘成复古旅行明信片的画面：浓郁而通透的版画风配色，"
@@ -144,8 +261,40 @@ def _seed_templates() -> List[Dict[str, Any]]:
                  "default": "WANDERLUST POST", "max_len": 30},
                 {"key": "date", "label": "日期", "role": "date",
                  "default": "{today}", "max_len": 24},
-            ]),
+            ],
+            guide={
+                "advice": "输出为 2048px 长边的印刷级 2K 图，可直接冲印；问候语、地点、日期由排版引擎叠加，文字保证正确。",
+                "suitable": ["旅行、风景、建筑", "色彩浓郁、构图干净的照片"],
+                "unsuitable": ["低分辨率截图", "画面过暗或焦点不实"],
+                "tips": ["地点用英文或短拼音更有邮票感", "日期默认今天，可以在提交页改"],
+            }),
     ]
+
+
+def _norm_guide(raw: Any) -> Dict[str, Any]:
+    """归一化选图指南：advice 一段话 + suitable/unsuitable/tips 三组清单。
+
+    清单支持列表或"一行一条"的字符串（后台 textarea 直接粘贴），
+    全部裁剪到安全长度 —— 指南是运营内容，坏数据不该让保存失败。
+    """
+    if not isinstance(raw, dict):
+        return {"advice": "", "suitable": [], "unsuitable": [], "tips": []}
+
+    def lines(value: Any, limit: int = 8, width: int = 60) -> List[str]:
+        if isinstance(value, str):
+            items = [s.strip() for s in value.splitlines() if s.strip()]
+        elif isinstance(value, list):
+            items = [str(s).strip() for s in value if str(s).strip()]
+        else:
+            items = []
+        return [i[:width] for i in items[:limit]]
+
+    return {
+        "advice": str(raw.get("advice", "") or "").strip()[:500],
+        "suitable": lines(raw.get("suitable")),
+        "unsuitable": lines(raw.get("unsuitable")),
+        "tips": lines(raw.get("tips")),
+    }
 
 
 def _validate(doc: Dict[str, Any]) -> None:
@@ -256,8 +405,29 @@ class TemplateStore:
                 raise ValueError("groups/templates 缺失")
             candidate = {"groups": groups, "templates": templates}
             _validate(candidate)  # 坏数据直接回种子，不带病运行
+            # 自动补齐缺失的新种子模板（如日漫错彩网点、毛毡等）
+            migrated = False
+            existing_ids = {t["id"] for t in templates}
+            for st in _seed_templates():
+                if st["id"] not in existing_ids:
+                    templates.append(st)
+                    migrated = True
+
+            # 旧版本数据没有 guide 字段：读入时统一补齐并归一化；
+            # 种子模板指南为空的回填种子内容（一次性迁移），自建模板不动
+            seed_guides = {t["id"]: t["guide"] for t in _seed_templates()}
+            for t in templates:
+                g = _norm_guide(t.get("guide"))
+                if not any([g["advice"], g["suitable"], g["unsuitable"], g["tips"]]) \
+                        and t["id"] in seed_guides:
+                    g = seed_guides[t["id"]]
+                    migrated = True
+                t["guide"] = g
             self._groups = groups
             self._templates = templates
+            if migrated:
+                self._save_locked()
+                log.info("模板数据迁移/同步完成（已同步种子模板与选图指南）")
             log.info("模板已加载: %s（%d 组 / %d 模板）",
                      self._path, len(groups), len(templates))
         except (OSError, ValueError) as exc:
@@ -375,6 +545,7 @@ class TemplateStore:
                 "model_override": str(data.get("model_override") or ""),
                 "layout": str(data.get("layout") or ""),
                 "text_fields": _norm_text_fields(data.get("text_fields")),
+                "guide": _norm_guide(data.get("guide")),
                 "sort": _as_int(data.get("sort"), 99),
                 "enabled": bool(data.get("enabled", True)),
                 "usage_count": 0,
@@ -408,6 +579,8 @@ class TemplateStore:
                     t["enabled"] = bool(patch["enabled"])
                 if "text_fields" in patch:
                     t["text_fields"] = _norm_text_fields(patch["text_fields"])
+                if "guide" in patch:
+                    t["guide"] = _norm_guide(patch["guide"])
                 t["updated_at"] = time.time()
                 self._validate_snapshot()
                 self._save_locked()
@@ -464,6 +637,7 @@ class TemplateStore:
                 "price": int(t.get("price", 0)),
                 "layout": t.get("layout", ""),
                 "text_fields": t.get("text_fields", []),
+                "guide": _norm_guide(t.get("guide")),
             })
         return out
 

@@ -23,7 +23,9 @@ Page({
     showHistoryModal: false,
     saving: false,
     featuredTemplates: [],
-    activeTemplate: null
+    activeTemplate: null,
+    textValues: {},
+    rightsOk: false
   },
 
   onLoad() {
@@ -42,14 +44,31 @@ Page({
     if (app.globalData.selectedTemplate) {
       const tpl = app.globalData.selectedTemplate;
       app.globalData.selectedTemplate = null;
-      this.setData({
-        activeTemplate: tpl,
-        currentQuality: tpl.engine === 'fine' ? 'fine' : 'light'
-      });
+      this.applyTemplate(tpl);
       if (this.data.state === 'empty') {
         this.onPickImage();
       }
     }
+  },
+
+  /** 应用模板：档位跟模板走，文字字段初始化默认值（{today} 换成当天） */
+  applyTemplate(tpl) {
+    if (!tpl) return;
+    const textValues = {};
+    (tpl.text_fields || []).forEach((f) => {
+      let v = f.default || '';
+      if (v === '{today}') {
+        const d = new Date();
+        const p = (n) => (n < 10 ? '0' + n : '' + n);
+        v = d.getFullYear() + '.' + p(d.getMonth() + 1) + '.' + p(d.getDate());
+      }
+      textValues[f.key] = v;
+    });
+    this.setData({
+      activeTemplate: tpl,
+      currentQuality: tpl.engine === 'fine' ? 'fine' : 'light',
+      textValues: textValues
+    });
   },
 
   loadTemplates() {
@@ -76,19 +95,25 @@ Page({
 
   onSelectFeaturedTemplate(e) {
     const tpl = e.currentTarget.dataset.template;
-    this.setData({
-      activeTemplate: tpl,
-      currentQuality: tpl.engine === 'fine' ? 'fine' : 'light'
+    if (!tpl) return;
+    wx.navigateTo({
+      url: `/pages/style-detail/style-detail?id=${encodeURIComponent(tpl.id)}`
     });
-    if (this.data.state === 'empty') {
-      this.onPickImage();
-    } else {
-      wx.showToast({ title: '已选用：' + tpl.name, icon: 'none' });
-    }
   },
 
   onClearTemplate() {
-    this.setData({ activeTemplate: null });
+    this.setData({ activeTemplate: null, textValues: {} });
+  },
+
+  /** 模板文字排版字段输入 */
+  onTextFieldInput(e) {
+    const key = e.currentTarget.dataset.key;
+    this.setData({ ['textValues.' + key]: e.detail.value });
+  },
+
+  /** 版权确认 */
+  onRightsChange(e) {
+    this.setData({ rightsOk: (e.detail.value || []).length > 0 });
   },
 
   loadNotice() {
@@ -125,7 +150,7 @@ Page({
       .catch(() => {});
   },
 
-  /** 状态 1：选择照片入口 */
+  /** 选择照片入口：选完直接跳转至【调整作品】页 (图2/3) */
   onPickImage() {
     if (this.data.state === 'processing') return;
 
@@ -136,14 +161,13 @@ Page({
       sizeType: ['compressed', 'original'],
       success: (res) => {
         const file = res.tempFiles[0];
-        const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
-        this.setData({
-          selectedImage: file.tempFilePath,
-          selectedImageSize: sizeMb > 0 ? `${sizeMb} MB` : '',
-          state: 'ready',
-          resultImage: '',
-          originalImage: '',
-          splitPercent: 50
+        if (!file || !file.tempFilePath) return;
+        const defaultTid = (this.data.featuredTemplates.length > 0)
+          ? this.data.featuredTemplates[0].id
+          : 't_anime_dots';
+
+        wx.navigateTo({
+          url: `/pages/adjust/adjust?image=${encodeURIComponent(file.tempFilePath)}&templateId=${encodeURIComponent(defaultTid)}`
         });
       }
     });
@@ -172,6 +196,10 @@ Page({
   /** 状态 2：点击【拯救这张照片】开始处理 */
   onRescue() {
     if (this.data.state === 'processing' || !this.data.selectedImage) return;
+    if (!this.data.rightsOk) {
+      wx.showToast({ title: '请先确认照片使用权', icon: 'none' });
+      return;
+    }
 
     const quality = this.data.currentQuality;
     const cost = quality === 'fine' ? this.data.priceFine : this.data.priceLight;
@@ -211,6 +239,10 @@ Page({
       const formData = { quality };
       if (tpl && tpl.id) {
         formData.template_id = tpl.id;
+        // 模板文字排版字段：后端做长度截断与默认值补齐
+        if ((tpl.text_fields || []).length) {
+          formData.text_fields = JSON.stringify(this.data.textValues);
+        }
       }
       const created = await api.upload(filePath, formData);
       if (!created || created.code !== 0 || !created.job_id) {
@@ -229,9 +261,9 @@ Page({
         }
       });
 
-      // 扣费
+      // 扣费：模板价 > 0 用模板价，0 表示按档位默认价（与后端口径一致）
       let cost = quality === 'fine' ? this.data.priceFine : this.data.priceLight;
-      if (tpl && typeof tpl.price === 'number') {
+      if (tpl && typeof tpl.price === 'number' && tpl.price > 0) {
         cost = tpl.price;
       }
       if (!this.data.freeMode && cost > 0) {

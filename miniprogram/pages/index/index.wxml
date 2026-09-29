@@ -171,12 +171,33 @@
           <view class="tpl-pill-left">
             <text class="tpl-pill-tag">艺术风格</text>
             <text class="tpl-pill-name">{{ activeTemplate.name }}</text>
-            <text class="tpl-pill-sub">{{ activeTemplate.engine === 'fine' ? '2K精细' : '1.5K轻量' }}</text>
+            <text class="tpl-pill-sub">{{ activeTemplate.engine === 'fine' ? '2K精细' : '1.5K轻量' }}{{ activeTemplate.price > 0 ? ' · ' + activeTemplate.price + ' 算力' : '' }}</text>
           </view>
           <text class="tpl-pill-cancel" bindtap="onClearTemplate">✕ 恢复纯修复</text>
         </view>
 
-        <view class="quality-selector">
+        <!-- 模板文字排版字段（代码叠加中文，保证文字正确） -->
+        <view wx:if="{{ activeTemplate && activeTemplate.text_fields.length > 0 }}" class="tpl-texts">
+          <text class="tpl-texts-title">自定义文字 · 生成后叠加在画面上</text>
+          <view
+            wx:for="{{ activeTemplate.text_fields }}"
+            wx:key="key"
+            class="tpl-text-row"
+          >
+            <text class="tpl-text-label">{{ item.label }}</text>
+            <input
+              class="tpl-text-input"
+              value="{{ textValues[item.key] }}"
+              placeholder="{{ item.label }}"
+              maxlength="{{ item.max_len }}"
+              bindinput="onTextFieldInput"
+              data-key="{{ item.key }}"
+            />
+          </view>
+        </view>
+
+        <!-- 手动档位仅在纯修复模式下提供；选模板后档位跟模板走 -->
+        <view wx:if="{{ !activeTemplate }}" class="quality-selector">
           <view
             class="quality-tab {{ currentQuality === 'light' ? 'tab-active' : '' }}"
             bindtap="onSelectQuality"
@@ -194,6 +215,14 @@
             <text class="tab-desc">发丝细节重构 · 约 15 秒 ({{ priceFine }} 算力)</text>
           </view>
         </view>
+
+        <!-- 版权确认（固定文案，合规要求） -->
+        <label class="rights-row">
+          <checkbox-group bindchange="onRightsChange">
+            <checkbox value="ok" checked="{{ rightsOk }}" color="#1a1917" style="transform:scale(0.8)" />
+          </checkbox-group>
+          <text class="rights-text">我拥有这张照片的使用权</text>
+        </label>
 
         <button class="btn-ink main-action-btn" bindtap="onRescue">
           拯救这张照片

@@ -1,0 +1,91 @@
+<view class="container">
+  <scroll-view class="scroll-content" scroll-y enable-flex>
+    <!-- 顶部风格封面卡片 -->
+    <view class="banner-card">
+      <image
+        class="banner-bg"
+        src="{{ template.coverUrl || '/images/logo.jpg' }}"
+        mode="aspectFill"
+      ></image>
+      <view class="banner-overlay"></view>
+      <view class="banner-content">
+        <text class="banner-title">{{ template.name || '风格重绘' }}</text>
+        <text class="banner-sub">{{ template.subtitle || '把真人照片重绘成流行艺术肖像' }}</text>
+      </view>
+    </view>
+
+    <!-- 选图建议导语区 -->
+    <view class="advice-block" wx:if="{{ template.guide && template.guide.advice }}">
+      <view class="advice-tag-row">
+        <text class="advice-tag">选图建议</text>
+      </view>
+      <text class="advice-body">{{ template.guide.advice }}</text>
+    </view>
+
+    <!-- 适合这些照片 卡片 (截图1核心视觉) -->
+    <view class="feature-card" wx:if="{{ suitableList.length > 0 }}">
+      <view class="card-head">
+        <view class="check-icon">
+          <text class="check-symbol">✓</text>
+        </view>
+        <view class="card-title-group">
+          <text class="card-title">适合这些照片</text>
+          <text class="card-subtitle">这些特征通常能得到更稳定的效果</text>
+        </view>
+      </view>
+
+      <view class="list-body">
+        <view
+          class="list-item"
+          wx:for="{{ suitableList }}"
+          wx:key="index"
+        >
+          <view class="badge-num badge-red">
+            <text>{{ index + 1 }}</text>
+          </view>
+          <text class="item-text">{{ item }}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 不太适合 卡片 (可选折叠/辅助提示) -->
+    <view class="feature-card unsuitable-card" wx:if="{{ unsuitableList.length > 0 }}">
+      <view class="card-head">
+        <view class="dash-icon">
+          <text class="dash-symbol">—</text>
+        </view>
+        <view class="card-title-group">
+          <text class="card-title">不太适合</text>
+          <text class="card-subtitle">建议换一张照片或选择其他风格</text>
+        </view>
+      </view>
+
+      <view class="list-body">
+        <view
+          class="list-item"
+          wx:for="{{ unsuitableList }}"
+          wx:key="index"
+        >
+          <view class="badge-num badge-gray">
+            <text>{{ index + 1 }}</text>
+          </view>
+          <text class="item-text item-text-gray">{{ item }}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 底部垫高，防止被吸底栏遮挡 -->
+    <view class="bottom-spacer"></view>
+  </scroll-view>
+
+  <!-- 底部吸底操作栏 (截图1) -->
+  <view class="fixed-bar">
+    <view class="bar-info">
+      <text class="bar-title">{{ template.name || '风格制作' }}</text>
+      <text class="bar-hint">生成前可选模型，积分以所选档位为准</text>
+    </view>
+    <button class="btn-create" bindtap="onChoosePhoto">
+      选择照片制作
+    </button>
+  </view>
+</view>

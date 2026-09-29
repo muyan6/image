@@ -102,7 +102,8 @@ class OpenAIImagesEnhance:
                 quality: str = "fine", style: Optional[str] = None,
                 prompt: Optional[str] = None,
                 size: Optional[str] = None,
-                model: Optional[str] = None) -> str:
+                model: Optional[str] = None,
+                image_url: Optional[str] = None) -> str:
         """把 input_path 的图交给网关模型处理,结果写到 output_path。
 
         prompt 由调用方(main.py)从运行时设置里取,后台改完立即生效;
@@ -132,8 +133,12 @@ class OpenAIImagesEnhance:
         for attempt in range(3):
             try:
                 try:
-                    payload = self._request_image(model, text, image_bytes,
-                                                  size=use_size)
+                    if image_url:
+                        payload = self._request_image_by_url(
+                            model, text, image_url, size=use_size)
+                    else:
+                        payload = self._request_image(model, text, image_bytes,
+                                                      size=use_size)
                 except GatewayError as exc:
                     # 网关不认识 size 参数:去掉再试一次,不算这家失败
                     if (use_size and exc.status in (400, 404, 415, 422)
@@ -191,6 +196,32 @@ class OpenAIImagesEnhance:
             raise GatewayError(
                 "输入超过 %.0fMB 且本地无 OpenCV 可压缩" % limit_mb,
                 code="IMAGE_TOO_LARGE")
+
+    def _request_image_by_url(self, model: str, prompt: str, image_url: str,
+                              size: Optional[str] = None) -> bytes:
+        """URL 直连:网关服务端自己拉取图片(如 COS 签名直链)。
+
+        本服务器不出公网流量。网关侧格式为 images[].image_url;
+        若网关拒绝该参数(400/404/415/422),由调用方回退 multipart。
+        """
+        url = self.base_url + self.endpoint
+        body = {"model": model, "prompt": prompt,
+                "images": [{"image_url": image_url}]}
+        if size:
+            body["size"] = size
+        try:
+            resp = self._session.post(url,
+                headers={"Authorization": "Bearer %s" % self.api_key,
+                         "Content-Type": "application/json"},
+                json=body, timeout=(15, self.timeout))
+        except requests.Timeout as exc:
+            raise GatewayError("网关请求超时(%ds)" % self.timeout,
+                               code="TIMEOUT") from exc
+        except requests.RequestException as exc:
+            raise GatewayError("网络错误: %s" % exc.__class__.__name__,
+                               code="NETWORK") from exc
+        self._raise_for_status(resp)
+        return self._extract_image(resp)
 
     def _request_image(self, model: str, prompt: str, image_bytes: bytes,
                        size: Optional[str] = None) -> bytes:

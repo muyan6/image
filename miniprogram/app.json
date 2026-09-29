@@ -2,6 +2,8 @@
   "pages": [
     "pages/index/index",
     "pages/templates/templates",
+    "pages/style-detail/style-detail",
+    "pages/adjust/adjust",
     "pages/community/community",
     "pages/my/my",
     "pages/credits/credits",

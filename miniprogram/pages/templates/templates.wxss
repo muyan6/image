@@ -378,3 +378,160 @@
   width: 100%;
   margin-top: 10rpx;
 }
+
+/* 选图指南（后台可编辑，模板详情页展示） */
+.detail-scroll {
+  flex: 1;
+  min-height: 0;
+  max-height: 72vh;
+}
+
+.stage-price-badge {
+  position: absolute;
+  top: 18rpx;
+  right: 18rpx;
+  padding: 6rpx 18rpx;
+  background: rgba(20, 26, 43, 0.72);
+  border-radius: 999rpx;
+  color: #ffffff;
+  font-size: 20rpx;
+  font-weight: 600;
+  letter-spacing: 1rpx;
+}
+
+.stage-price-free {
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--ink-body);
+}
+
+.detail-cover-stage {
+  position: relative;
+}
+
+.guide-advice-block {
+  margin-top: 22rpx;
+}
+
+.guide-advice-tag {
+  display: block;
+  font-size: 22rpx;
+  font-weight: 700;
+  color: var(--accent-rust);
+  letter-spacing: 2rpx;
+  margin-bottom: 8rpx;
+}
+
+.guide-advice-text {
+  display: block;
+  font-size: 26rpx;
+  font-weight: 600;
+  color: var(--ink-title);
+  line-height: 1.65;
+}
+
+.guide-card {
+  margin-top: 22rpx;
+  border: 1rpx solid var(--paper-border);
+  border-radius: 14rpx;
+  background: var(--paper-card-subtle);
+  padding: 22rpx 24rpx;
+}
+
+.guide-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 16rpx;
+}
+
+.guide-dot {
+  flex: none;
+  width: 36rpx;
+  height: 36rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20rpx;
+  font-weight: 700;
+}
+
+.guide-dot-good {
+  background: var(--ink-title);
+  color: #ffffff;
+  font-size: 14rpx;
+}
+
+.guide-dot-bad {
+  background: #d8d2c6;
+  color: #ffffff;
+}
+
+.guide-dot-info {
+  background: var(--accent-rust);
+  color: #ffffff;
+  font-style: italic;
+}
+
+.guide-card-title {
+  display: block;
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+}
+
+.guide-card-sub {
+  display: block;
+  font-size: 20rpx;
+  color: var(--ink-muted);
+}
+
+.guide-li {
+  display: flex;
+  align-items: flex-start;
+  gap: 14rpx;
+  padding: 10rpx 0;
+  border-top: 1rpx dashed var(--paper-border);
+}
+
+.guide-li:first-of-type {
+  border-top: none;
+}
+
+.guide-num {
+  flex: none;
+  width: 32rpx;
+  height: 32rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18rpx;
+  font-weight: 700;
+  margin-top: 2rpx;
+}
+
+.guide-num-good {
+  background: var(--accent-rust);
+  color: #ffffff;
+}
+
+.guide-num-gray {
+  background: #d8d2c6;
+  color: #ffffff;
+}
+
+.guide-li-text {
+  flex: 1;
+  font-size: 24rpx;
+  color: var(--ink-body);
+  line-height: 1.6;
+}
+
+.guide-fineprint {
+  display: block;
+  text-align: center;
+  font-size: 20rpx;
+  color: var(--ink-faint);
+  margin-top: 24rpx;
+}

@@ -49,9 +49,11 @@ def _host(conf: Dict[str, str]) -> str:
     return "%s.cos.%s.myqcloud.com" % (conf["cos_bucket"], conf["cos_region"])
 
 
-def _sign_key(conf: Dict[str, str], key_time: str) -> bytes:
+def _sign_key(conf: Dict[str, str], key_time: str) -> str:
+    """官方规范: SignKey = Hex(HmacSHA1(SecretKey, KeyTime))——十六进制字符串,
+    第二次 HMAC 用它字符串本身做密钥,不能用原始字节。"""
     return hmac.new(conf["secret_key"].encode("utf-8"),
-                    key_time.encode("utf-8"), hashlib.sha1).digest()
+                    key_time.encode("utf-8"), hashlib.sha1).hexdigest()
 
 
 def presign(settings: SettingsStore, method: str, key: str,
@@ -66,7 +68,7 @@ def presign(settings: SettingsStore, method: str, key: str,
     http_string = "%s\n%s\n%s\n%s\n" % (method.lower(), uri, "", "")
     string_to_sign = "sha1\n%s\n%s\n" % (
         key_time, hashlib.sha1(http_string.encode("utf-8")).hexdigest())
-    signature = hmac.new(sign_key, string_to_sign.encode("utf-8"),
+    signature = hmac.new(sign_key.encode("utf-8"), string_to_sign.encode("utf-8"),
                          hashlib.sha1).hexdigest()
 
     query = (

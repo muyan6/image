@@ -323,7 +323,8 @@ def _moderate_or_reject(image_bytes: bytes, job_ctx: str, openid: str) -> Option
 def _register_job(openid: str, quality: str, style: str,
                   orig_tmp_path: str, ext: str,
                   template: Optional[Dict[str, Any]] = None,
-                  text_values: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+                  text_values: Optional[Dict[str, str]] = None,
+                  aspect_ratio: str = "") -> Dict[str, Any]:
     """把已落盘的原图登记为任务（ multipart 与 COS 直传共用这条尾巴）。
 
     template 非空时，引擎档位/提示词/输出尺寸/文字排版全部以模板为准，
@@ -358,6 +359,7 @@ def _register_job(openid: str, quality: str, style: str,
         template_id=(template or {}).get("id", ""),
         template_name=(template or {}).get("name", ""),
         price=price,
+        aspect_ratio=aspect_ratio,
         orig_file=orig_file,
         result_file=result_file,
         stage="queued",
@@ -368,10 +370,10 @@ def _register_job(openid: str, quality: str, style: str,
     )
     jobs.sweep()
     users.inc_total(openid)
-    users.audit(openid, "submitted", "job=%s quality=%s tpl=%s"
-                % (job_id, quality, (template or {}).get("id", "-")))
+    users.audit(openid, "submitted", "job=%s quality=%s tpl=%s ar=%s"
+                % (job_id, quality, (template or {}).get("id", "-"), aspect_ratio or "-"))
     pool.submit(_run_pipeline, job_id, quality, style,
-                copy_template(template), dict(text_values or {}))
+                copy_template(template), dict(text_values or {}), aspect_ratio)
     return {
         "code": 0,
         "job_id": job_id,
@@ -379,6 +381,7 @@ def _register_job(openid: str, quality: str, style: str,
         "quality": quality,
         "template_id": (template or {}).get("id", ""),
         "template_name": (template or {}).get("name", ""),
+        "aspect_ratio": aspect_ratio,
         "price": price,
         "orig_url": "/api/images/%s" % orig_file,
         "result_url": "/api/images/%s" % result_file,
@@ -523,8 +526,55 @@ def _validate_image(path: str) -> None:
         )
 
 
-def _normalize_long_side(src: str, dst: str, target: int = 0) -> str:
-    """把长边缩放到 target，输出 JPEG q95。
+def _crop_aspect_ratio(img: Any, aspect_ratio: str = "") -> Any:
+    """按画幅比例做居中裁剪。空或 original/auto 则不裁剪。"""
+    if not aspect_ratio or img is None:
+        return img
+    ar = str(aspect_ratio).strip().lower()
+    if ar in ("original", "auto", "none", ""):
+        return img
+
+    ratio_map = {
+        "1:1": 1.0,
+        "3:4": 3.0 / 4.0,
+        "4:3": 4.0 / 3.0,
+        "9:16": 9.0 / 16.0,
+        "16:9": 16.0 / 9.0,
+        "2:3": 2.0 / 3.0,
+        "3:2": 3.0 / 2.0,
+    }
+    target_ratio = ratio_map.get(ar)
+    if target_ratio is None:
+        try:
+            parts = ar.split(":")
+            if len(parts) == 2:
+                target_ratio = float(parts[0]) / float(parts[1])
+        except Exception:
+            target_ratio = None
+
+    if not target_ratio or target_ratio <= 0:
+        return img
+
+    h, w = img.shape[:2]
+    if h == 0 or w == 0:
+        return img
+    cur_ratio = w / float(h)
+    if abs(cur_ratio - target_ratio) < 0.008:
+        return img
+
+    if cur_ratio > target_ratio:
+        new_w = max(1, int(round(h * target_ratio)))
+        offset_x = max(0, (w - new_w) // 2)
+        return img[:, offset_x:offset_x + new_w]
+    else:
+        new_h = max(1, int(round(w / target_ratio)))
+        offset_y = max(0, (h - new_h) // 2)
+        return img[offset_y:offset_y + new_h, :]
+
+
+def _normalize_long_side(src: str, dst: str, target: int = 0,
+                         aspect_ratio: str = "") -> str:
+    """把长边缩放到 target，支持指定画幅比例居中裁剪，输出 JPEG q95。
 
     这一步对齐了原站的做法（我们逐字节复现过：sharp/libvips 的 lanczos3）。
     统一尺寸有两个好处：模型输入稳定，成本可预测。
@@ -538,6 +588,10 @@ def _normalize_long_side(src: str, dst: str, target: int = 0) -> str:
     img = cv2.imread(src, cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError("无法读取图片: %s" % src)
+
+    if aspect_ratio:
+        img = _crop_aspect_ratio(img, aspect_ratio)
+
     h, w = img.shape[:2]
     long_side = max(h, w)
     if target > 0 and long_side != target:
@@ -562,7 +616,8 @@ def _media_type(path: str) -> str:
 # --------------------------------------------------------------------------- #
 def _run_pipeline(job_id: str, quality: str, style: str,
                   template: Optional[Dict[str, Any]] = None,
-                  text_values: Optional[Dict[str, str]] = None) -> None:
+                  text_values: Optional[Dict[str, str]] = None,
+                  aspect_ratio: str = "") -> None:
     """后台执行：归一化 -> 按 settings.chain 依次尝试 -> 本地兜底
     -> 模板输出尺寸 -> 模板文字排版。
 
@@ -585,9 +640,27 @@ def _run_pipeline(job_id: str, quality: str, style: str,
     provider_used = None
     template = template or {}
     try:
-        # --- 1. 归一化 ---
-        _normalize_long_side(src, norm, target=settings.normalize_long_side())
+        # --- 1. 归一化（包含画幅裁剪）---
+        _normalize_long_side(src, norm, target=settings.normalize_long_side(),
+                             aspect_ratio=aspect_ratio)
         jobs.update(job_id, stage="enhance")
+
+        # 归一化图上传 COS 并生成签名直链：让网关自己来拉，
+        # 服务器→供应商的公网出方向流量归零（同地域内网上传免费）
+        gateway_url = None
+        if settings.cos_ready():
+            try:
+                norm_key = "norms/%s/%s.jpg" % ((job.get("openid") or "anon")[:8],
+                                                job_id)
+                with open(norm, "rb") as fh:
+                    cos_put(settings, norm_key, fh.read())
+                gateway_url = cos_presign(settings, "get", norm_key,
+                                          ttl_seconds=3600)
+                jobs.update(job_id, norm_cos=norm_key)
+                log.info("[%s] URL 直连就绪：%s", job_id, norm_key)
+            except CosError as exc:
+                log.warning("[%s] 归一化图传 COS 失败，回退 multipart: %s",
+                            job_id, exc)
 
         # --- 2. 按链路逐级尝试 ---
         stage = "enhance"
@@ -611,11 +684,13 @@ def _run_pipeline(job_id: str, quality: str, style: str,
             try:
                 if name == "worldcodes":
                     # 网关是提示词驱动的编辑模型，提示词从后台设置现读；
-                    # 模板可覆盖模型（原生 2K/4K）与尺寸参数
+                    # 模板可覆盖模型（原生 2K/4K）与尺寸参数；
+                    # 有 COS 直链时走 URL 直连（网关自己拉图），失败自动回退 multipart
                     client.enhance(norm, tmp, quality=quality, style=style,
                                    prompt=tier_prompt,
                                    size=str(template.get("gateway_size") or ""),
-                                   model=str(template.get("model_override") or ""))
+                                   model=str(template.get("model_override") or ""),
+                                   image_url=gateway_url)
                 else:
                     client.enhance(norm, tmp, quality=quality, style=style)
                 enhanced = True
@@ -676,6 +751,14 @@ def _run_pipeline(job_id: str, quality: str, style: str,
             jobs.update(job_id, status="failed", stage=stage, error=reject)
             log.warning("[%s] 结果被审核拦截: %s", job_id, reject)
             return
+        # 结果图上传 COS（登记时预留的 result_cos 键），用户下载走 COS 直链
+        if job.get("result_cos"):
+            try:
+                with open(out, "rb") as fh:
+                    cos_put(settings, job["result_cos"], fh.read())
+            except CosError as exc:
+                log.warning("[%s] 结果传 COS 失败，退本地直链: %s", job_id, exc)
+                jobs.update(job_id, result_cos=None)
         jobs.update(job_id, status="succeeded", stage="done",
                     provider=provider_used)
         users.audit(job.get("openid", ""), "completed", "job=%s" % job_id)
@@ -1039,18 +1122,21 @@ async def create_rescue_job(
     style: str = Form(""),
     template_id: str = Form(""),
     text_fields: str = Form(""),
+    aspect_ratio: str = Form(""),
 ):
     """提交修图任务（multipart 路径；启用 COS 直传后小程序走 /by-upload）。
 
-    template_id 非空时走模板：引擎/提示词/输出尺寸/文字排版/价格全部以
-    模板为准，quality/style 仅作兜底。立刻返回 job_id，处理在线程池里跑，
-    避免 15~30s 推理撑爆请求超时。
-    前置：登录 -> 维护检查 -> 频控/配额 -> 上传侧内容审核。
+    支持画幅比例 aspect_ratio（1:1, 3:4, 4:3, 9:16, 16:9, original）。
+    用户显式选择的 quality（light/fine）优先；template_id 非空时合并模板提示词/排版。
     """
     user = _rescue_guard(request)
     tpl, tpl_quality, text_values = _resolve_template(template_id, text_fields)
-    quality, style = _validate_quality_style(
-        tpl_quality or quality, style)
+    req_q = (quality or "").strip().lower()
+    if req_q in ("light", "fine"):
+        chosen_q = req_q
+    else:
+        chosen_q = tpl_quality or "fine"
+    quality, style = _validate_quality_style(chosen_q, style)
 
     ext = os.path.splitext(image.filename or "")[1].lower()
     if ext not in ALLOWED_EXT:
@@ -1096,12 +1182,13 @@ async def create_rescue_job(
         raise HTTPException(status_code=400, detail=reject)
 
     return _register_job(user["openid"], quality, style, job_tmp, ext,
-                         template=tpl, text_values=text_values)
+                         template=tpl, text_values=text_values,
+                         aspect_ratio=aspect_ratio)
 
 
 @app.post("/api/rescue/by-upload")
 async def create_rescue_job_by_upload(request: Request):
-    """COS 直传路径：JSON {upload_id, quality, style, template_id, text_fields}，
+    """COS 直传路径：JSON {upload_id, quality, style, template_id, text_fields, aspect_ratio}，
     图片字节不过本服务器。"""
     user = _rescue_guard(request)
     try:
@@ -1110,11 +1197,16 @@ async def create_rescue_job_by_upload(request: Request):
     except (ValueError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=400, detail="请求体不是合法 JSON") from exc
     upload_id = str(body.get("upload_id") or "")
+    aspect_ratio = str(body.get("aspect_ratio") or "")
     tpl, tpl_quality, text_values = _resolve_template(
         str(body.get("template_id") or ""), str(body.get("text_fields") or ""))
+    req_q = str(body.get("quality") or "").strip().lower()
+    if req_q in ("light", "fine"):
+        chosen_q = req_q
+    else:
+        chosen_q = tpl_quality or "fine"
     quality, style = _validate_quality_style(
-        tpl_quality or str(body.get("quality") or "fine"),
-        str(body.get("style") or ""))
+        chosen_q, str(body.get("style") or ""))
 
     with _uploads_lock:
         rec = _uploads.get(upload_id)
@@ -1145,7 +1237,8 @@ async def create_rescue_job_by_upload(request: Request):
         raise HTTPException(status_code=400, detail=reject)
 
     return _register_job(user["openid"], quality, style, job_tmp, ext,
-                         template=tpl, text_values=text_values)
+                         template=tpl, text_values=text_values,
+                         aspect_ratio=aspect_ratio)
 
 
 @app.get("/api/jobs/{job_id}")
@@ -1170,6 +1263,7 @@ def query_job_status(job_id: str) -> Dict[str, Any]:
         "status": job["status"],
         "stage": job.get("stage"),
         "quality": job.get("quality"),
+        "aspect_ratio": job.get("aspect_ratio", ""),
         "template_id": job.get("template_id", ""),
         "template_name": job.get("template_name", ""),
         "price": job.get("price"),

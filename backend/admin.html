@@ -975,6 +975,18 @@ function openTplModal(id) {
       <p style="margin:10px 0 0"><button class="btn-ghost btn-small" onclick="addFieldRow()">＋ 加一个字段</button>
         <span class="muted" style="margin-left:8px">代码叠加中文保证文字正确；默认值支持 {today}；最多 6 个</span></p>
 
+      <div class="modal-section">选图指南<small style="font-weight:400;color:var(--faint);letter-spacing:0">模板详情页展示，清单每行一条</small></div>
+      <div class="field"><label>选图建议（一段话，≤500 字）</label>
+        <textarea id="m-tpl-advice" style="min-height:64px" maxlength="500">${esc(t?.guide?.advice || "")}</textarea></div>
+      <div class="form-grid" style="margin-top:12px">
+        <div class="field"><label>适合这些照片（每行一条）</label>
+          <textarea id="m-tpl-suitable" style="min-height:70px">${esc((t?.guide?.suitable || []).join("\n"))}</textarea></div>
+        <div class="field"><label>不太适合（每行一条）</label>
+          <textarea id="m-tpl-unsuitable" style="min-height:70px">${esc((t?.guide?.unsuitable || []).join("\n"))}</textarea></div>
+      </div>
+      <div class="field" style="margin-top:12px"><label>上传前这样选（每行一条）</label>
+        <textarea id="m-tpl-tips" style="min-height:70px">${esc((t?.guide?.tips || []).join("\n"))}</textarea></div>
+
       <div class="modal-section">封面示例图</div>
       <div class="cover-row">
         <img id="m-cover-preview" class="cover-preview" alt="" src="${t?.cover_url || ""}" ${t?.cover_url ? "" : "hidden"}>
@@ -1025,6 +1037,12 @@ window.saveTpl = async () => {
     gateway_size: $("m-tpl-gsize").value.trim(), model_override: $("m-tpl-model").value.trim(),
     sort: parseInt($("m-tpl-sort").value, 10) || 99, layout: $("m-tpl-layout").value,
     enabled: $("m-tpl-enabled").checked, text_fields: collectFields(),
+    guide: {
+      advice: $("m-tpl-advice").value,
+      suitable: $("m-tpl-suitable").value.split("\n").map((s) => s.trim()).filter(Boolean),
+      unsuitable: $("m-tpl-unsuitable").value.split("\n").map((s) => s.trim()).filter(Boolean),
+      tips: $("m-tpl-tips").value.split("\n").map((s) => s.trim()).filter(Boolean),
+    },
   };
   try {
     let saved;

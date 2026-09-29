@@ -819,3 +819,57 @@
   padding: 4rpx 8rpx;
 }
 
+
+/* 模板文字排版字段 + 版权确认 */
+.tpl-texts {
+  margin-top: 18rpx;
+  padding: 20rpx 22rpx;
+  border: 2rpx dashed var(--paper-border-dark);
+  border-radius: 12rpx;
+  background: var(--paper-card-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
+.tpl-texts-title {
+  font-size: 21rpx;
+  font-weight: 700;
+  color: var(--ink-muted);
+  letter-spacing: 1rpx;
+}
+
+.tpl-text-row {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+
+.tpl-text-label {
+  flex: 0 0 110rpx;
+  font-size: 22rpx;
+  font-weight: 600;
+  color: var(--ink-body);
+}
+
+.tpl-text-input {
+  flex: 1;
+  padding: 14rpx 18rpx;
+  border: 1rpx solid var(--paper-border-dark);
+  border-radius: 8rpx;
+  background: #ffffff;
+  font-size: 24rpx;
+  color: var(--ink-title);
+}
+
+.rights-row {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  margin: 18rpx 4rpx 4rpx;
+}
+
+.rights-text {
+  font-size: 22rpx;
+  color: var(--ink-muted);
+}

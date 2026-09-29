@@ -86,7 +86,10 @@ Page({
 
   onOpenDetail(e) {
     const item = e.currentTarget.dataset.template;
-    this.setData({ selectedItem: item });
+    if (!item) return;
+    wx.navigateTo({
+      url: `/pages/style-detail/style-detail?id=${encodeURIComponent(item.id)}`
+    });
   },
 
   onCloseDetail() {
@@ -96,12 +99,9 @@ Page({
   onApplyTemplate() {
     const tpl = this.data.selectedItem;
     if (!tpl) return;
-
-    app.globalData.selectedTemplate = tpl;
     this.setData({ selectedItem: null });
-
-    wx.switchTab({
-      url: '/pages/index/index'
+    wx.navigateTo({
+      url: `/pages/style-detail/style-detail?id=${encodeURIComponent(tpl.id)}`
     });
   }
 });

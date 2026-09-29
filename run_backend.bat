@@ -1,64 +1,136 @@
 @echo off
-chcp 65001 >nul
-setlocal
+setlocal enabledelayedexpansion
+title ·ÏÆ¬Õü¾ÈËù ¡¤ ºó¶Ë·þÎñ
 cd /d "%~dp0backend"
 
-echo [Photo Rescue Backend]
+REM =================================================================== #
+REM  Ò»¼üÆô¶¯ºó¶Ë£¨·þÎñÆ÷ÉÏË«»÷±¾ÎÄ¼þ¼´¿É£©
+REM
+REM  ×Ô¶¯Íê³É£º´´½¨ÐéÄâ»·¾³ -> ×°ÒÀÀµ -> Éú³É .env -> Æð·þÎñ
+REM  ÄÚÖÃÊØ»¤£º½ø³Ì±ÀÀ£ 3 Ãëºó×Ô¶¯À­Æð£»Á¬Ðø¿ìËÙ±ÀÀ£ 5 ´Î²Å·ÅÆú
+REM  ÈÕÖ¾£º¿ØÖÆÌ¨ÊµÊ±ÏÔÊ¾£¬Í¬Ê±×·¼Óµ½ logs\backend_ÈÕÆÚ.log
+REM
+REM  Í£Ö¹·þÎñ£ºÔËÐÐÍ¬Ä¿Â¼µÄ stop_backend.bat£¨»òÔÚ±¾´°¿Ú°´ Ctrl+C ºó°´ Y£©
+REM  ×¢Òâ£º±¾·þÎñ×´Ì¬ÔÚ½ø³ÌÄÚ´æÀï£¬ÓÀÔ¶²»Òª¸ø uvicorn ¼Ó --workers ¶à½ø³Ì£¡
+REM =================================================================== #
+
+REM ---------- ¿É¸ÄÅäÖÃ ----------
+set "HOST=0.0.0.0"
+set "PORT=8000"
+REM ----------------------------
+
+echo.
+echo  ============================================
+echo   ·ÏÆ¬Õü¾ÈËù - ºó¶Ë·þÎñ (Photo Rescue)
+echo  ============================================
 echo.
 
-REM ä¼˜å…ˆä½¿ç”¨é¡¹ç›®å†…çš„è™šæ‹ŸçŽ¯å¢ƒ
-if exist ".venv\Scripts\python.exe" (
+REM ---------- 1. ÕÒ Python£¨ÓÅÏÈÏîÄ¿ÄÚÐéÄâ»·¾³£© ----------
+set "PY="
+if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
+if not defined PY (
+    py -3 --version >nul 2>nul && set "PY=py -3"
+)
+if not defined PY (
+    python --version >nul 2>nul && set "PY=python"
+)
+if not defined PY (
+    echo  [´íÎó] Ã»ÕÒµ½ Python¡£Çë°²×° Python 3.10+ ²¢¹´Ñ¡ "Add Python to PATH"¡£
+    pause
+    exit /b 1
+)
+
+REM ---------- 2. Ê×´ÎÔËÐÐ£º½¨ÐéÄâ»·¾³ ----------
+if not exist ".venv\Scripts\python.exe" (
+    echo  [³õÊ¼»¯ 1/2] ´´½¨ÐéÄâ»·¾³ .venv ...
+    %PY% -m venv .venv
+    if errorlevel 1 (
+        echo  [´íÎó] ´´½¨ÐéÄâ»·¾³Ê§°Ü£¬ÇëÈ·ÈÏ Python 3.10+ ¿ÉÓÃ¡£
+        pause
+        exit /b 1
+    )
     set "PY=.venv\Scripts\python.exe"
 ) else (
-    set "PY=python"
+    echo  [OK] ÐéÄâ»·¾³ÒÑ¾ÍÐ÷
 )
 
-REM é¦–æ¬¡è¿è¡Œè‡ªåŠ¨è£…ä¾èµ–
-if not exist ".venv\Scripts\python.exe" (
-    if not exist "requirements.txt" goto :skipdeps
-    echo [1/2] åˆ›å»ºè™šæ‹ŸçŽ¯å¢ƒ .venv ...
-    %PY% -m venv .venv
-    if errorlevel 1 goto :novenv
-    set "PY=.venv\Scripts\python.exe"
-    echo [2/2] å®‰è£…ä¾èµ–ï¼ˆé¦–æ¬¡è¾ƒæ…¢ï¼‰...
-    "%PY%" -m pip install --upgrade pip -q
-    "%PY%" -m pip install -r requirements.txt
-    if errorlevel 1 goto :pipfail
+REM ---------- 3. ÒÀÀµÈ±Ê§Ê±×Ô¶¯°²×°£¨»»Ô´ÓÅÏÈ£¬Ê§°Ü»ØÍË¹Ù·½Ô´£© ----------
+.venv\Scripts\python.exe -c "import uvicorn, fastapi, cv2, PIL, requests, multipart" >nul 2>nul
+if errorlevel 1 (
+    echo  [³õÊ¼»¯ 2/2] °²×°ÒÀÀµ£¨Ê×´ÎÔ¼ 1~3 ·ÖÖÓ£¬×ß¹úÄÚ¾µÏñ£©...
+    .venv\Scripts\python.exe -m pip install -q --disable-pip-version-check -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+    if errorlevel 1 .venv\Scripts\python.exe -m pip install -q --disable-pip-version-check -r requirements.txt
+    .venv\Scripts\python.exe -c "import uvicorn, fastapi, cv2, PIL, requests, multipart" >nul 2>nul
+    if errorlevel 1 (
+        echo  [´íÎó] ÒÀÀµ°²×°Ê§°Ü¡£¼ì²éÍøÂçºóÖØÅÜ±¾½Å±¾£¬»òÊÖ¶¯Ö´ÐÐ£º
+        echo      cd backend ^&^& .venv\Scripts\python -m pip install -r requirements.txt
+        pause
+        exit /b 1
+    )
+) else (
+    echo  [OK] ÒÀÀµÒÑ¾ÍÐ÷
 )
-:skipdeps
 
+REM ---------- 4. .env Òýµ¼£¨Ê×ÆôÃÜÂë»á´òÓ¡ÔÚÈÕÖ¾Àï£© ----------
 if not exist ".env" (
     if exist ".env.example" (
-        echo.
-        echo [æç¤º] æœªæ‰¾åˆ° .envï¼Œå·²ä»Ž .env.example å¤åˆ¶ä¸€ä»½ã€‚
-        echo        å¡«å…¥ FAL_KEY åŽé‡æ–°è¿è¡Œå³å¯å¯ç”¨ AI ä¿®å¤ã€‚
         copy /y ".env.example" ".env" >nul
+        echo  [OK] ÒÑÉú³É .env£¨¹ÜÀíºóÌ¨Ê×ÆôÃÜÂë»á´òÓ¡ÔÚÏÂ·½ÈÕÖ¾ÖÐ£©
     )
 )
 
+REM ---------- 5. ÈÕÖ¾Ä¿Â¼ÓëÎÄ¼þÃû ----------
+if not exist logs mkdir logs
+for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd"') do set "DAYSTAMP=%%i"
+set "LOGFILE=logs\backend_!DAYSTAMP!.log"
+
+REM ---------- 6. ¶Ë¿ÚÕ¼ÓÃ¼ì²é ----------
+netstat -ano | findstr /C:":%PORT% " | findstr "LISTENING" >nul 2>nul
+if not errorlevel 1 (
+    echo.
+    echo  [¾¯¸æ] ¶Ë¿Ú %PORT% ÒÑ±»Õ¼ÓÃ ¡ª¡ª ºó¶Ë¿ÉÄÜÒÑ¾­ÔÚÔËÐÐ¡£
+    echo         ÈçÐèÖØÆô£ºÏÈÔËÐÐ stop_backend.bat£¬ÔÙÔËÐÐ±¾½Å±¾¡£
+    echo.
+    pause
+    exit /b 1
+)
+
 echo.
-echo æœåŠ¡åœ°å€: http://127.0.0.1:8000
-echo æŽ¥å£æ–‡æ¡£: http://127.0.0.1:8000/docs
-echo å¥åº·æ£€æŸ¥: http://127.0.0.1:8000/api/health
+echo  ·þÎñµØÖ·   : http://127.0.0.1:%PORT%
+echo  ¹ÜÀíºóÌ¨   : http://127.0.0.1:%PORT%/admin
+echo  ½Ó¿ÚÎÄµµ   : http://127.0.0.1:%PORT%/docs
+echo  ½¡¿µ¼ì²é   : http://127.0.0.1:%PORT%/api/health
+echo  ÈÕÖ¾ÎÄ¼þ   : backend\%LOGFILE%
+echo  Í£Ö¹·½Ê½   : ÔËÐÐ stop_backend.bat£¬»ò±¾´°¿Ú Ctrl+C ºó°´ Y
 echo.
-echo æŒ‰ Ctrl+C åœæ­¢æœåŠ¡ã€‚
+echo  ---------------------------------------------------------------
 echo.
 
-"%PY%" -m uvicorn main:app --host 0.0.0.0 --port 8000
-pause
-exit /b 0
+REM ---------- 7. ÊØ»¤Ñ­»·£º±ÀÀ£×Ô¶¯À­Æð ----------
+set /a CRASHES=0
 
-:novenv
-echo.
-echo [é”™è¯¯] åˆ›å»ºè™šæ‹ŸçŽ¯å¢ƒå¤±è´¥ã€‚è¯·ç¡®è®¤å·²å®‰è£… Python 3.9+ å¹¶åŠ å…¥ PATHã€‚
-pause
-exit /b 1
+:loop
+for /f %%i in ('powershell -NoProfile -Command "[int][double]::Parse((Get-Date -UFormat %%s))"') do set "T0=%%i"
 
-:pipfail
-echo.
-echo [é”™è¯¯] ä¾èµ–å®‰è£…å¤±è´¥ã€‚è¯·æ£€æŸ¥ç½‘ç»œï¼Œæˆ–æ‰‹åŠ¨æ‰§è¡Œï¼š
-echo     cd backend
-echo     python -m venv .venv
-echo     .venv\Scripts\python -m pip install -r requirements.txt
-pause
-exit /b 1
+REM ¿ØÖÆÌ¨ÊµÊ±ÏÔÊ¾ + ÒÔ UTF-8 ×·¼ÓÐ´ÈëÈÕÖ¾£¨grep/tail ¿ÉÖ±½ÓÓÃ£©
+"%PY%" -m uvicorn main:app --host %HOST% --port %PORT% 2>&1 | "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "$input | ForEach-Object { Add-Content -Path '%LOGFILE%' -Value $_ -Encoding UTF8; $_ }"
+
+for /f %%i in ('powershell -NoProfile -Command "[int][double]::Parse((Get-Date -UFormat %%s))"') do set "T1=%%i"
+set /a ELAPSED=T1-T0
+
+if !ELAPSED! GEQ 60 set /a CRASHES=0
+set /a CRASHES+=1
+
+if !CRASHES! GEQ 5 (
+    echo.
+    echo  [·ÅÆú] ·þÎñÁ¬Ðø¿ìËÙ±ÀÀ£ !CRASHES! ´Î£¬Í£Ö¹À­Æð¡£
+    echo         Çë²é¿´ %LOGFILE% Ä©Î²µÄ´íÎóÐÅÏ¢¡£
+    echo.
+    pause
+    exit /b 1
+)
+
+echo  [%date% %time%] ºó¶Ë½ø³ÌÍË³ö£¨ÒÑÔËÐÐ !ELAPSED! Ãë£©£¬3 Ãëºó×Ô¶¯ÖØÆô£¨Á¬ÐøµÚ !CRASHES! ´Î£©...
+powershell -NoProfile -Command "Add-Content -Path '%LOGFILE%' -Value ('backend exited after !ELAPSED!s, restarting (attempt !CRASHES!/5) at ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8"
+ping -n 4 127.0.0.1 >nul
+goto loop

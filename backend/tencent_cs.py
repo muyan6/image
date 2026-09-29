@@ -25,9 +25,9 @@ from settings_store import SettingsStore
 
 log = logging.getLogger("rescue.moderation")
 
-_HOST = "cms.tencentcloudapi.com"
-_SERVICE = "cms"
-_VERSION = "2019-03-21"
+_HOST = "ims.tencentcloudapi.com"
+_SERVICE = "ims"
+_VERSION = "2020-12-29"
 _ACTION = "ImageModeration"
 _ENDPOINT = "https://" + _HOST
 # 一次调用的同步等待上限；内容审核正常 1~2 秒
@@ -44,7 +44,8 @@ class ModerationError(RuntimeError):
         self.code = code
 
 
-def _tc3_headers(conf: Dict[str, str], payload_json: str) -> Dict[str, str]:
+def _tc3_headers(conf: Dict[str, str], payload_json: str,
+                 region: Optional[str] = None) -> Dict[str, str]:
     """按腾讯云 TC3-HMAC-SHA256 规范生成签名请求头。"""
     secret_id = conf["secret_id"]
     secret_key = conf["secret_key"]
@@ -80,7 +81,7 @@ def _tc3_headers(conf: Dict[str, str], payload_json: str) -> Dict[str, str]:
         "TC3-HMAC-SHA256 Credential=%s/%s/%s/tc3_request, "
         "SignedHeaders=content-type;host;x-tc-action, Signature=%s"
         % (secret_id, date, _SERVICE, signature))
-    return {
+    headers = {
         "Authorization": authorization,
         "Content-Type": "application/json; charset=utf-8",
         "Host": _HOST,
@@ -88,6 +89,10 @@ def _tc3_headers(conf: Dict[str, str], payload_json: str) -> Dict[str, str]:
         "X-TC-Version": _VERSION,
         "X-TC-Timestamp": str(ts),
     }
+    if region:
+        # X-TC-Region 不参与签名，直接作为普通头发送
+        headers["X-TC-Region"] = region
+    return headers
 
 
 def moderate_image_bytes(image_bytes: bytes,
@@ -105,10 +110,10 @@ def moderate_image_bytes(image_bytes: bytes,
         image_bytes = _squeeze(image_bytes)
 
     payload = json.dumps({
-        "ImageBase64": base64.b64encode(image_bytes).decode("ascii"),
-        "Categories": ["Porn", "Pol", "Terror"],
+        "FileContent": base64.b64encode(image_bytes).decode("ascii"),
     }, ensure_ascii=False)
-    headers = _tc3_headers(conf, payload)
+    region = (conf.get("cos_region") or "").strip() or "ap-guangzhou"
+    headers = _tc3_headers(conf, payload, region=region)
 
     last_error: Optional[ModerationError] = None
     for attempt in range(_MAX_ATTEMPTS):

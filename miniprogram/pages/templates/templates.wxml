@@ -77,7 +77,7 @@
   <view wx:if="{{ selectedItem }}" class="modal-backdrop" bindtap="onCloseDetail">
     <view class="modal-card gallery-card detail-modal" catchtap="true">
       <view class="washi-tape"></view>
-      
+
       <view class="detail-header">
         <view class="detail-tags">
           <text class="detail-group-pill">{{ selectedItem.group_name || '风格工坊' }}</text>
@@ -86,37 +86,94 @@
         <text class="modal-close" bindtap="onCloseDetail">✕</text>
       </view>
 
-      <view class="detail-cover-stage">
-        <image
-          class="detail-stage-img"
-          src="{{ selectedItem.coverUrl || '/images/logo.jpg' }}"
-          mode="aspectFill"
-        ></image>
-      </view>
-
-      <view class="detail-body">
-        <text class="detail-title">{{ selectedItem.name }}</text>
-        <text class="detail-subtitle">{{ selectedItem.subtitle }}</text>
-
-        <view class="detail-info-card">
-          <view class="info-metric">
-            <text class="metric-label">重构模式</text>
-            <text class="metric-value">{{ selectedItem.engine === 'fine' ? '深度纹理超分' : '光影结构重绘' }}</text>
+      <scroll-view class="detail-scroll" scroll-y>
+        <view class="detail-cover-stage">
+          <image
+            class="detail-stage-img"
+            src="{{ selectedItem.coverUrl || '/images/logo.jpg' }}"
+            mode="aspectFill"
+          ></image>
+          <view class="stage-price-badge" wx:if="{{ selectedItem.price > 0 }}">
+            <text>{{ selectedItem.price }} 算力</text>
           </view>
-          <view class="info-metric">
-            <text class="metric-label">消耗算力</text>
-            <text class="metric-value metric-gold">{{ selectedItem.price > 0 ? (selectedItem.price + ' 点算力') : '免费体验' }}</text>
-          </view>
-          <view class="info-metric">
-            <text class="metric-label">排版特性</text>
-            <text class="metric-value">{{ selectedItem.layout ? '支持日签排版' : '原画全幅装裱' }}</text>
+          <view class="stage-price-badge stage-price-free" wx:else>
+            <text>按档位计费</text>
           </view>
         </view>
 
-        <button class="btn-ink apply-btn" bindtap="onApplyTemplate">
-          选用此风格，开始创作 →
-        </button>
-      </view>
+        <view class="detail-body">
+          <text class="detail-title">{{ selectedItem.name }}</text>
+          <text class="detail-subtitle">{{ selectedItem.subtitle }}</text>
+
+          <view class="detail-info-card">
+            <view class="info-metric">
+              <text class="metric-label">重构模式</text>
+              <text class="metric-value">{{ selectedItem.engine === 'fine' ? '深度纹理超分' : '光影结构重绘' }}</text>
+            </view>
+            <view class="info-metric">
+              <text class="metric-label">消耗算力</text>
+              <text class="metric-value metric-gold">{{ selectedItem.price > 0 ? (selectedItem.price + ' 点算力') : '按档位默认价' }}</text>
+            </view>
+            <view class="info-metric">
+              <text class="metric-label">排版特性</text>
+              <text class="metric-value">{{ selectedItem.layout ? '支持日签排版' : '原画全幅装裱' }}</text>
+            </view>
+          </view>
+
+          <!-- 选图指南（后台可编辑） -->
+          <block wx:if="{{ selectedItem.guide && (selectedItem.guide.advice || selectedItem.guide.suitable.length || selectedItem.guide.unsuitable.length || selectedItem.guide.tips.length) }}">
+            <view wx:if="{{ selectedItem.guide.advice }}" class="guide-advice-block">
+              <text class="guide-advice-tag">选图建议</text>
+              <text class="guide-advice-text">{{ selectedItem.guide.advice }}</text>
+            </view>
+
+            <view wx:if="{{ selectedItem.guide.suitable.length }}" class="guide-card">
+              <view class="guide-card-head">
+                <text class="guide-dot guide-dot-good">●</text>
+                <text class="guide-card-title">适合这些照片</text>
+              </view>
+              <view wx:for="{{ selectedItem.guide.suitable }}" wx:key="*this" class="guide-li">
+                <text class="guide-num guide-num-good">{{ index + 1 }}</text>
+                <text class="guide-li-text">{{ item }}</text>
+              </view>
+            </view>
+
+            <view wx:if="{{ selectedItem.guide.unsuitable.length }}" class="guide-card">
+              <view class="guide-card-head">
+                <text class="guide-dot guide-dot-bad">—</text>
+                <view>
+                  <text class="guide-card-title">不太适合</text>
+                  <text class="guide-card-sub">建议换一张照片或选择其他风格</text>
+                </view>
+              </view>
+              <view wx:for="{{ selectedItem.guide.unsuitable }}" wx:key="*this" class="guide-li">
+                <text class="guide-num guide-num-gray">{{ index + 1 }}</text>
+                <text class="guide-li-text">{{ item }}</text>
+              </view>
+            </view>
+
+            <view wx:if="{{ selectedItem.guide.tips.length }}" class="guide-card">
+              <view class="guide-card-head">
+                <text class="guide-dot guide-dot-info">i</text>
+                <view>
+                  <text class="guide-card-title">上传前这样选</text>
+                  <text class="guide-card-sub">简单检查一下原图</text>
+                </view>
+              </view>
+              <view wx:for="{{ selectedItem.guide.tips }}" wx:key="*this" class="guide-li">
+                <text class="guide-num guide-num-gray">{{ index + 1 }}</text>
+                <text class="guide-li-text">{{ item }}</text>
+              </view>
+            </view>
+
+            <text class="guide-fineprint">合适的原图能明显提高生成稳定性，但 AI 作品仍会保留一定随机变化。</text>
+          </block>
+
+          <button class="btn-ink apply-btn" bindtap="onApplyTemplate">
+            选用此风格，开始创作 →
+          </button>
+        </view>
+      </scroll-view>
     </view>
   </view>
 </view>

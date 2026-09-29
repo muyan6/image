@@ -1,0 +1,282 @@
+page {
+  background-color: #f7f7f8;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: #1a1a1a;
+  box-sizing: border-box;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  box-sizing: border-box;
+}
+
+.scroll-content {
+  flex: 1;
+  padding: 24rpx 28rpx;
+  box-sizing: border-box;
+}
+
+/* 顶部风格封面卡片 */
+.banner-card {
+  position: relative;
+  width: 100%;
+  height: 240rpx;
+  border-radius: 28rpx;
+  overflow: hidden;
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.08);
+  margin-bottom: 32rpx;
+}
+
+.banner-bg {
+  width: 100%;
+  height: 100%;
+  filter: brightness(0.88);
+}
+
+.banner-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.15) 0%, rgba(0, 0, 0, 0.72) 100%);
+}
+
+.banner-content {
+  position: absolute;
+  left: 32rpx;
+  bottom: 28rpx;
+  right: 32rpx;
+  display: flex;
+  flex-direction: column;
+}
+
+.banner-title {
+  font-size: 42rpx;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 1rpx;
+  line-height: 1.25;
+  text-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.4);
+}
+
+.banner-sub {
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, 0.88);
+  margin-top: 8rpx;
+  line-height: 1.35;
+  letter-spacing: 0.5rpx;
+}
+
+/* 选图建议导语区 */
+.advice-block {
+  padding: 0 4rpx;
+  margin-bottom: 32rpx;
+}
+
+.advice-tag-row {
+  margin-bottom: 12rpx;
+}
+
+.advice-tag {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #942a27;
+  letter-spacing: 1rpx;
+}
+
+.advice-body {
+  font-size: 32rpx;
+  line-height: 1.6;
+  font-weight: 600;
+  color: #1f1f22;
+  letter-spacing: 0.6rpx;
+  text-align: justify;
+}
+
+/* 白色功能卡片 (适合这些照片) */
+.feature-card {
+  background-color: #ffffff;
+  border-radius: 28rpx;
+  padding: 32rpx 28rpx;
+  box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.04);
+  margin-bottom: 24rpx;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  padding-bottom: 24rpx;
+  border-bottom: 1rpx solid #f0f0f2;
+}
+
+.check-icon {
+  width: 52rpx;
+  height: 52rpx;
+  border-radius: 14rpx;
+  background-color: #1a1a1c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 20rpx;
+  flex-shrink: 0;
+}
+
+.check-symbol {
+  color: #ffffff;
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.dash-icon {
+  width: 52rpx;
+  height: 52rpx;
+  border-radius: 14rpx;
+  background-color: #8c8c92;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 20rpx;
+  flex-shrink: 0;
+}
+
+.dash-symbol {
+  color: #ffffff;
+  font-size: 28rpx;
+  font-weight: 700;
+}
+
+.card-title-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.card-title {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #1a1a1c;
+  line-height: 1.3;
+}
+
+.card-subtitle {
+  font-size: 22rpx;
+  color: #8a8a92;
+  margin-top: 4rpx;
+}
+
+/* 列表条目 */
+.list-body {
+  padding-top: 8rpx;
+}
+
+.list-item {
+  display: flex;
+  align-items: center;
+  padding: 22rpx 0;
+  border-bottom: 1rpx solid #f6f6f8;
+}
+
+.list-item:last-child {
+  border-bottom: none;
+  padding-bottom: 6rpx;
+}
+
+.badge-num {
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22rpx;
+  font-weight: 700;
+  color: #ffffff;
+  margin-right: 22rpx;
+  flex-shrink: 0;
+}
+
+.badge-red {
+  background-color: #942a27;
+}
+
+.badge-gray {
+  background-color: #8a8a92;
+}
+
+.item-text {
+  font-size: 28rpx;
+  color: #222226;
+  font-weight: 500;
+  line-height: 1.45;
+  flex: 1;
+}
+
+.item-text-gray {
+  color: #55555c;
+}
+
+/* 底部防遮挡垫片 */
+.bottom-spacer {
+  height: 180rpx;
+  width: 100%;
+}
+
+/* 底部吸底操作栏 (截图1) */
+.fixed-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ffffff;
+  border-top: 1rpx solid #eaeaea;
+  padding: 20rpx 32rpx calc(20rpx + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 -4rpx 16rpx rgba(0, 0, 0, 0.03);
+  z-index: 100;
+}
+
+.bar-info {
+  display: flex;
+  flex-direction: column;
+  max-width: 52%;
+}
+
+.bar-title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #1a1a1c;
+  line-height: 1.3;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bar-hint {
+  font-size: 20rpx;
+  color: #92929a;
+  margin-top: 4rpx;
+  line-height: 1.35;
+}
+
+.btn-create {
+  background-color: #161618;
+  color: #ffffff;
+  font-size: 30rpx;
+  font-weight: 600;
+  border-radius: 46rpx;
+  padding: 0 46rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+  margin: 0;
+  box-shadow: 0 6rpx 18rpx rgba(0, 0, 0, 0.16);
+  transition: opacity 0.2s;
+}
+
+.btn-create:active {
+  opacity: 0.88;
+}

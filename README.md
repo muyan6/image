@@ -19,19 +19,31 @@
 
 ### 1. 后端
 
-```bat
-run_backend.bat
-```
+服务器上**双击 `run_backend.bat`** 即可，无需任何手动步骤。脚本会自动：
 
-首次运行会自动：创建 `.venv` → 安装依赖 → 复制 `.env.example` 为 `.env`
-→ 生成随机管理密码写回 `.env` 并打印在日志里。
+1. 找 Python（优先项目内 `.venv`，没有就 `py -3` / `python`）；
+2. 首次运行：创建虚拟环境 → 装依赖（国内镜像优先、官方源兜底）→ 复制 `.env.example` 为 `.env`；
+3. 起服务（`0.0.0.0:8000`），**内置守护：进程崩溃 3 秒后自动拉起**，
+   连续快速崩溃 5 次才放弃并提示查日志；
+4. 日志同时写到 `backend/logs/backend_日期.log`（UTF-8，可直接 grep/tail）。
+
+停止服务：**双击 `stop_backend.bat`**（先结束守护窗口再释放端口，防止自动拉起），
+或命令行 `stop_backend.bat 8000`；也可在启动窗口按 Ctrl+C 后按 Y。
+
+端口/地址在 `run_backend.bat` 顶部的 `HOST` / `PORT` 两个变量里改。
+
+> 开机自启（可选）：`schtasks /create /tn PhotoRescue /tr "F:\Project\image\run_backend.bat" /sc onstart /ru SYSTEM`
+> 需要管理员权限运行一次；删除用 `/delete /tn PhotoRescue /f`。
 
 启动后：
 
 - 服务地址 <http://127.0.0.1:8000>
-- **管理后台 <http://127.0.0.1:8000/admin>**（密码 = `.env` 的 `ADMIN_PASSWORD`）
+- **管理后台 <http://127.0.0.1:8000/admin>**（密码 = `.env` 的 `ADMIN_PASSWORD`，首次启动自动生成并打印在日志里）
 - 接口文档 <http://127.0.0.1:8000/docs>
 - 健康检查 <http://127.0.0.1:8000/api/health>
+
+> 注意：任务状态在进程内存里，**不要**给 uvicorn 加 `--workers` 多进程，
+> 多实例部署前先看「已知限制」。
 
 ### 2. 配置密钥（在网页后台做）
 
@@ -44,6 +56,39 @@ run_backend.bat
 2. 目录选 `miniprogram/`
 3. AppID 选「测试号」
 4. 真机调试时把 `miniprogram/app.js` 里的 `apiBase` 改成局域网 IP 或已备案域名 —— `127.0.0.1` 在手机上指向手机自己
+
+### 4. 云服务器部署（Linux + Gitee）
+
+本仓库的部署形态：Windows 侧只做开发（用上面的 `.bat`），**Linux 云服务器上用 shell 脚本**。
+
+**首次部署（在服务器上跑一次）：**
+
+```bash
+git clone <你的Gitee仓库地址> photo-rescue && cd photo-rescue
+bash deploy/install-service.sh        # 注册 systemd：开机自启 + 崩溃 3 秒自动拉起
+chmod +x .update                      # 首次给更新脚本执行权限（只需一次）
+```
+
+脚本会自动创建 venv、装依赖（清华源）、补 OpenCV 需要的系统库（libGL）、
+写入 systemd 服务并启动。看日志：`journalctl -u photo-rescue -f`。
+
+**以后每次更新（拉取 Gitee 最新代码）：**
+
+```bash
+./.update
+```
+
+一条命令自动完成：`git pull` → requirements 有变化才重装依赖 → 重启服务
+（优先 systemd，未注册时自动退回 `start.sh`/`stop.sh`）→ 健康检查，
+失败会直接打印最近 30 行日志。没有新提交时秒级结束，不会瞎重启。
+
+说明：
+
+- 运行数据（`backend/data/`、`.env`、`uploads/`、`logs/`）都在 `.gitignore` 里，
+  服务器上 `git pull` 不会和运行状态冲突；换服务器时这些文件手动迁移；
+- 云服务器安全组需放行后端端口；小程序正式上线需要 **ICP 备案域名 + nginx 反代**（见「已知限制」）；
+- 无 systemd 的环境（如容器）直接用 `bash start.sh [端口]` / `bash stop.sh [端口]`，
+  但没有崩溃自动拉起，建议尽量走 systemd。
 
 ---
 
