@@ -7,6 +7,7 @@ Page({
     template: null,
     suitableList: [],
     unsuitableList: [],
+    bannerIndex: 0,
     loading: true
   },
 
@@ -27,8 +28,16 @@ Page({
         }
 
         if (tpl) {
-          const coverUrl = tpl.cover ? api.absolute(tpl.cover) : '/images/logo.jpg';
-          const fullTpl = Object.assign({}, tpl, { coverUrl: coverUrl });
+          const rawCovers = (Array.isArray(tpl.covers) && tpl.covers.length > 0)
+            ? tpl.covers
+            : (tpl.cover ? [tpl.cover] : []);
+          const coverUrls = rawCovers.map((c) => api.absolute(c)).filter(Boolean);
+          if (coverUrls.length === 0) coverUrls.push('/images/logo.jpg');
+
+          const fullTpl = Object.assign({}, tpl, {
+            covers: coverUrls,
+            coverUrl: coverUrls[0]
+          });
 
           const guide = tpl.guide || {};
           let suitable = (guide.suitable && guide.suitable.length > 0)
@@ -84,6 +93,20 @@ Page({
         if (err && err.errMsg && err.errMsg.indexOf('cancel') >= 0) return;
         wx.showToast({ title: '选择照片失败', icon: 'none' });
       }
+    });
+  },
+
+  onBannerSwiperChange(e) {
+    this.setData({ bannerIndex: e.detail.current });
+  },
+
+  onPreviewCover(e) {
+    const current = e.currentTarget.dataset.url;
+    const covers = (this.data.template && this.data.template.covers) || [];
+    if (!covers.length) return;
+    wx.previewImage({
+      current: current || covers[0],
+      urls: covers
     });
   }
 });

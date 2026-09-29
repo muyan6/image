@@ -69,10 +69,11 @@ def _seed_templates() -> List[Dict[str, Any]]:
             output_size: int = 0, gateway_size: str = "",
             model_override: str = "", layout: str = "",
             text_fields: Optional[List[Dict[str, Any]]] = None,
-            guide: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+            guide: Optional[Dict[str, Any]] = None,
+            covers: Optional[List[str]] = None) -> Dict[str, Any]:
         return {
             "id": tid, "group_id": group, "name": name, "subtitle": subtitle,
-            "cover": "", "prompt": prompt, "engine": engine, "price": price,
+            "cover": "", "covers": list(covers or []), "prompt": prompt, "engine": engine, "price": price,
             "output_size": output_size, "gateway_size": gateway_size,
             "model_override": model_override, "layout": layout,
             "text_fields": text_fields or [],
@@ -347,6 +348,9 @@ def _validate(doc: Dict[str, Any]) -> None:
             raise ValueError("模板 %s gateway_size 格式应为 宽x高，如 2048x2048" % tid)
         if len(str(t.get("model_override", ""))) > 80:
             raise ValueError("模板 %s model_override 不超过 80 字" % tid)
+        covers = t.get("covers")
+        if covers is not None and (not isinstance(covers, list) or len(covers) > 3):
+            raise ValueError("模板 %s 的 covers 必须是不超过 3 项的列表" % tid)
         layout = str(t.get("layout", "") or "")
         if layout and layout not in TEXT_LAYOUTS:
             raise ValueError("模板 %s layout 只能是 %s" % (tid, "/".join(TEXT_LAYOUTS)))
@@ -613,6 +617,12 @@ class TemplateStore:
                         candidate[key] = _as_int(patch[key], candidate.get(key, 0))
                 if "enabled" in patch:
                     candidate["enabled"] = bool(patch["enabled"])
+                if "covers" in patch:
+                    raw_c = patch["covers"]
+                    if isinstance(raw_c, list):
+                        cleaned_c = [str(x).strip() for x in raw_c if str(x).strip()][:3]
+                        candidate["covers"] = cleaned_c
+                        candidate["cover"] = cleaned_c[0] if cleaned_c else ""
                 if "text_fields" in patch:
                     candidate["text_fields"] = _norm_text_fields(patch["text_fields"])
                 if "guide" in patch:
@@ -645,12 +655,45 @@ class TemplateStore:
                     return
 
     def set_cover(self, tpl_id: str, cover: str) -> Dict[str, Any]:
-        """封面上传后回写引用与版本号（版本号用于 CDN 缓存刷新）。"""
+        """兼容老接口：默认写第 0 槽位。"""
+        return self.set_cover_slot(tpl_id, 0, cover)
+
+    def set_cover_slot(self, tpl_id: str, slot: int, cover: str) -> Dict[str, Any]:
+        """设置模板的第 slot 张示例图（slot 为 0, 1, 2）。"""
+        slot = max(0, min(int(slot), 2))
         with self._lock:
             for t in self._templates:
                 if t["id"] == tpl_id:
-                    t["cover"] = cover
-                    t["cover_v"] = int(t.get("cover_v", 0)) + 1
+                    covers = list(t.get("covers") or [])
+                    if not covers and t.get("cover"):
+                        covers = [t["cover"]]
+                    while len(covers) <= slot:
+                        covers.append("")
+                    covers[slot] = cover
+                    while covers and not covers[-1]:
+                        covers.pop()
+                    t["covers"] = covers[:3]
+                    t["cover"] = covers[0] if covers else ""
+                    t["cover_v"] = int(t.get("cover_v", 0) or 0) + 1
+                    t["updated_at"] = time.time()
+                    self._save_locked()
+                    return copy.deepcopy(t)
+        raise KeyError("模板不存在")
+
+    def delete_cover_slot(self, tpl_id: str, slot: int) -> Dict[str, Any]:
+        """删除模板的第 slot 张示例图（slot 为 0, 1, 2）。"""
+        slot = max(0, min(int(slot), 2))
+        with self._lock:
+            for t in self._templates:
+                if t["id"] == tpl_id:
+                    covers = list(t.get("covers") or [])
+                    if not covers and t.get("cover"):
+                        covers = [t["cover"]]
+                    if slot < len(covers):
+                        covers.pop(slot)
+                    t["covers"] = covers
+                    t["cover"] = covers[0] if covers else ""
+                    t["cover_v"] = int(t.get("cover_v", 0) or 0) + 1
                     t["updated_at"] = time.time()
                     self._save_locked()
                     return copy.deepcopy(t)
@@ -659,17 +702,20 @@ class TemplateStore:
     # ------------------------------------------------------------------ #
     # 公开接口的精简投影：提示词不下发（那是调教出来的东西）
     def public_templates(self, settings) -> List[Dict[str, Any]]:
-        """给小程序的模板列表：解析封面 URL，附带分组名。"""
+        """给小程序的模板列表：解析封面与多张示例图 URL，附带分组名。"""
         group_names = {g["id"]: g["name"] for g in self.list_groups(enabled_only=True)}
         out = []
         for t in self.list_templates(enabled_only=True):
+            resolved_list = resolve_covers(t, settings)
+            main_cover = resolved_list[0] if resolved_list else resolve_cover(t, settings)
             out.append({
                 "id": t["id"],
                 "group_id": t["group_id"],
                 "group_name": group_names.get(t["group_id"], ""),
                 "name": t["name"],
                 "subtitle": t.get("subtitle", ""),
-                "cover": resolve_cover(t, settings),
+                "cover": main_cover,
+                "covers": resolved_list,
                 "engine": t["engine"],
                 "price": int(t.get("price", 0)),
                 "layout": t.get("layout", ""),
@@ -790,17 +836,15 @@ def generate_placeholder_cover(name: str, subtitle: str, group: str) -> bytes:
     return buf.getvalue()
 
 
-def resolve_cover(t: Dict[str, Any], settings) -> str:
-    """把 cover 引用解析成可访问 URL。
-
-    - http(s) 开头：外链/CDN，原样返回；
-    - cos: 前缀：现场预签名（纯 HMAC 计算，零网络请求，2 小时有效），
-      对象键自带版本号（covers/{id}_v{n}.jpg），图片流量走 COS/CDN；
-    - local: 前缀：后端 /api/covers/ 本地服务（开发期用），?v= 刷缓存；
-    - 空：检查本地是否有 {id}_v1.jpg，若有直接返回本地 URL；
-    """
-    cover = str(t.get("cover") or "").strip()
-    version = t.get("cover_v", 0)
+def resolve_cover_ref(cover: str, version: int, settings, tid: str = "") -> str:
+    """把单个 cover 引用解析成可访问 URL。"""
+    cover = str(cover or "").strip()
+    if not cover:
+        if tid:
+            v1_name = "%s_v1.jpg" % tid
+            if os.path.isfile(os.path.join(_covers_dir(), v1_name)):
+                return "/api/covers/%s?v=1" % v1_name
+        return ""
     if cover.startswith(("http://", "https://")):
         return cover
     if cover.startswith("cos:"):
@@ -815,14 +859,32 @@ def resolve_cover(t: Dict[str, Any], settings) -> str:
             return ""
     if cover.startswith("local:"):
         return "/api/covers/%s?v=%d" % (os.path.basename(cover[6:]), version)
-    
-    # 若 cover 为空但本地已有同名占位图，自动补充返回
-    tid = t.get("id", "")
-    if tid:
-        v1_name = "%s_v1.jpg" % tid
-        if os.path.isfile(os.path.join(_covers_dir(), v1_name)):
-            return "/api/covers/%s?v=1" % v1_name
     return cover
+
+
+def resolve_cover(t: Dict[str, Any], settings) -> str:
+    """解析模板主封面地址。"""
+    raw_covers = t.get("covers")
+    version = int(t.get("cover_v", 0) or 0)
+    tid = t.get("id", "")
+    if isinstance(raw_covers, list) and raw_covers:
+        first = raw_covers[0]
+        if first:
+            return resolve_cover_ref(first, version, settings, tid)
+    return resolve_cover_ref(t.get("cover", ""), version, settings, tid)
+
+
+def resolve_covers(t: Dict[str, Any], settings) -> List[str]:
+    """解析模板的示例图列表（至多 3 张有效地址）。"""
+    raw_covers = t.get("covers")
+    version = int(t.get("cover_v", 0) or 0)
+    tid = t.get("id", "")
+    if isinstance(raw_covers, list) and raw_covers:
+        res = [resolve_cover_ref(c, version, settings, tid) for c in raw_covers if str(c or "").strip()]
+        if res:
+            return res
+    c = resolve_cover(t, settings)
+    return [c] if c else []
 
 
 _COVERS_DIR_CACHE: Dict[str, str] = {}

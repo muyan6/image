@@ -56,8 +56,13 @@ Page({
   _renderData(groups, rawItems) {
     const items = rawItems.map((item) => {
       const cost = item.price > 0 ? ('✦ ' + item.price + ' 光子') : (item.engine === 'fine' ? '✦ 3 光子' : '✦ 1 光子');
+      const rawCovers = Array.isArray(item.covers) && item.covers.length > 0
+        ? item.covers
+        : (item.cover ? [item.cover] : []);
+      const coverUrls = rawCovers.map((c) => api.absolute(c)).filter(Boolean);
       return Object.assign({}, item, {
-        coverUrl: item.cover ? api.absolute(item.cover) : '/images/logo.jpg',
+        covers: coverUrls,
+        coverUrl: coverUrls[0] || (item.cover ? api.absolute(item.cover) : '/images/logo.jpg'),
         costText: cost
       });
     });
@@ -118,6 +123,16 @@ Page({
     this.setData({ selectedItem: null });
     wx.navigateTo({
       url: `/pages/style-detail/style-detail?id=${encodeURIComponent(tpl.id)}`
+    });
+  },
+
+  onPreviewCovers(e) {
+    const current = e.currentTarget.dataset.url;
+    const covers = (this.data.selectedItem && this.data.selectedItem.covers) || [];
+    if (!covers.length) return;
+    wx.previewImage({
+      current: current || covers[0],
+      urls: covers
     });
   }
 });

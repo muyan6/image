@@ -135,6 +135,19 @@
   border-radius: 2rpx;
 }
 
+.card-multi-badge {
+  position: absolute;
+  top: 12rpx;
+  left: 12rpx;
+  background: rgba(26, 25, 23, 0.72);
+  color: #f7f4ed;
+  font-size: 18rpx;
+  font-weight: 500;
+  padding: 4rpx 10rpx;
+  border-radius: 2rpx;
+  backdrop-filter: blur(4px);
+}
+
 .card-content {
   padding: 20rpx 18rpx;
   display: flex;
@@ -316,6 +329,11 @@
   border: 1rpx solid var(--paper-border);
   overflow: hidden;
   margin-bottom: 24rpx;
+}
+
+.detail-stage-swiper {
+  width: 100%;
+  height: 100%;
 }
 
 .detail-stage-img {

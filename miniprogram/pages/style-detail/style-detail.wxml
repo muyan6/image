@@ -1,16 +1,44 @@
 <view class="container">
   <scroll-view class="scroll-content" scroll-y enable-flex>
-    <!-- 顶部风格封面卡片 -->
+    <!-- 顶部风格封面卡片（支持多张示例图轮播与大图预览） -->
     <view class="banner-card">
+      <swiper
+        wx:if="{{ template.covers && template.covers.length > 1 }}"
+        class="banner-swiper"
+        circular
+        indicator-dots
+        indicator-color="rgba(255,255,255,0.4)"
+        indicator-active-color="#ffffff"
+        bindchange="onBannerSwiperChange"
+      >
+        <swiper-item wx:for="{{ template.covers }}" wx:key="*this">
+          <image
+            class="banner-bg"
+            src="{{ item }}"
+            mode="aspectFill"
+            bindtap="onPreviewCover"
+            data-url="{{ item }}"
+          ></image>
+        </swiper-item>
+      </swiper>
       <image
+        wx:else
         class="banner-bg"
         src="{{ template.coverUrl || '/images/logo.jpg' }}"
         mode="aspectFill"
+        bindtap="onPreviewCover"
+        data-url="{{ template.coverUrl }}"
       ></image>
       <view class="banner-overlay"></view>
       <view class="banner-content">
         <text class="banner-title">{{ template.name || '风格重绘' }}</text>
         <text class="banner-sub">{{ template.subtitle || '把真人照片重绘成流行艺术肖像' }}</text>
+      </view>
+      <view class="banner-hint-badge" wx:if="{{ template.covers && template.covers.length > 1 }}">
+        <text>{{ (bannerIndex + 1) }}/{{ template.covers.length }} 滑动看效果 · 点击放大</text>
+      </view>
+      <view class="banner-hint-badge" wx:else bindtap="onPreviewCover" data-url="{{ template.coverUrl }}">
+        <text>点击查看大图</text>
       </view>
     </view>
 

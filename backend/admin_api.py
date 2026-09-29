@@ -21,10 +21,10 @@ import threading
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile
 
 from settings_store import SettingsStore, AnnouncementStore
-from templates_store import covers_dir, resolve_cover
+from templates_store import covers_dir, resolve_cover, resolve_covers
 
 # 需要打码的密钥字段: (节路径) -> 字段列表
 _MASK_SCHEMA = {
@@ -426,9 +426,10 @@ def make_admin_router(*, settings: SettingsStore,
     def list_templates(request: Request) -> Dict[str, Any]:
         _guard(request)
         items = templates.list_templates()
-        # 附带解析后的封面 URL，后台预览用（cos: -> 预签名, local: -> 本地路径）
+        # 附带解析后的封面与 3 张示例图 URL，后台预览用
         for t in items:
             t["cover_url"] = resolve_cover(t, settings)
+            t["covers_urls"] = resolve_covers(t, settings)
         return {"items": items}
 
     @router.post("/templates")
@@ -457,9 +458,11 @@ def make_admin_router(*, settings: SettingsStore,
         return {"ok": True}
 
     @router.post("/templates/{tpl_id}/cover")
+    @router.post("/templates/{tpl_id}/covers")
     def upload_template_cover(tpl_id: str, request: Request,
+                              slot: int = Query(0),
                               file: UploadFile = File(...)) -> Dict[str, Any]:
-        """上传模板封面：压到长边 720 的 JPEG。
+        """上传模板示例图（支持 3 张，slot=0, 1, 2）。压到长边 720 的 JPEG。
 
         配了 COS 传到 cos:covers/（/api/templates 读时现场签名，流量走 COS）；
         否则落盘 data/covers/ 走后端本地服务（开发期用）。
@@ -467,6 +470,7 @@ def make_admin_router(*, settings: SettingsStore,
         同步处理且按块限长读取：超限直接断，不把大文件整个读进内存。
         """
         _guard(request)
+        slot = max(0, min(int(slot), 2))
         limit = 10 * 1024 * 1024
         chunks = []
         received = 0
@@ -493,12 +497,12 @@ def make_admin_router(*, settings: SettingsStore,
         current = templates.get_template(tpl_id)
         if current is None:
             raise HTTPException(status_code=404, detail="模板不存在")
-        next_v = int(current.get("cover_v", 0)) + 1
+        next_v = int(current.get("cover_v", 0) or 0) + 1
 
-        # COS 用版本化对象键（covers/{id}_v{n}.jpg），旧版本自然失效，免缓存刷新
-        cover_key = "covers/%s_v%d.jpg" % (tpl_id, next_v)
-        cover_ref = "local:%s_v%d.jpg" % (tpl_id, next_v)
-        local_name = "%s_v%d.jpg" % (tpl_id, next_v)
+        # COS 用版本化对象键（covers/{id}_s{slot}_v{n}.jpg），免缓存刷新
+        cover_key = "covers/%s_s%d_v%d.jpg" % (tpl_id, slot, next_v)
+        cover_ref = "local:%s_s%d_v%d.jpg" % (tpl_id, slot, next_v)
+        local_name = "%s_s%d_v%d.jpg" % (tpl_id, slot, next_v)
         if settings.cos_ready():
             try:
                 from cos_store import CosError, put_object as cos_put
@@ -506,11 +510,23 @@ def make_admin_router(*, settings: SettingsStore,
                 cover_ref = "cos:%s" % cover_key
             except CosError as exc:
                 log.warning("封面传 COS 失败，退本地存储: %s", exc)
-                cover_ref = "local:%s.jpg" % tpl_id
-                local_name = "%s.jpg" % tpl_id
+                cover_ref = "local:%s_s%d.jpg" % (tpl_id, slot)
+                local_name = "%s_s%d.jpg" % (tpl_id, slot)
         with open(os.path.join(covers_dir(), local_name), "wb") as fh:
             fh.write(jpg)   # 本地永远留一份降级副本
-        return templates.set_cover(tpl_id, cover_ref)
+        updated = templates.set_cover_slot(tpl_id, slot, cover_ref)
+        updated["cover_url"] = resolve_cover(updated, settings)
+        updated["covers_urls"] = resolve_covers(updated, settings)
+        return updated
+
+    @router.delete("/templates/{tpl_id}/covers/{slot}")
+    def delete_template_cover(tpl_id: str, slot: int, request: Request) -> Dict[str, Any]:
+        """删除指定槽位的示例图。"""
+        _guard(request)
+        updated = templates.delete_cover_slot(tpl_id, slot)
+        updated["cover_url"] = resolve_cover(updated, settings)
+        updated["covers_urls"] = resolve_covers(updated, settings)
+        return updated
 
     return router
 

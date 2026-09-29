@@ -39,6 +39,9 @@
         <view class="card-badge card-engine-badge">
           <text>{{ item.engine === 'fine' ? '2K精细' : '1.5K轻量' }}</text>
         </view>
+        <view class="card-multi-badge" wx:if="{{ item.covers && item.covers.length > 1 }}">
+          <text>{{ item.covers.length }}图</text>
+        </view>
         <view class="card-group-tag" wx:if="{{ item.group_name }}">
           <text>{{ item.group_name }}</text>
         </view>
@@ -88,10 +91,31 @@
 
       <scroll-view class="detail-scroll" scroll-y>
         <view class="detail-cover-stage">
+          <swiper
+            wx:if="{{ selectedItem.covers && selectedItem.covers.length > 1 }}"
+            class="detail-stage-swiper"
+            circular
+            indicator-dots
+            indicator-color="rgba(255,255,255,0.4)"
+            indicator-active-color="#ffffff"
+          >
+            <swiper-item wx:for="{{ selectedItem.covers }}" wx:key="*this">
+              <image
+                class="detail-stage-img"
+                src="{{ item }}"
+                mode="aspectFill"
+                bindtap="onPreviewCovers"
+                data-url="{{ item }}"
+              ></image>
+            </swiper-item>
+          </swiper>
           <image
+            wx:else
             class="detail-stage-img"
             src="{{ selectedItem.coverUrl || '/images/logo.jpg' }}"
             mode="aspectFill"
+            bindtap="onPreviewCovers"
+            data-url="{{ selectedItem.coverUrl }}"
           ></image>
           <view class="stage-price-badge" wx:if="{{ selectedItem.price > 0 }}">
             <text>✦ {{ selectedItem.price }} 光子</text>

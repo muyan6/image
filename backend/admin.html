@@ -170,6 +170,18 @@
 
   /* ---------- 封面上传 ---------- */
   .cover-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .covers-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
+  .cover-card { border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: #fafbfc;
+                display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .cover-card .slot-title { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 8px; }
+  .cover-card .cover-preview { width: 100%; max-width: 110px; height: 140px; object-fit: cover; border: 1px solid var(--border);
+                               border-radius: 8px; background: #fff; }
+  .cover-card .cover-fallback { width: 100%; max-width: 110px; height: 140px; border: 1px dashed #cdd4e0; border-radius: 8px;
+                                display: flex; align-items: center; justify-content: center;
+                                color: var(--faint); font-size: 11px; text-align: center; padding: 6px; background: #fff; }
+  .cover-card .cover-actions { margin-top: 8px; width: 100%; display: flex; flex-direction: column; gap: 5px; }
+  .cover-card .del-btn { color: #d5304f; font-size: 11px; background: none; border: none; cursor: pointer; padding: 2px; }
+  .cover-card .del-btn:hover { text-decoration: underline; }
   .cover-preview { width: 96px; height: 120px; object-fit: cover; border: 1px solid var(--border);
                    border-radius: 8px; background: #f1f5f9; }
   .cover-fallback { width: 96px; height: 120px; border: 1px dashed #cdd4e0; border-radius: 8px;
@@ -977,7 +989,8 @@ function renderTplTable() {
     tr.innerHTML =
       `<td>${tpl.cover_url
           ? `<img class="thumb" src="${esc(tpl.cover_url)}" alt="">`
-          : `<div class="thumb-fallback">${esc((tpl.name || "?")[0])}</div>`}</td>
+          : `<div class="thumb-fallback">${esc((tpl.name || "?")[0])}</div>`}
+          ${tpl.covers_urls && tpl.covers_urls.length > 1 ? `<span style="display:block;font-size:10px;color:var(--primary);text-align:center;margin-top:2px;font-weight:600">${tpl.covers_urls.length}图</span>` : ""}</td>
        <td><span class="cell-title">${esc(tpl.name)}</span>
            <span class="sub">${esc(tpl.subtitle || "")}</span>
            ${extra ? `<span class="sub">${esc(extra)}</span>` : ""}</td>
@@ -1017,6 +1030,28 @@ function openTplModal(id) {
     `<option value="${esc(g.id)}" ${t && t.group_id === g.id ? "selected" : ""}>${esc(g.name)}</option>`).join("");
   const layoutOpts = Object.entries(LAYOUT_NAMES).map(([v, n]) =>
     `<option value="${v}" ${t && (t.layout || "") === v ? "selected" : ""}>${n}</option>`).join("");
+
+  const covers = (t && t.covers_urls && t.covers_urls.length)
+    ? t.covers_urls
+    : (t?.cover_url ? [t.cover_url] : []);
+
+  const slotCards = [0, 1, 2].map((slot) => {
+    const url = covers[slot] || "";
+    const slotTitle = slot === 0 ? "主封面（卡片展示）" : `示例图 ${slot + 1}`;
+    return `
+      <div class="cover-card" id="slot-card-${slot}">
+        <div class="slot-title">${slotTitle}</div>
+        ${url ? `<img id="slot-preview-${slot}" class="cover-preview" alt="" src="${esc(url)}">`
+              : `<div id="slot-fallback-${slot}" class="cover-fallback">未上传</div>`}
+        <div class="cover-actions">
+          <input type="file" id="slot-file-${slot}" accept="image/*" style="font-size:11px;width:100%;margin-bottom:4px" onchange="uploadCoverSlot(${slot})">
+          <button class="btn-ghost btn-small" type="button" onclick="uploadCoverSlot(${slot})" style="width:100%">${url ? "重新上传" : "确认上传"}</button>
+          ${url ? `<button class="del-btn" type="button" onclick="deleteCoverSlot(${slot})">删除此图</button>` : `<div style="height:17px"></div>`}
+        </div>
+      </div>
+    `;
+  }).join("");
+
   openModal(`
     <div class="modal-head"><b id="m-tpl-title">${t ? "编辑模板 · " + esc(t.name) : "新建模板"}</b>
       <button class="icon-btn" onclick="closeModal()">✕</button></div>
@@ -1065,15 +1100,10 @@ function openTplModal(id) {
       <div class="field" style="margin-top:12px"><label>上传前这样选（每行一条）</label>
         <textarea id="m-tpl-tips" style="min-height:70px">${esc((t?.guide?.tips || []).join("\n"))}</textarea></div>
 
-      <div class="modal-section">封面示例图</div>
-      <div class="cover-row">
-        <img id="m-cover-preview" class="cover-preview" alt="" src="${t?.cover_url || ""}" ${t?.cover_url ? "" : "hidden"}>
-        <div id="m-cover-fallback" class="cover-fallback" ${t?.cover_url ? "hidden" : ""}>暂无封面<br>上传或保存后设置</div>
-        <div style="flex:1;min-width:200px">
-          <input type="file" id="m-cover-file" accept="image/*" style="font-size:12.5px">
-          <p class="muted" style="margin:6px 0 10px">长边自动压到 720。配了 COS 走对象存储直链（不占服务器带宽），否则存本地由后端发放</p>
-          <button class="btn-ghost btn-small" id="m-cover-btn" onclick="uploadCover()">上传封面</button>
-        </div>
+      <div class="modal-section">封面与示例图（最多支持 3 张，第 1 张为主封面）</div>
+      <p class="muted" style="margin:-6px 0 10px">长边自动压到 720。小程序端将支持轮播切换与全屏预览</p>
+      <div class="covers-grid">
+        ${slotCards}
       </div>
     </div>
     <div class="modal-foot"><span class="msg" id="m-tpl-msg"></span>
@@ -1127,35 +1157,61 @@ window.saveTpl = async () => {
     if (id) saved = await api("/templates/" + id, { method: "PUT", body: payload });
     else saved = await api("/templates", { method: "POST", body: payload });
     await loadTemplates();
-    // 停留在弹窗并转为编辑态，方便接着上传封面
-    $("m-tpl-id").value = saved.id;
-    $("m-tpl-title").textContent = "编辑模板 · " + saved.name;
-    $("m-tpl-msg").textContent = "✓ 已保存，小程序端即时生效" + (id ? "" : "，现在可以上传封面了");
     toast("模板已保存");
-  } catch (e) { $("m-tpl-msg").textContent = "✗ " + e.message; }
+    openTplModal(saved.id);
+    const m = $("m-tpl-msg");
+    if (m) m.textContent = "✓ 已保存，小程序端即时生效" + (id ? "" : "，现在可以上传示例图了");
+  } catch (e) {
+    const m = $("m-tpl-msg");
+    if (m) m.textContent = "✗ " + e.message;
+  }
 };
 
-window.uploadCover = async () => {
+window.uploadCoverSlot = async (slot) => {
   const id = $("m-tpl-id").value;
   const msg = $("m-tpl-msg");
-  if (!id) { msg.textContent = "✗ 先保存模板，再上传封面"; return; }
-  const f = $("m-cover-file").files[0];
-  if (!f) { msg.textContent = "✗ 先选择图片文件"; return; }
-  const fd = new FormData(); fd.append("file", f);
+  if (!id) { if (msg) msg.textContent = "✗ 请先保存模板，再上传示例图"; return; }
+  const fileInput = $(`slot-file-${slot}`);
+  const f = fileInput ? fileInput.files[0] : null;
+  if (!f) { if (msg) msg.textContent = `✗ 请先为槽位 ${slot + 1} 选择图片文件`; return; }
+  const fd = new FormData();
+  fd.append("file", f);
+  if (msg) msg.textContent = `正在上传示例图 ${slot + 1}...`;
   try {
-    const res = await fetch("/admin/api/templates/" + id + "/cover", {
+    const res = await fetch(`/admin/api/templates/${id}/covers?slot=${slot}`, {
       method: "POST", headers: { "X-Admin-Request": "1" },
-      credentials: "same-origin", body: fd });
+      credentials: "same-origin", body: fd
+    });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || "HTTP " + res.status);
-    $("m-cover-preview").src = URL.createObjectURL(f);
-    $("m-cover-preview").hidden = false;
-    $("m-cover-fallback").hidden = true;
-    msg.textContent = "✓ 封面已更新";
-    toast("封面已更新");
-    loadTemplates();
-  } catch (e) { msg.textContent = "✗ " + e.message; }
+    toast(`示例图 ${slot + 1} 已更新`);
+    await loadTemplates();
+    openTplModal(id);
+    const m = $("m-tpl-msg");
+    if (m) m.textContent = `✓ 示例图 ${slot + 1} 上传成功`;
+  } catch (e) {
+    if (msg) msg.textContent = "✗ " + e.message;
+  }
 };
+
+window.deleteCoverSlot = async (slot) => {
+  const id = $("m-tpl-id").value;
+  const msg = $("m-tpl-msg");
+  if (!id) return;
+  if (!confirm(`确定删除第 ${slot + 1} 张示例图？`)) return;
+  try {
+    await api(`/templates/${id}/covers/${slot}`, { method: "DELETE" });
+    toast(`示例图 ${slot + 1} 已删除`);
+    await loadTemplates();
+    openTplModal(id);
+    const m = $("m-tpl-msg");
+    if (m) m.textContent = `✓ 示例图 ${slot + 1} 已删除`;
+  } catch (e) {
+    if (msg) msg.textContent = "✗ " + e.message;
+  }
+};
+
+window.uploadCover = () => uploadCoverSlot(0);
 
 function openImportModal() {
   openModal(`
