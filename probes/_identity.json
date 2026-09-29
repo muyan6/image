@@ -1,0 +1,605 @@
+[
+ {
+  "file": "p1_resample.png",
+  "probe": "p1",
+  "meta": {
+   "bytes": 15473,
+   "ext": ".png",
+   "png_text": {
+    "Software": "probe-gen 1.0",
+    "Comment": "PROBE-PNG-COMMENT",
+    "Probe": "p1_resample"
+   },
+   "exif": {
+    "270": "PROBE-DESCRIPTION",
+    "271": "ProbeCam",
+    "272": "PROBE-1",
+    "305": "probe-gen 1.0",
+    "306": "2026:09:27 12:00:00",
+    "33432": "PROBE-COPYRIGHT",
+    "315": "PROBE-ARTIST"
+   },
+   "jpeg_quality_hint": null,
+   "format": "PNG",
+   "mode": "RGB",
+   "size": [
+    1920,
+    1440
+   ]
+  },
+  "out_w": 1920,
+  "out_h": 1440,
+  "scale_x": 1.0,
+  "scale_y": 1.0,
+  "upscale_vs_1536": 1.25,
+  "stripe_contrast": {
+   "2": 127.49,
+   "3": 127.49,
+   "4": 127.49,
+   "6": 127.49,
+   "8": 127.42,
+   "12": 127.49,
+   "16": 127.28,
+   "24": 126.43,
+   "32": 126.43
+  },
+  "mtf_normalized": {
+   "2": 1.008,
+   "3": 1.008,
+   "4": 1.008,
+   "6": 1.008,
+   "8": 1.008,
+   "12": 1.008,
+   "16": 1.007,
+   "24": 1.0,
+   "32": 1.0
+  },
+  "edge": {
+   "rise_10_90_px": null,
+   "overshoot": 0.0,
+   "undershoot": 0.0
+  },
+  "edge_verdict": [
+   "边缘很锐（几乎未重采样，或用了锐化）",
+   "无上冲 -> 平滑核（双三次 / 双线性）"
+  ],
+  "resample_scale": {
+   "output_vs_probe": 1.0,
+   "output_vs_1536": 1.25
+  }
+ },
+ {
+  "file": "p2_tone.png",
+  "probe": "p2",
+  "meta": {
+   "bytes": 15760,
+   "ext": ".png",
+   "png_text": {
+    "Software": "probe-gen 1.0",
+    "Comment": "PROBE-PNG-COMMENT",
+    "Probe": "p2_tone"
+   },
+   "exif": {
+    "270": "PROBE-DESCRIPTION",
+    "271": "ProbeCam",
+    "272": "PROBE-1",
+    "305": "probe-gen 1.0",
+    "306": "2026:09:27 12:00:00",
+    "33432": "PROBE-COPYRIGHT",
+    "315": "PROBE-ARTIST"
+   },
+   "jpeg_quality_hint": null,
+   "format": "PNG",
+   "mode": "RGB",
+   "size": [
+    1920,
+    1440
+   ]
+  },
+  "out_w": 1920,
+  "out_h": 1440,
+  "scale_x": 1.0,
+  "scale_y": 1.0,
+  "upscale_vs_1536": 1.25,
+  "tone_curve": {
+   "expected": [
+    0.0,
+    8.2,
+    16.5,
+    24.7,
+    32.9,
+    41.1,
+    49.4,
+    57.6,
+    65.8,
+    74.0,
+    82.3,
+    90.5,
+    98.7,
+    106.9,
+    115.2,
+    123.4,
+    131.6,
+    139.8,
+    148.1,
+    156.3,
+    164.5,
+    172.7,
+    181.0,
+    189.2,
+    197.4,
+    205.6,
+    213.9,
+    222.1,
+    230.3,
+    238.5,
+    246.8,
+    255.0
+   ],
+   "measured": [
+    0.0,
+    8.0,
+    16.0,
+    25.0,
+    33.0,
+    41.0,
+    49.0,
+    58.0,
+    66.0,
+    74.0,
+    82.0,
+    90.0,
+    99.0,
+    107.0,
+    115.0,
+    123.0,
+    132.0,
+    140.0,
+    148.0,
+    156.0,
+    165.0,
+    173.0,
+    181.0,
+    189.0,
+    197.0,
+    206.0,
+    214.0,
+    222.0,
+    230.0,
+    239.0,
+    247.0,
+    255.0
+   ]
+  },
+  "tone_points": {
+   "in_0": 0.0,
+   "in_64": 66.0,
+   "in_128": 132.0,
+   "in_192": 189.0,
+   "in_255": 255.0
+  },
+  "tone_fit": {
+   "slope": 1.0008,
+   "intercept": -0.1,
+   "gamma": 1.34
+  },
+  "tone_verdict": [
+   "近似线性（无色调曲线）"
+  ],
+  "patches": {
+   "white": {
+    "in_rgb": [
+     255,
+     255,
+     255
+    ],
+    "out_rgb": [
+     255.0,
+     255.0,
+     255.0
+    ]
+   },
+   "gray": {
+    "in_rgb": [
+     128,
+     128,
+     128
+    ],
+    "out_rgb": [
+     128.0,
+     128.0,
+     128.0
+    ]
+   },
+   "black": {
+    "in_rgb": [
+     0,
+     0,
+     0
+    ],
+    "out_rgb": [
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "red": {
+    "in_rgb": [
+     255,
+     0,
+     0
+    ],
+    "out_rgb": [
+     255.0,
+     0.0,
+     0.0
+    ]
+   },
+   "green": {
+    "in_rgb": [
+     0,
+     255,
+     0
+    ],
+    "out_rgb": [
+     0.0,
+     255.0,
+     0.0
+    ]
+   },
+   "blue": {
+    "in_rgb": [
+     0,
+     0,
+     255
+    ],
+    "out_rgb": [
+     0.0,
+     0.0,
+     255.0
+    ]
+   },
+   "cyan": {
+    "in_rgb": [
+     0,
+     255,
+     255
+    ],
+    "out_rgb": [
+     0.0,
+     255.0,
+     255.0
+    ]
+   },
+   "magenta": {
+    "in_rgb": [
+     255,
+     0,
+     255
+    ],
+    "out_rgb": [
+     255.0,
+     0.0,
+     255.0
+    ]
+   },
+   "yellow": {
+    "in_rgb": [
+     255,
+     255,
+     0
+    ],
+    "out_rgb": [
+     255.0,
+     255.0,
+     0.0
+    ]
+   }
+  },
+  "white_balance": {
+   "gain_r": 1.0,
+   "gain_g": 1.0,
+   "gain_b": 1.0
+  },
+  "wb_verdict": "灰块被中和（有白平衡）",
+  "saturation_red": 1.9922,
+  "saturation_blue": 1.9922
+ },
+ {
+  "file": "p3_hifreq.png",
+  "probe": "p3",
+  "meta": {
+   "bytes": 31235,
+   "ext": ".png",
+   "png_text": {
+    "Software": "probe-gen 1.0",
+    "Comment": "PROBE-PNG-COMMENT",
+    "Probe": "p3_hifreq"
+   },
+   "exif": {
+    "270": "PROBE-DESCRIPTION",
+    "271": "ProbeCam",
+    "272": "PROBE-1",
+    "305": "probe-gen 1.0",
+    "306": "2026:09:27 12:00:00",
+    "33432": "PROBE-COPYRIGHT",
+    "315": "PROBE-ARTIST"
+   },
+   "jpeg_quality_hint": null,
+   "format": "PNG",
+   "mode": "RGB",
+   "size": [
+    1920,
+    1440
+   ]
+  },
+  "out_w": 1920,
+  "out_h": 1440,
+  "scale_x": 1.0,
+  "scale_y": 1.0,
+  "upscale_vs_1536": 1.25,
+  "checker": {
+   "1": {
+    "std": 127.5,
+    "range": 255.0,
+    "mean": 127.5
+   },
+   "2": {
+    "std": 127.5,
+    "range": 255.0,
+    "mean": 127.5
+   },
+   "4": {
+    "std": 127.5,
+    "range": 255.0,
+    "mean": 127.5
+   }
+  },
+  "hifreq_retention_1px": 1.0,
+  "hifreq_verdict": [
+   "1px 存活",
+   "2px 存活",
+   "4px 存活"
+  ]
+ },
+ {
+  "file": "p4_latent.png",
+  "probe": "p4",
+  "meta": {
+   "bytes": 1446932,
+   "ext": ".png",
+   "png_text": {
+    "Software": "probe-gen 1.0",
+    "Comment": "PROBE-PNG-COMMENT",
+    "Probe": "p4_latent"
+   },
+   "exif": {
+    "270": "PROBE-DESCRIPTION",
+    "271": "ProbeCam",
+    "272": "PROBE-1",
+    "305": "probe-gen 1.0",
+    "306": "2026:09:27 12:00:00",
+    "33432": "PROBE-COPYRIGHT",
+    "315": "PROBE-ARTIST"
+   },
+   "jpeg_quality_hint": null,
+   "format": "PNG",
+   "mode": "RGB",
+   "size": [
+    1920,
+    1440
+   ]
+  },
+  "out_w": 1920,
+  "out_h": 1440,
+  "scale_x": 1.0,
+  "scale_y": 1.0,
+  "upscale_vs_1536": 1.25,
+  "latent": {
+   "row_peaks": [],
+   "col_peaks": [],
+   "core_std": 17.068,
+   "core_mean": 181.57,
+   "grid_hits": [],
+   "grid_2d_ratio": {
+    "4": 2.42,
+    "8": 2.73,
+    "16": 2.22,
+    "32": 2.69
+   },
+   "grid_2d_best": {
+    "period_px": 8,
+    "ratio": 2.73,
+    "kind": "diag"
+   },
+   "note": "若 p8_flat 两次提交输出逐字节相同，则基本可排除扩散模型"
+  },
+  "latent_verdict": "1D 与 2D 均未检出稳定网格 —— 更像判别式超分（ESRGAN 类）或传统滤波",
+  "latent_confidence": "medium"
+ },
+ {
+  "file": "p5_text.png",
+  "probe": "p5",
+  "meta": {
+   "bytes": 67748,
+   "ext": ".png",
+   "png_text": {
+    "Software": "probe-gen 1.0",
+    "Comment": "PROBE-PNG-COMMENT",
+    "Probe": "p5_text"
+   },
+   "exif": {
+    "270": "PROBE-DESCRIPTION",
+    "271": "ProbeCam",
+    "272": "PROBE-1",
+    "305": "probe-gen 1.0",
+    "306": "2026:09:27 12:00:00",
+    "33432": "PROBE-COPYRIGHT",
+    "315": "PROBE-ARTIST"
+   },
+   "jpeg_quality_hint": null,
+   "format": "PNG",
+   "mode": "RGB",
+   "size": [
+    1920,
+    1440
+   ]
+  },
+  "out_w": 1920,
+  "out_h": 1440,
+  "scale_x": 1.0,
+  "scale_y": 1.0,
+  "upscale_vs_1536": 1.25,
+  "text": {
+   "contrast": 190.0,
+   "std": 51.65,
+   "min": 25.0,
+   "max": 215.0
+  },
+  "text_verdict": "文字对比度保留 —— 未发生内容级重画"
+ },
+ {
+  "file": "p6_texture.png",
+  "probe": "p6",
+  "meta": {
+   "bytes": 2788246,
+   "ext": ".png",
+   "png_text": {
+    "Software": "probe-gen 1.0",
+    "Comment": "PROBE-PNG-COMMENT",
+    "Probe": "p6_texture"
+   },
+   "exif": {
+    "270": "PROBE-DESCRIPTION",
+    "271": "ProbeCam",
+    "272": "PROBE-1",
+    "305": "probe-gen 1.0",
+    "306": "2026:09:27 12:00:00",
+    "33432": "PROBE-COPYRIGHT",
+    "315": "PROBE-ARTIST"
+   },
+   "jpeg_quality_hint": null,
+   "format": "PNG",
+   "mode": "RGB",
+   "size": [
+    1920,
+    1440
+   ]
+  },
+  "out_w": 1920,
+  "out_h": 1440,
+  "scale_x": 1.0,
+  "scale_y": 1.0,
+  "upscale_vs_1536": 1.25,
+  "texture_energy": {
+   "1.0": 10.268,
+   "2.0": 18.49,
+   "4.0": 23.503,
+   "8.0": 25.412
+  },
+  "texture_fine_coarse_ratio": 0.404
+ },
+ {
+  "file": "p7_meta.png",
+  "probe": "p7",
+  "meta": {
+   "bytes": 20736,
+   "ext": ".png",
+   "png_text": {
+    "Software": "probe-gen 1.0",
+    "Comment": "PROBE-PNG-COMMENT",
+    "Probe": "p7_meta"
+   },
+   "exif": {
+    "270": "PROBE-DESCRIPTION",
+    "271": "ProbeCam",
+    "272": "PROBE-1",
+    "305": "probe-gen 1.0",
+    "306": "2026:09:27 12:00:00",
+    "33432": "PROBE-COPYRIGHT",
+    "315": "PROBE-ARTIST"
+   },
+   "jpeg_quality_hint": null,
+   "format": "PNG",
+   "mode": "RGB",
+   "size": [
+    1920,
+    1440
+   ]
+  },
+  "out_w": 1920,
+  "out_h": 1440,
+  "scale_x": 1.0,
+  "scale_y": 1.0,
+  "upscale_vs_1536": 1.25,
+  "note": "p7（元数据）已在 meta 字段中报告"
+ },
+ {
+  "file": "p8_flat.png",
+  "probe": "p8",
+  "meta": {
+   "bytes": 2482139,
+   "ext": ".png",
+   "png_text": {
+    "Software": "probe-gen 1.0",
+    "Comment": "PROBE-PNG-COMMENT",
+    "Probe": "p8_flat"
+   },
+   "exif": {
+    "270": "PROBE-DESCRIPTION",
+    "271": "ProbeCam",
+    "272": "PROBE-1",
+    "305": "probe-gen 1.0",
+    "306": "2026:09:27 12:00:00",
+    "33432": "PROBE-COPYRIGHT",
+    "315": "PROBE-ARTIST"
+   },
+   "jpeg_quality_hint": null,
+   "format": "PNG",
+   "mode": "RGB",
+   "size": [
+    1920,
+    1440
+   ]
+  },
+  "out_w": 1920,
+  "out_h": 1440,
+  "scale_x": 1.0,
+  "scale_y": 1.0,
+  "upscale_vs_1536": 1.25,
+  "noise": {
+   "32": {
+    "sigma": 6.015,
+    "mean": 31.5
+   },
+   "64": {
+    "sigma": 6.036,
+    "mean": 63.5
+   },
+   "96": {
+    "sigma": 6.011,
+    "mean": 95.5
+   },
+   "128": {
+    "sigma": 6.007,
+    "mean": 127.5
+   },
+   "160": {
+    "sigma": 6.012,
+    "mean": 159.5
+   },
+   "192": {
+    "sigma": 5.993,
+    "mean": 191.5
+   },
+   "224": {
+    "sigma": 6.029,
+    "mean": 223.5
+   }
+  },
+  "noise_sigma_in": 6.0,
+  "noise_sigma_out_avg": 6.015,
+  "noise_ratio": 1.002,
+  "denoise_verdict": "几乎未降噪（噪声基本原样）"
+ }
+]

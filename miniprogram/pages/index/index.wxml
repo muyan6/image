@@ -1,0 +1,224 @@
+<view class="page-container">
+  <!-- 顶部极简中文栏 -->
+  <view class="nav-bar">
+    <view class="nav-brand">
+      <image class="brand-logo" src="/images/logo.jpg" mode="aspectFit"></image>
+      <text class="brand-name">光影画质修复</text>
+    </view>
+    <view class="credit-pill" bindtap="onOpenCreditModal">
+      <text class="credit-icon">⚡</text>
+      <text class="credit-text">{{ freeMode ? '免扣费' : (fishTokens + ' 算力') }}</text>
+      <text class="credit-add" wx:if="{{ !freeMode }}">+</text>
+    </view>
+  </view>
+
+  <!-- 公告横幅 (如有) -->
+  <view wx:if="{{ notice }}" class="notice-strip" bindtap="onTapNotice">
+    <text class="notice-tag">公告</text>
+    <text class="notice-title">{{ notice.title }}</text>
+    <text class="notice-arrow">›</text>
+  </view>
+
+  <!-- ================= 状态 1：初始空白待选图状态 (EMPTY) ================= -->
+  <view wx:if="{{ state === 'empty' }}" class="state-empty-wrap">
+    <!-- 标语区 (优雅中文诗意排版) -->
+    <view class="intro-section">
+      <text class="eyebrow">旧日瞬间 · 再度新生</text>
+      <text class="headline">让这一刻，重获新生</text>
+      <text class="subhead">修复光影 · 留住真实 · 细节重构</text>
+    </view>
+
+    <!-- 核心选图卡片 (带艺术纸质与和纸胶带) -->
+    <view class="upload-portal gallery-card" bindtap="onPickImage">
+      <view class="washi-tape"></view>
+      <view class="portal-body">
+        <image class="portal-emblem" src="/images/logo.jpg" mode="aspectFit"></image>
+        <view class="portal-btn">
+          <text class="portal-btn-title">选择待拯救照片</text>
+          <text class="portal-btn-arrow">→</text>
+        </view>
+        <text class="portal-desc">点击从手机相册选择，或现场拍照</text>
+        <text class="portal-specs">支持 JPG / PNG / WebP · 自动适配超清</text>
+      </view>
+    </view>
+
+    <!-- 底部历史记录轻量入口 (不堆砌) -->
+    <view
+      class="history-entry"
+      wx:if="{{ historyList.length > 0 }}"
+      bindtap="onOpenHistory"
+    >
+      <text>查看过往修复记录 ({{ historyList.length }}) ›</text>
+    </view>
+  </view>
+
+  <!-- ================= 状态 2/3/4：已选图 / 处理中 / 对比查看 ================= -->
+  <view wx:else class="workspace-wrap">
+    <!-- 顶部状态栏 -->
+    <view class="workspace-header">
+      <view class="btn-text-back" bindtap="onChangePhoto">
+        <text>← 换一张照片</text>
+      </view>
+      <view class="workspace-badge" wx:if="{{ state === 'result' }}" bindtap="onOpenFullscreen">
+        <text>全屏对比 ↗</text>
+      </view>
+    </view>
+
+    <!-- 核心照片装裱台 (Photo Panel) -->
+    <view
+      class="photo-panel gallery-card"
+      id="photo-stage"
+      bindtouchstart="onTouchStart"
+      bindtouchmove="onTouchMove"
+      bindtouchend="onTouchEnd"
+    >
+      <view class="washi-tape"></view>
+
+      <!-- 底层：在 result 状态显示超清图，其他状态显示原图预览 -->
+      <image
+        class="stage-photo"
+        src="{{ state === 'result' ? resultImage : selectedImage }}"
+        mode="aspectFit"
+      ></image>
+
+      <!-- 顶层裁剪层 (仅在 result 状态激活滑块对比) -->
+      <view
+        wx:if="{{ state === 'result' }}"
+        class="clip-layer"
+        style="clip-path: inset(0 {{ 100 - splitPercent }}% 0 0);"
+      >
+        <image class="stage-photo" src="{{ originalImage }}" mode="aspectFit"></image>
+      </view>
+
+      <!-- 对比标签 (仅在 result 状态展示) -->
+      <view wx:if="{{ state === 'result' }}" class="label-tag label-before {{ isDragging ? 'faded' : '' }}">
+        <text>原图</text>
+      </view>
+      <view wx:if="{{ state === 'result' }}" class="label-tag label-after {{ isDragging ? 'faded' : '' }}">
+        <text>已拯救</text>
+      </view>
+
+      <!-- 分割滑块与把手 (仅在 result 状态展示) -->
+      <view
+        wx:if="{{ state === 'result' }}"
+        class="slider-divider"
+        style="left: {{ splitPercent }}%;"
+      >
+        <view class="slider-handle">
+          <text>‹ ›</text>
+        </view>
+      </view>
+
+      <!-- 处理中蒙层 (仅在 processing 状态展示) -->
+      <view wx:if="{{ state === 'processing' }}" class="processing-mask">
+        <view class="processing-box">
+          <view class="breathing-dot"></view>
+          <text class="processing-title">{{ processingText }}</text>
+          <text class="processing-sub">AI 正在深度重构光影与微观纹理…</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 照片下方操作区 (根据状态流转呈现) -->
+    <view class="panel-controls">
+      <!-- 状态 2 (READY)：画质档位选择 + 【拯救这张照片】 -->
+      <view wx:if="{{ state === 'ready' }}" class="ready-controls">
+        <view class="quality-selector">
+          <view
+            class="quality-tab {{ currentQuality === 'light' ? 'tab-active' : '' }}"
+            bindtap="onSelectQuality"
+            data-quality="light"
+          >
+            <text class="tab-title">轻量快速 · 1.5K</text>
+            <text class="tab-desc">快速去噪去偏色 · 约 3 秒 ({{ priceLight }} 算力)</text>
+          </view>
+          <view
+            class="quality-tab {{ currentQuality === 'fine' ? 'tab-active' : '' }}"
+            bindtap="onSelectQuality"
+            data-quality="fine"
+          >
+            <text class="tab-title">精细超分 · 2K</text>
+            <text class="tab-desc">发丝细节重构 · 约 15 秒 ({{ priceFine }} 算力)</text>
+          </view>
+        </view>
+
+        <button class="btn-ink main-action-btn" bindtap="onRescue">
+          拯救这张照片
+        </button>
+      </view>
+
+      <!-- 状态 4 (RESULT)：左右滑动提示 + 【保存照片】与【换一张】 -->
+      <view wx:if="{{ state === 'result' }}" class="result-controls">
+        <view class="slider-hint">
+          <text>← 左右拖动滑块检视拯救细节 →</text>
+        </view>
+        <view class="result-actions">
+          <button class="btn-ink btn-save" bindtap="onSave">
+            保存照片到相册
+          </button>
+          <button class="btn-line btn-change" bindtap="onChangePhoto">
+            换一张
+          </button>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 算力印记模态框 -->
+  <view wx:if="{{ showCreditModal }}" class="modal-backdrop" bindtap="onCloseCreditModal">
+    <view class="modal-card gallery-card" catchtap="true">
+      <view class="modal-head">
+        <text class="modal-head-title">算力中心</text>
+        <text class="modal-close" bindtap="onCloseCreditModal">✕</text>
+      </view>
+      <view class="modal-body">
+        <view class="credit-stat">
+          <text class="stat-caption">当前剩余可用算力</text>
+          <text class="stat-number">{{ freeMode ? '无限制 (免扣费)' : fishTokens }}</text>
+        </view>
+        <view class="credit-info-list">
+          <view class="info-row">
+            <text class="info-dot">●</text>
+            <text class="info-text">轻量快速修复：消耗 {{ priceLight }} 算力 / 张</text>
+          </view>
+          <view class="info-row">
+            <text class="info-dot">●</text>
+            <text class="info-text">精细超分重构：消耗 {{ priceFine }} 算力 / 张</text>
+          </view>
+        </view>
+        <button class="btn-ink modal-claim-btn" bindtap="onGainCredits">
+          免费领取 +3 算力
+        </button>
+      </view>
+    </view>
+  </view>
+
+  <!-- 历史记录抽屉模态框 -->
+  <view wx:if="{{ showHistoryModal }}" class="modal-backdrop" bindtap="onCloseHistory">
+    <view class="history-drawer gallery-card" catchtap="true">
+      <view class="modal-head">
+        <text class="modal-head-title">历史修复记录 ({{ historyList.length }})</text>
+        <view class="history-head-actions">
+          <text class="history-purge" bindtap="onClearHistory">清空</text>
+          <text class="modal-close" bindtap="onCloseHistory">✕</text>
+        </view>
+      </view>
+      <scroll-view class="history-list-scroll" scroll-y>
+        <view class="history-grid">
+          <view
+            wx:for="{{ historyList }}"
+            wx:key="jobId"
+            class="history-card"
+            bindtap="onSelectHistoryItem"
+            data-index="{{ index }}"
+          >
+            <image class="history-img" src="{{ item.result }}" mode="aspectFill"></image>
+            <view class="history-tag">
+              <text>{{ item.quality === 'fine' ? '2K精细' : '1.5K' }}</text>
+            </view>
+          </view>
+        </view>
+      </scroll-view>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,130 @@
+/**
+ * app.wxss 全局样式：简约高端海报报刊风 (Editorial Art & Gallery Poster Aesthetic)
+ */
+
+page {
+  /* 典藏纸本与墨色系统 */
+  --paper-bg: #f5f2eb;
+  --paper-card: #ffffff;
+  --paper-card-subtle: #faf8f4;
+  --paper-border: #e3ded4;
+  --paper-border-dark: #cec7b9;
+  
+  --ink-title: #1a1917;
+  --ink-body: #3c3933;
+  --ink-muted: #787368;
+  --ink-faint: #aba496;
+
+  --accent-gold: #b38b4d;
+  --accent-indigo: #27384e;
+  --accent-rust: #9e4b3c;
+  --accent-tape: rgba(228, 219, 198, 0.75);
+
+  --font-serif: "Playfair Display", "Didot", "Cinzel", "Songti SC", "Source Han Serif CN", "Noto Serif SC", "STSong", Georgia, serif;
+  --font-mono: "Courier New", Courier, "SF Mono", Menlo, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, sans-serif;
+
+  background-color: var(--paper-bg);
+  color: var(--ink-body);
+  font-family: var(--font-sans);
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+}
+
+view, text, image, button, input {
+  box-sizing: border-box;
+}
+
+/* 艺术画框卡片 (Museum Mat Board) */
+.gallery-card {
+  background: var(--paper-card);
+  border: 1rpx solid var(--paper-border);
+  box-shadow: 0 4rpx 24rpx rgba(40, 35, 25, 0.04);
+  position: relative;
+}
+
+/* 和纸胶带修饰 (Washi Tape) */
+.washi-tape {
+  position: absolute;
+  top: -16rpx;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 110rpx;
+  height: 32rpx;
+  background: var(--accent-tape);
+  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.06);
+  border-left: 2rpx dashed rgba(180, 170, 150, 0.4);
+  border-right: 2rpx dashed rgba(180, 170, 150, 0.4);
+  z-index: 20;
+}
+
+/* 典藏黑色高定主按钮 */
+.btn-ink {
+  background: var(--ink-title);
+  color: #f7f4ed;
+  font-family: var(--font-serif);
+  font-size: 28rpx;
+  letter-spacing: 2rpx;
+  padding: 26rpx 48rpx;
+  border-radius: 0;
+  border: 1rpx solid var(--ink-title);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16rpx;
+  transition: all 0.2s ease;
+  box-shadow: 0 8rpx 20rpx rgba(26, 25, 23, 0.15);
+}
+
+.btn-ink:active {
+  background: #2e2c28;
+  transform: translateY(2rpx);
+  opacity: 0.95;
+}
+
+/* 极简线框副按钮 */
+.btn-line {
+  background: transparent;
+  color: var(--ink-title);
+  border: 1rpx solid var(--ink-title);
+  font-size: 24rpx;
+  padding: 16rpx 32rpx;
+  letter-spacing: 1rpx;
+  border-radius: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.btn-line:active {
+  background: rgba(26, 25, 23, 0.05);
+}
+
+/* 色彩印记样卡 (Color Swatches) */
+.palette-swatches {
+  display: flex;
+  gap: 12rpx;
+  align-items: center;
+}
+
+.swatch {
+  width: 28rpx;
+  height: 28rpx;
+  border-radius: 2rpx;
+  box-shadow: inset 0 0 0 1rpx rgba(0, 0, 0, 0.1);
+}
+
+.swatch-sky { background: #6da4cf; }
+.swatch-indigo { background: #374665; }
+.swatch-ochre { background: #deb87b; }
+.swatch-terra { background: #af5c4c; }
+
+/* 报刊打字机 / 编号标签 */
+.typewriter-label {
+  font-family: var(--font-mono);
+  font-size: 20rpx;
+  letter-spacing: 2rpx;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}

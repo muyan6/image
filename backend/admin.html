@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>废片拯救所 · 管理后台</title>
+<style>
+  :root {
+    --bg: #f3f5f9; --card: #ffffff; --border: #e5e9f2;
+    --ink: #1a2233; --muted: #6b7488; --faint: #9aa3b5;
+    --brand: #4f46e5; --brand-hover: #4338ca; --brand-weak: #eef2ff;
+    --ok: #10b981; --bad: #e11d48; --warn: #d97706;
+    --sidebar: #141a2b; --sidebar-ink: #a3adc6;
+    --radius: 12px;
+    --shadow: 0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; font: 14px/1.65 "PingFang SC", "Microsoft YaHei", -apple-system, system-ui, sans-serif;
+         background: var(--bg); color: var(--ink); }
+  h1, h2, h3 { margin: 0; }
+  a { color: var(--brand); text-decoration: none; }
+  code { background: #eef1f6; border-radius: 4px; padding: 1px 6px; font-size: 12px; color: #475069; }
+  .muted { color: var(--muted); font-size: 12.5px; }
+
+  /* ---------- 布局骨架 ---------- */
+  .layout { min-height: 100vh; }
+  .sidebar { width: 224px; background: var(--sidebar); color: var(--sidebar-ink);
+             position: fixed; inset: 0 auto 0 0; z-index: 50; display: flex; flex-direction: column; }
+  .main { margin-left: 224px; min-width: 0; display: flex; flex-direction: column; min-height: 100vh; }
+  .topbar { height: 58px; background: var(--card); border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 14px; padding: 0 26px;
+            position: sticky; top: 0; z-index: 40; }
+  .content { padding: 24px 26px 60px; max-width: 1180px; width: 100%; }
+
+  /* ---------- 侧边栏 ---------- */
+  .brand { display: flex; align-items: center; gap: 10px; padding: 18px 18px 14px;
+           border-bottom: 1px solid rgba(255,255,255,.07); }
+  .brand svg { width: 30px; height: 30px; color: #818cf8; flex: none; }
+  .brand b { color: #fff; font-size: 15px; display: block; line-height: 1.3; }
+  .brand small { color: #5b6579; font-size: 10.5px; letter-spacing: .14em; }
+  nav { flex: 1; overflow-y: auto; padding: 8px 0 16px; }
+  .nav-label { font-size: 11px; letter-spacing: .14em; color: #525c74; padding: 16px 22px 6px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; margin: 2px 10px; padding: 9px 12px;
+              border-radius: 8px; cursor: pointer; font-size: 13.5px; color: var(--sidebar-ink);
+              transition: background .12s, color .12s; user-select: none; }
+  .nav-item svg { width: 16px; height: 16px; flex: none; opacity: .85; }
+  .nav-item:hover { background: rgba(255,255,255,.06); color: #fff; }
+  .nav-item.on { background: var(--brand); color: #fff; box-shadow: 0 4px 12px rgba(79,70,229,.35); }
+  .sidebar-foot { padding: 12px 22px; border-top: 1px solid rgba(255,255,255,.07);
+                  font-size: 11px; color: #525c74; }
+  .sidebar-backdrop { display: none; position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 45; }
+  .burger { display: none; }
+
+  /* ---------- 顶栏 ---------- */
+  .page-title { font-size: 16px; font-weight: 700; flex: 1; }
+  .top-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
+              border-radius: 999px; padding: 3px 12px; }
+  .top-chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .top-chip.green { background: #ecfdf5; color: #047857; } .top-chip.green .dot { background: var(--ok); }
+  .top-chip.red { background: #fff1f2; color: #be123c; } .top-chip.red .dot { background: var(--bad); }
+
+  /* ---------- 卡片 ---------- */
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+          box-shadow: var(--shadow); padding: 20px 22px; margin-bottom: 18px; }
+  .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .card-head h2 { font-size: 15px; font-weight: 700; flex: 1; }
+  .card-head h2 small { color: var(--faint); font-weight: 400; font-size: 12px; margin-left: 8px; }
+  .stack > .card:last-child { margin-bottom: 0; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 1000px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  /* ---------- 统计 ---------- */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+  .stat { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: #fbfcfe; }
+  .stat b { font-size: 23px; font-weight: 700; display: block; color: var(--brand); }
+  .stat span { font-size: 12px; color: var(--muted); }
+
+  /* ---------- 表单 ---------- */
+  label { display: block; font-size: 13px; font-weight: 600; margin: 0 0 6px; }
+  label small { font-weight: 400; color: var(--muted); }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 14px; }
+  .field { min-width: 0; }
+  input[type=text], input[type=password], input[type=number], textarea, select {
+    width: 100%; padding: 9px 12px; border: 1px solid #d4d9e3; border-radius: 8px;
+    font: inherit; background: #fff; color: var(--ink); transition: border-color .12s, box-shadow .12s; }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--brand);
+    box-shadow: 0 0 0 3px rgba(79,70,229,.13); }
+  textarea { min-height: 92px; resize: vertical; }
+  .check { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px;
+           cursor: pointer; margin: 4px 0; }
+  .check input { width: 15px; height: 15px; accent-color: var(--brand); }
+
+  /* ---------- 按钮 ---------- */
+  button { font: inherit; font-weight: 500; border-radius: 8px; border: 1px solid transparent;
+           padding: 8px 16px; cursor: pointer; transition: all .13s; }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+  .btn-primary { background: var(--brand); color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: var(--brand-hover); }
+  .btn-ghost { background: #fff; border-color: #d4d9e3; color: var(--ink); }
+  .btn-ghost:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+  .btn-danger { background: #fff; border-color: #fbd0d9; color: #d5304f; }
+  .btn-danger:hover:not(:disabled) { background: #fff1f2; border-color: #f5b8c6; }
+  .btn-small { padding: 4px 12px; font-size: 12.5px; border-radius: 7px; }
+  .icon-btn { background: none; border: none; color: var(--faint); font-size: 16px; padding: 4px 8px; }
+  .icon-btn:hover { color: var(--ink); }
+
+  /* ---------- 开关 ---------- */
+  .switch { position: relative; display: inline-block; width: 36px; height: 20px; flex: none; vertical-align: middle; }
+  .switch input { display: none; }
+  .switch .knob { position: absolute; inset: 0; background: #cdd4e0; border-radius: 999px; transition: .15s; cursor: pointer; }
+  .switch .knob::after { content: ""; position: absolute; width: 16px; height: 16px; background: #fff;
+                         border-radius: 50%; top: 2px; left: 2px; transition: .15s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+  .switch input:checked + .knob { background: var(--ok); }
+  .switch input:checked + .knob::after { transform: translateX(16px); }
+
+  /* ---------- 徽章 / 状态点 ---------- */
+  .badge { display: inline-flex; align-items: center; padding: 1px 10px; border-radius: 999px;
+           font-size: 12px; font-weight: 600; background: #eef1f6; color: #475069; }
+  .badge.indigo { background: var(--brand-weak); color: var(--brand); }
+  .badge.green { background: #ecfdf5; color: #047857; }
+  .badge.red { background: #fff1f2; color: #be123c; }
+  .badge.amber { background: #fffbeb; color: #b45309; }
+
+  /* ---------- 表格 ---------- */
+  .table-wrap { overflow-x: auto; margin: 0 -6px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; white-space: nowrap;
+       padding: 9px 12px; border-bottom: 1px solid var(--border); background: #f8fafc; }
+  td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tbody tr:hover td { background: #fafbff; }
+  td .sub { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .cell-title { font-weight: 600; }
+  .thumb { width: 44px; height: 56px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border);
+           background: #f1f5f9; display: block; }
+  .thumb-fallback { width: 44px; height: 56px; border-radius: 6px; border: 1px solid var(--border);
+                    background: linear-gradient(160deg, #dfe5ee, #b9c5d4); color: rgba(255,255,255,.9);
+                    display: flex; align-items: center; justify-content: center; font-weight: 700; }
+  .row-actions { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .empty { text-align: center; color: var(--faint); padding: 28px 0 !important; }
+
+  /* ---------- 链路行 / 动态行 ---------- */
+  .line-item { display: flex; align-items: center; gap: 12px; border: 1px solid var(--border);
+               border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; background: #fff; flex-wrap: wrap; }
+  .line-item b { flex: 1; min-width: 90px; }
+  .line-item input[type=text] { max-width: 180px; }
+  .line-item input[type=number] { max-width: 74px; }
+
+  /* ---------- 弹窗 ---------- */
+  .modal-mask { position: fixed; inset: 0; background: rgba(15,23,42,.48); z-index: 100;
+                display: flex; justify-content: center; align-items: flex-start;
+                padding: 44px 16px; overflow-y: auto; }
+  .modal { background: #fff; border-radius: 14px; width: 100%; max-width: 560px;
+           box-shadow: 0 24px 64px rgba(15,23,42,.28); animation: pop .16s ease; }
+  .modal.wide { max-width: 800px; }
+  @keyframes pop { from { transform: translateY(8px); opacity: 0; } }
+  .modal-head { display: flex; align-items: center; justify-content: space-between;
+                padding: 16px 22px; border-bottom: 1px solid var(--border); }
+  .modal-head b { font-size: 15px; }
+  .modal-body { padding: 20px 22px; }
+  .modal-foot { padding: 14px 22px; border-top: 1px solid var(--border);
+                display: flex; gap: 10px; justify-content: flex-end; align-items: center; }
+  .modal-foot .msg { flex: 1; font-size: 12.5px; color: var(--muted); }
+  .modal-section { font-size: 12px; letter-spacing: .1em; color: var(--faint); font-weight: 700;
+                   margin: 20px 0 10px; padding-top: 16px; border-top: 1px dashed var(--border);
+                   display: flex; align-items: center; justify-content: space-between; }
+  .modal-section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+
+  /* ---------- 封面上传 ---------- */
+  .cover-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .cover-preview { width: 96px; height: 120px; object-fit: cover; border: 1px solid var(--border);
+                   border-radius: 8px; background: #f1f5f9; }
+  .cover-fallback { width: 96px; height: 120px; border: 1px dashed #cdd4e0; border-radius: 8px;
+                    display: flex; align-items: center; justify-content: center;
+                    color: var(--faint); font-size: 12px; text-align: center; padding: 8px; }
+
+  /* ---------- 公告项 ---------- */
+  .ann-item { border: 1px solid var(--border); border-radius: 10px; padding: 13px 16px;
+              margin-bottom: 10px; background: #fff; }
+  .ann-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .ann-head b { font-size: 14px; }
+
+  /* ---------- 分页 ---------- */
+  .pager { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+
+  /* ---------- Toast ---------- */
+  #toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 200;
+           padding: 9px 20px; border-radius: 999px; font-size: 13.5px; font-weight: 600;
+           color: #fff; background: #1f2937; box-shadow: 0 8px 24px rgba(15,23,42,.25);
+           animation: pop .18s ease; max-width: 80vw; }
+  #toast.ok { background: #065f46; }
+  #toast.bad { background: #be123c; }
+
+  /* ---------- 登录门 ---------- */
+  .gate-mask { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+               background: var(--bg); z-index: 300; }
+  .gate-card { width: 370px; background: var(--card); border: 1px solid var(--border);
+               border-radius: 16px; box-shadow: var(--shadow); padding: 36px 32px; text-align: center; }
+  .gate-card svg { width: 44px; height: 44px; color: var(--brand); }
+  .gate-card h1 { font-size: 19px; margin: 12px 0 4px; }
+  .gate-card p { color: var(--muted); font-size: 12.5px; margin: 0 0 18px; }
+  .gate-msg { background: #fff1f2; color: #be123c; border: 1px solid #fbd0d9; border-radius: 8px;
+              padding: 8px 12px; font-size: 12.5px; margin-top: 12px; }
+
+  /* ---------- 移动端 ---------- */
+  @media (max-width: 900px) {
+    .sidebar { transform: translateX(-100%); transition: transform .2s ease; }
+    .sidebar.open { transform: none; }
+    .main { margin-left: 0; }
+    .burger { display: inline-flex; background: none; border: none; font-size: 20px;
+              padding: 4px 8px; color: var(--ink); }
+    .sidebar-backdrop.show { display: block; }
+    .content { padding: 16px 14px 60px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 登录门 -->
+<div class="gate-mask" id="gate">
+  <div class="gate-card">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+      <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.6"/>
+      <path d="M12 3v5.4M12 15.6V21M3 12h5.4M15.6 12H21"/>
+    </svg>
+    <h1>废片拯救所 · 管理后台</h1>
+    <p>密码在 backend/.env 的 ADMIN_PASSWORD<br>首次启动会自动生成并打印在日志里</p>
+    <input type="password" id="pwd" placeholder="管理密码" onkeydown="if(event.key==='Enter')doLogin()">
+    <p style="margin-top:16px"><button class="btn-primary" style="width:100%" onclick="doLogin()">登 录</button></p>
+    <div class="gate-msg" id="gate-msg" hidden></div>
+  </div>
+</div>
+
+<!-- 主框架 -->
+<div class="layout" id="app" hidden>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+        <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.6"/>
+        <path d="M12 3v5.4M12 15.6V21M3 12h5.4M15.6 12H21"/>
+      </svg>
+      <div><b>废片拯救所</b><small>PHOTO RESCUE ADMIN</small></div>
+    </div>
+    <nav>
+      <div class="nav-label">概览</div>
+      <div class="nav-item on" data-page="dash" onclick="showPage('dash')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="2" y="2" width="5" height="5" rx="1.2"/><rect x="9" y="2" width="5" height="5" rx="1.2"/>
+          <rect x="2" y="9" width="5" height="5" rx="1.2"/><rect x="9" y="9" width="5" height="5" rx="1.2"/>
+        </svg>仪表盘</div>
+
+      <div class="nav-label">内容管理</div>
+      <div class="nav-item" data-page="tpl" onclick="showPage('tpl')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <path d="M8 2l6 3-6 3-6-3 6-3z"/><path d="M2 8l6 3 6-3"/><path d="M2 11l6 3 6-3"/>
+        </svg>模板管理</div>
+      <div class="nav-item" data-page="ann" onclick="showPage('ann')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <path d="M8 2a4 4 0 0 0-4 4v2.5L2.8 11h10.4L12 8.5V6a4 4 0 0 0-4-4z"/>
+          <path d="M6.5 13a1.5 1.5 0 0 0 3 0" stroke-linecap="round"/>
+        </svg>公告管理</div>
+
+      <div class="nav-label">运营配置</div>
+      <div class="nav-item" data-page="prov" onclick="showPage('prov')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <path d="M9 1.5L3.5 9H7l-1 5.5L11.5 7H8l1-5.5z"/>
+        </svg>供应商与提示词</div>
+      <div class="nav-item" data-page="conf" onclick="showPage('conf')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
+          <circle cx="6" cy="4.5" r="1.7" fill="#fff"/><circle cx="10.5" cy="8" r="1.7" fill="#fff"/>
+          <circle cx="5" cy="11.5" r="1.7" fill="#fff"/>
+        </svg>通用设置</div>
+      <div class="nav-item" data-page="sec" onclick="showPage('sec')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+          <path d="M8 1.8l5 2v3.4c0 3.2-2.1 5.6-5 7-2.9-1.4-5-3.8-5-7V3.8l5-2z"/>
+        </svg>平台与安全</div>
+
+      <div class="nav-label">数据记录</div>
+      <div class="nav-item" data-page="jobs" onclick="showPage('jobs')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <circle cx="8" cy="8" r="6"/><path d="M8 4.8V8l2.4 1.6"/>
+        </svg>任务记录</div>
+      <div class="nav-item" data-page="users" onclick="showPage('users')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <circle cx="6" cy="5.6" r="2.6"/><path d="M1.8 13.6c.6-2.7 2.3-4.1 4.2-4.1s3.6 1.4 4.2 4.1"/>
+          <circle cx="11.6" cy="6.2" r="2"/><path d="M11.8 9.6c1.5.2 2.7 1.5 3.2 3.4"/>
+        </svg>用户管理</div>
+    </nav>
+    <div class="sidebar-foot">Photo Rescue · v2.1</div>
+  </aside>
+  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="toggleSidebar(false)"></div>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="burger" onclick="toggleSidebar()">☰</button>
+      <div class="page-title" id="page-title">仪表盘</div>
+      <span id="topbar-chip" hidden></span>
+      <button class="btn-ghost btn-small" onclick="doLogout()">退出登录</button>
+    </header>
+
+    <main class="content">
+      <!-- 仪表盘 -->
+      <section id="page-dash">
+        <div class="card">
+          <div class="card-head"><h2>今日概览</h2><span class="muted" id="chain-line"></span></div>
+          <div class="stats" id="stats"></div>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h2>供应商状态</h2></div>
+            <div id="prov-chips" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+            <p class="muted" style="margin-bottom:0">打勾 = 密钥齐备可参与修复；顺序与开关在「供应商与提示词」里调</p>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>维护模式</h2></div>
+            <label class="check"><span class="switch"><input type="checkbox" id="mt-quick" onchange="quickMaintenance(this)"><span class="knob"></span></span>
+              开启后 /api/rescue 直接拒绝新任务</label>
+            <p class="muted" id="mt-msg" style="margin-bottom:0"></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 模板管理 -->
+      <section id="page-tpl" hidden>
+        <div class="card">
+          <div class="card-head">
+            <h2>模板分组<small>小程序端按此分组展示</small></h2>
+            <button class="btn-primary btn-small" onclick="openGroupModal(null)">＋ 新建分组</button>
+          </div>
+          <div class="table-wrap"><table id="grp-table"></table></div>
+          <p class="muted" style="margin:10px 0 0">删除分组前需先移走或删除组内模板；停用的分组小程序里不可见</p>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h2>模板列表<small id="tpl-count"></small></h2>
+            <select id="tpl-filter" style="width:auto" onchange="renderTplTable()"></select>
+            <button class="btn-ghost btn-small" onclick="openImportModal()">批量导入</button>
+            <button class="btn-primary btn-small" onclick="openTplModal(null)">＋ 新建模板</button>
+          </div>
+          <div class="table-wrap"><table id="tpl-table"></table></div>
+        </div>
+      </section>
+
+      <!-- 公告管理 -->
+      <section id="page-ann" hidden>
+        <div class="card">
+          <div class="card-head">
+            <h2>公告列表<small>只展示启用的，最新在前，最多 5 条</small></h2>
+            <button class="btn-primary btn-small" onclick="openAnnModal(null)">＋ 发布公告</button>
+          </div>
+          <div id="ann-list"></div>
+        </div>
+      </section>
+
+      <!-- 供应商与提示词 -->
+      <section id="page-prov" hidden>
+        <div class="card">
+          <div class="card-head"><h2>降级链<small>从上到下依次尝试，失败自动落下一级</small></h2></div>
+          <div id="chain-list"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>中转网关（worldcodes / Sub2API 类）</h2></div>
+          <div class="form-grid">
+            <div class="field"><label>Base URL</label><input type="text" id="wc-base"></div>
+            <div class="field"><label>API Key <small>打码=未改动；清空=停用</small></label><input type="text" id="wc-key" placeholder="sk-..."></div>
+            <div class="field"><label>接口路径</label><input type="text" id="wc-endpoint"></div>
+            <div class="field"><label>请求超时（秒）</label><input type="number" id="wc-timeout" min="10" max="600"></div>
+            <div class="field"><label>轻量档模型</label><input type="text" id="wc-ml"></div>
+            <div class="field"><label>轻量档单价（¥/张）</label><input type="number" id="wc-pl" step="0.01" min="0"></div>
+            <div class="field"><label>精细档模型</label><input type="text" id="wc-mf"></div>
+            <div class="field"><label>精细档单价（¥/张）</label><input type="number" id="wc-pf" step="0.01" min="0"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>其它供应商密钥</h2></div>
+          <div class="form-grid">
+            <div class="field"><label>fal.ai Key <small>格式 key_id:key_secret</small></label><input type="text" id="fal-key" placeholder="••••"></div>
+            <div class="field"><label>百度 API Key</label><input type="text" id="bd-key"></div>
+            <div class="field"><label>百度 Secret Key</label><input type="text" id="bd-sk"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>网关修图提示词<small>基础档位兜底用；模板有自己的提示词</small></h2></div>
+          <div class="field"><label>轻量档提示词</label><textarea id="prompt-light"></textarea></div>
+          <div class="field" style="margin-top:12px"><label>精细档提示词</label><textarea id="prompt-fine"></textarea></div>
+          <p style="margin:16px 0 0"><button class="btn-primary" onclick="saveProviders()">保存供应商与提示词</button></p>
+        </div>
+      </section>
+
+      <!-- 通用设置 -->
+      <section id="page-conf" hidden>
+        <div class="card">
+          <div class="card-head"><h2>计费与输出</h2></div>
+          <div class="form-grid">
+            <div class="field"><label>轻量档价格（小鱼干/张）</label><input type="number" id="price-light" min="0" max="9999"></div>
+            <div class="field"><label>精细档价格（小鱼干/张）</label><input type="number" id="price-fine" min="0" max="9999"></div>
+            <div class="field"><label>归一化长边<small>0 = 关闭缩放；改小可省网关费用</small></label><input type="number" id="normalize" min="0" max="8192"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>维护与调试</h2></div>
+          <div class="field"><label>维护文案</label><input type="text" id="mt-message"></div>
+          <label class="check"><span class="switch"><input type="checkbox" id="mt-enabled"><span class="knob"></span></span>开启维护模式</label>
+          <br>
+          <label class="check" style="background:#fffbeb;border:1px dashed #f5d78e;border-radius:8px;padding:8px 12px">
+            <span class="switch"><input type="checkbox" id="free-mode"><span class="knob"></span></span>
+            调试模式（不限次）：小程序跳过小鱼干扣减，鱼干显示 ∞</label>
+          <p style="margin:16px 0 0"><button class="btn-primary" onclick="saveConf()">保存通用设置</button></p>
+        </div>
+      </section>
+
+      <!-- 平台与安全 -->
+      <section id="page-sec" hidden>
+        <div class="card">
+          <div class="card-head"><h2>微信小程序<small>wx.login 登录用</small></h2></div>
+          <div class="form-grid">
+            <div class="field"><label>AppID</label><input type="text" id="wx-appid" placeholder="wx..."></div>
+            <div class="field"><label>AppSecret <small>打码=未改动</small></label><input type="text" id="wx-secret"></div>
+          </div>
+          <p class="muted" style="margin:0">填好后小程序才能登录；小程序后台需把本服务域名加进 request 合法域名</p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>腾讯云<small>内容审核 + COS 对象存储共用</small></h2></div>
+          <div class="form-grid">
+            <div class="field"><label>SecretId</label><input type="text" id="tc-id"></div>
+            <div class="field"><label>SecretKey</label><input type="text" id="tc-key"></div>
+            <div class="field"><label>COS 桶名 <small>如 bucket-1250000000</small></label><input type="text" id="tc-bucket"></div>
+            <div class="field"><label>COS 地域 <small>如 ap-guangzhou</small></label><input type="text" id="tc-region"></div>
+          </div>
+          <p class="muted" style="margin:0">四项齐全即启用直传与封面 COS 存储（上传/下载不占服务器带宽）</p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>内容审核</h2></div>
+          <label class="check"><span class="switch"><input type="checkbox" id="mod-enabled"><span class="knob"></span></span>
+            启用图片机审（上传与结果各查一道，≈ ¥0.0015/张）</label><br>
+          <label class="check"><span class="switch"><input type="checkbox" id="mod-strict"><span class="knob"></span></span>
+            审核服务异常时也拦截（默认放行并记日志，生产建议开启）</label>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>频控与配额</h2></div>
+          <div class="form-grid">
+            <div class="field"><label>每人每日上限（0=不限）</label><input type="number" id="quota-daily" min="0" max="100000"></div>
+            <div class="field"><label>每分钟上限（0=不限）</label><input type="number" id="quota-minute" min="0" max="1000"></div>
+          </div>
+          <p class="muted" style="margin:0 0 14px">调试模式（通用设置页）开启时每日上限不生效</p>
+          <button class="btn-primary" onclick="saveSec()">保存平台与安全设置</button>
+        </div>
+      </section>
+
+      <!-- 任务记录 -->
+      <section id="page-jobs" hidden>
+        <div class="card">
+          <div class="card-head">
+            <h2>最近任务</h2>
+            <button class="btn-ghost btn-small" onclick="loadJobs()">刷新</button>
+          </div>
+          <div class="table-wrap"><table id="jobs-table"></table></div>
+          <div class="pager">
+            <button class="btn-ghost btn-small" id="jobs-prev" onclick="jobsPage(-1)">上一页</button>
+            <span class="muted" id="jobs-page"></span>
+            <button class="btn-ghost btn-small" id="jobs-next" onclick="jobsPage(1)">下一页</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 用户管理 -->
+      <section id="page-users" hidden>
+        <div class="card">
+          <div class="card-head">
+            <h2>用户（最近活跃）</h2>
+            <button class="btn-ghost btn-small" onclick="loadUsers()">刷新</button>
+          </div>
+          <div class="table-wrap"><table id="users-table"></table></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div id="modal-root"></div>
+<div id="toast" hidden></div>
+
+<script>
+"use strict";
+let SETTINGS = null, JOBS_OFFSET = 0;
+let TPL_GROUPS = [], TPLS = [], ANNS = [];
+
+/* ---------- 基础 ---------- */
+const $ = (id) => document.getElementById(id);
+async function api(path, opts = {}) {
+  const res = await fetch("/admin/api" + path, {
+    method: opts.method || "GET",
+    headers: { "X-Admin-Request": "1", "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && path !== "/login") { showGate(); throw new Error("未登录"); }
+  if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+  return data;
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+  (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtTime = (ts) => ts ? new Date(ts * 1000).toLocaleString("zh-CN", { hour12: false }) : "—";
+
+let toastTimer = null;
+function toast(msg, type) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.className = type === "bad" ? "bad" : "ok";
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
+}
+
+/* ---------- 弹窗 ---------- */
+function openModal(html, wide) {
+  $("modal-root").innerHTML =
+    `<div class="modal-mask" onclick="maskClose(event)"><div class="modal ${wide ? "wide" : ""}">${html}</div></div>`;
+}
+function maskClose(e) { if (e.target.classList.contains("modal-mask")) closeModal(); }
+function closeModal() { $("modal-root").innerHTML = ""; }
+
+/* ---------- 登录 ---------- */
+async function doLogin() {
+  try {
+    $("gate-msg").hidden = true;
+    await api("/login", { method: "POST", body: { password: $("pwd").value } });
+    $("pwd").value = "";
+    enterApp();
+  } catch (e) {
+    const m = $("gate-msg"); m.textContent = e.message; m.hidden = false;
+  }
+}
+async function doLogout() {
+  try { await api("/logout", { method: "POST" }); } catch (e) {}
+  showGate();
+}
+function showGate() { $("app").hidden = true; $("gate").hidden = false; }
+async function enterApp() {
+  $("gate").hidden = true; $("app").hidden = false;
+  SETTINGS = await api("/settings");
+  showPage("dash");
+}
+showGate();
+api("/session").then(enterApp).catch(() => {});
+
+/* ---------- 侧边栏导航 ---------- */
+const PAGES = {
+  dash:  { title: "仪表盘",        load: loadOverview },
+  tpl:   { title: "模板管理",      load: loadTemplates },
+  ann:   { title: "公告管理",      load: loadAnnouncements },
+  prov:  { title: "供应商与提示词", load: () => { renderChain(); renderProviderForm(); } },
+  conf:  { title: "通用设置",      load: renderConf },
+  sec:   { title: "平台与安全",    load: renderSec },
+  jobs:  { title: "任务记录",      load: loadJobs },
+  users: { title: "用户管理",      load: loadUsers },
+};
+function showPage(name) {
+  document.querySelectorAll("section[id^='page-']").forEach((s) => {
+    s.hidden = s.id !== "page-" + name;
+  });
+  document.querySelectorAll(".nav-item").forEach((n) =>
+    n.classList.toggle("on", n.dataset.page === name));
+  $("page-title").textContent = PAGES[name].title;
+  toggleSidebar(false);
+  closeModal();
+  try { PAGES[name].load(); } catch (e) { console.error(e); }
+}
+function toggleSidebar(force) {
+  const sb = $("sidebar");
+  const open = force !== undefined ? force : !sb.classList.contains("open");
+  sb.classList.toggle("open", open);
+  $("sidebar-backdrop").classList.toggle("show", open);
+}
+
+/* ---------- 仪表盘 ---------- */
+async function loadOverview() {
+  try {
+    const o = await api("/overview");
+    const s = o.stats;
+    $("stats").innerHTML =
+      stat(s.today_total, "今日任务") + stat(s.today_succeeded, "今日成功") +
+      stat(s.today_failed, "今日失败") + stat(s.running, "进行中") +
+      stat("¥" + (s.today_cost_cny ?? 0).toFixed(2), "今日网关成本") +
+      stat("$" + (s.today_cost_usd ?? 0).toFixed(3), "今日 fal 成本");
+    $("chain-line").textContent = "降级链：" + o.chain.join(" → ") +
+      (o.free_mode ? "　【调试模式】" : "");
+    const NAMES = { worldcodes: "中转网关", fal: "fal.ai", baidu: "百度 AI", local: "本地引擎" };
+    $("prov-chips").innerHTML = Object.entries(o.configured).map(([k, v]) =>
+      `<span class="badge ${v ? "green" : "red"}">${v ? "✓" : "✗"} ${NAMES[k] || k}</span>`).join("") +
+      (o.cos_ready ? `<span class="badge indigo">COS 直传就绪</span>` : `<span class="badge">COS 未配置</span>`) +
+      (o.moderation?.enabled ? `<span class="badge indigo">机审开启</span>` : "");
+    $("mt-quick").checked = o.maintenance.enabled;
+    $("mt-msg").textContent = "当前文案：" + (o.maintenance.message || "（空）");
+    const chip = $("topbar-chip");
+    if (o.maintenance.enabled) {
+      chip.className = "top-chip red"; chip.innerHTML = '<span class="dot"></span>维护中'; chip.hidden = false;
+    } else if (o.free_mode) {
+      chip.className = "top-chip red"; chip.innerHTML = '<span class="dot"></span>调试模式'; chip.hidden = false;
+    } else {
+      chip.hidden = true;
+    }
+  } catch (e) { console.error(e); }
+}
+const stat = (v, label) => `<div class="stat"><b>${esc(v)}</b><span>${esc(label)}</span></div>`;
+
+async function quickMaintenance(box) {
+  try {
+    await api("/settings", { method: "PUT", body: { maintenance: { enabled: box.checked } } });
+    SETTINGS = await api("/settings");
+    toast(box.checked ? "维护模式已开启" : "维护模式已关闭");
+    loadOverview();
+  } catch (e) { box.checked = !box.checked; toast(e.message, "bad"); }
+}
+
+/* ---------- 供应商与提示词 ---------- */
+const PROV_NAMES = { worldcodes: "中转网关", fal: "fal.ai", baidu: "百度 AI", local: "本地引擎" };
+
+function renderChain() {
+  const box = $("chain-list"); box.innerHTML = "";
+  SETTINGS.chain.forEach((name, i) => {
+    const conf = SETTINGS.providers[name] || {};
+    const row = document.createElement("div"); row.className = "line-item";
+    row.innerHTML =
+      `<label class="switch"><input type="checkbox" ${conf.enabled ? "checked" : ""}
+         onchange="toggleProv('${name}', this)"><span class="knob"></span></label>
+       <b>${PROV_NAMES[name] || name} <code>${name}</code></b>
+       <button class="btn-ghost btn-small" ${i === 0 ? "disabled" : ""}
+         onclick="moveProv(${i}, -1)">↑</button>
+       <button class="btn-ghost btn-small" ${i === SETTINGS.chain.length - 1 ? "disabled" : ""}
+         onclick="moveProv(${i}, 1)">↓</button>`;
+    box.appendChild(row);
+  });
+}
+window.toggleProv = async (name, box) => {
+  try {
+    SETTINGS = await api("/settings", { method: "PUT",
+      body: { providers: { [name]: { enabled: box.checked } } } });
+    renderChain(); if (!$("page-dash").hidden) loadOverview();
+  } catch (e) { box.checked = !box.checked; toast(e.message, "bad"); }
+};
+window.moveProv = async (i, dir) => {
+  const chain = [...SETTINGS.chain];
+  [chain[i], chain[i + dir]] = [chain[i + dir], chain[i]];
+  try {
+    SETTINGS = await api("/settings", { method: "PUT", body: { chain } });
+    renderChain();
+  } catch (e) { toast(e.message, "bad"); }
+};
+
+function renderProviderForm() {
+  const wc = SETTINGS.providers.worldcodes || {};
+  $("wc-base").value = wc.base_url || "";
+  $("wc-key").value = wc.api_key || "";
+  $("wc-endpoint").value = wc.endpoint || "";
+  $("wc-timeout").value = wc.timeout ?? 180;
+  $("wc-ml").value = wc.model_light || "";
+  $("wc-pl").value = wc.price_light_cny ?? 0.04;
+  $("wc-mf").value = wc.model_fine || "";
+  $("wc-pf").value = wc.price_fine_cny ?? 0.15;
+  $("fal-key").value = SETTINGS.providers.fal?.api_key || "";
+  $("bd-key").value = SETTINGS.providers.baidu?.api_key || "";
+  $("bd-sk").value = SETTINGS.providers.baidu?.secret_key || "";
+  $("prompt-light").value = SETTINGS.prompts?.light || "";
+  $("prompt-fine").value = SETTINGS.prompts?.fine || "";
+}
+window.saveProviders = async () => {
+  try {
+    SETTINGS = await api("/settings", { method: "PUT", body: { providers: {
+      worldcodes: {
+        base_url: $("wc-base").value.trim(), api_key: $("wc-key").value.trim(),
+        endpoint: $("wc-endpoint").value.trim(),
+        timeout: parseInt($("wc-timeout").value, 10) || 180,
+        model_light: $("wc-ml").value.trim(),
+        price_light_cny: parseFloat($("wc-pl").value) || 0,
+        model_fine: $("wc-mf").value.trim(),
+        price_fine_cny: parseFloat($("wc-pf").value) || 0,
+      },
+      fal: { api_key: $("fal-key").value.trim() },
+      baidu: { api_key: $("bd-key").value.trim(), secret_key: $("bd-sk").value.trim() },
+    }, prompts: { light: $("prompt-light").value, fine: $("prompt-fine").value } } });
+    renderProviderForm();
+    toast("已保存并即时生效");
+  } catch (e) { toast(e.message, "bad"); }
+};
+
+/* ---------- 通用设置 ---------- */
+function renderConf() {
+  $("price-light").value = SETTINGS.prices?.light ?? 1;
+  $("price-fine").value = SETTINGS.prices?.fine ?? 3;
+  $("normalize").value = SETTINGS.normalize_long_side ?? 1536;
+  $("mt-message").value = SETTINGS.maintenance?.message || "";
+  $("mt-enabled").checked = SETTINGS.maintenance?.enabled || false;
+  $("free-mode").checked = SETTINGS.free_mode || false;
+}
+window.saveConf = async () => {
+  try {
+    SETTINGS = await api("/settings", { method: "PUT", body: {
+      prices: { light: parseInt($("price-light").value, 10) || 0,
+                fine: parseInt($("price-fine").value, 10) || 0 },
+      normalize_long_side: parseInt($("normalize").value, 10) || 0,
+      maintenance: { enabled: $("mt-enabled").checked,
+                     message: $("mt-message").value },
+      free_mode: $("free-mode").checked } });
+    renderConf();
+    toast("已保存并即时生效");
+  } catch (e) { toast(e.message, "bad"); }
+};
+
+/* ---------- 平台与安全 ---------- */
+function renderSec() {
+  $("wx-appid").value = SETTINGS.wechat?.app_id || "";
+  $("wx-secret").value = SETTINGS.wechat?.app_secret || "";
+  $("tc-id").value = SETTINGS.tencent?.secret_id || "";
+  $("tc-key").value = SETTINGS.tencent?.secret_key || "";
+  $("tc-bucket").value = SETTINGS.tencent?.cos_bucket || "";
+  $("tc-region").value = SETTINGS.tencent?.cos_region || "";
+  $("mod-enabled").checked = SETTINGS.moderation?.enabled || false;
+  $("mod-strict").checked = SETTINGS.moderation?.block_on_error || false;
+  $("quota-daily").value = SETTINGS.quota?.daily ?? 20;
+  $("quota-minute").value = SETTINGS.quota?.per_minute ?? 3;
+}
+window.saveSec = async () => {
+  try {
+    SETTINGS = await api("/settings", { method: "PUT", body: {
+      wechat: { app_id: $("wx-appid").value.trim(), app_secret: $("wx-secret").value.trim() },
+      tencent: { secret_id: $("tc-id").value.trim(), secret_key: $("tc-key").value.trim(),
+                 cos_bucket: $("tc-bucket").value.trim(), cos_region: $("tc-region").value.trim() },
+      moderation: { enabled: $("mod-enabled").checked, block_on_error: $("mod-strict").checked },
+      quota: { daily: parseInt($("quota-daily").value, 10) || 0,
+               per_minute: parseInt($("quota-minute").value, 10) || 0 } } });
+    renderSec();
+    toast("已保存并即时生效");
+  } catch (e) { toast(e.message, "bad"); }
+};
+
+/* ---------- 公告管理 ---------- */
+async function loadAnnouncements() {
+  try {
+    ANNS = (await api("/announcements")).items;
+    const box = $("ann-list"); box.innerHTML = "";
+    if (!ANNS.length) { box.innerHTML = '<p class="muted" style="text-align:center;padding:20px 0">还没有公告</p>'; return; }
+    ANNS.forEach((a) => {
+      const row = document.createElement("div"); row.className = "ann-item";
+      row.innerHTML =
+        `<div class="ann-head"><b>${esc(a.title)}</b>
+           <span class="badge ${{ info: "", warn: "amber", critical: "red" }[a.level] || ""}">
+             ${{ info: "通知", warn: "提醒", critical: "紧急" }[a.level] || a.level}</span>
+           <span class="badge ${a.enabled ? "green" : ""}">${a.enabled ? "展示中" : "已停用"}</span>
+           <span class="muted">${fmtTime(a.created_at)}</span>
+           <span style="flex:1"></span>
+           <label class="switch"><input type="checkbox" ${a.enabled ? "checked" : ""}
+             onchange="toggleAnn('${a.id}', this)"><span class="knob"></span></label>
+           <button class="btn-ghost btn-small" onclick="openAnnModal('${a.id}')">编辑</button>
+           <button class="btn-danger btn-small" onclick="delAnn('${a.id}')">删除</button></div>
+         <div style="margin-top:8px;font-size:13px;color:var(--muted);white-space:pre-wrap">${esc(a.body)}</div>`;
+      box.appendChild(row);
+    });
+  } catch (e) { console.error(e); }
+}
+window.toggleAnn = async (id, box) => {
+  try {
+    await api("/announcements/" + id, { method: "PUT", body: { enabled: box.checked } });
+    loadAnnouncements();
+  } catch (e) { box.checked = !box.checked; toast(e.message, "bad"); }
+};
+window.delAnn = async (id) => {
+  if (!confirm("确定删除这条公告？")) return;
+  try { await api("/announcements/" + id, { method: "DELETE" }); toast("已删除"); loadAnnouncements(); }
+  catch (e) { toast(e.message, "bad"); }
+};
+function openAnnModal(id) {
+  const a = id ? ANNS.find((x) => x.id === id) : null;
+  const lv = a ? a.level : "info";
+  openModal(`
+    <div class="modal-head"><b>${a ? "编辑公告" : "发布公告"}</b>
+      <button class="icon-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="field"><label>标题（≤60 字）</label><input type="text" id="m-ann-title" maxlength="60" value="${esc(a?.title || "")}"></div>
+        <div class="field"><label>级别</label><select id="m-ann-level">
+          <option value="info" ${lv === "info" ? "selected" : ""}>通知</option>
+          <option value="warn" ${lv === "warn" ? "selected" : ""}>提醒</option>
+          <option value="critical" ${lv === "critical" ? "selected" : ""}>紧急</option></select></div>
+      </div>
+      <div class="field"><label>正文（≤2000 字，小程序端纯文本展示）</label>
+        <textarea id="m-ann-body" maxlength="2000" style="min-height:130px">${esc(a?.body || "")}</textarea></div>
+      <label class="check"><input type="checkbox" id="m-ann-enabled" ${!a || a.enabled ? "checked" : ""}> 立即启用</label>
+    </div>
+    <div class="modal-foot"><span class="msg" id="m-ann-msg"></span>
+      <button class="btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn-primary" onclick="saveAnnouncement('${a ? a.id : ""}')">保存</button></div>
+  `);
+}
+window.saveAnnouncement = async (id) => {
+  const payload = { title: $("m-ann-title").value, body: $("m-ann-body").value,
+                    level: $("m-ann-level").value, enabled: $("m-ann-enabled").checked };
+  try {
+    if (id) await api("/announcements/" + id, { method: "PUT", body: payload });
+    else await api("/announcements", { method: "POST", body: payload });
+    closeModal(); toast("公告已保存"); loadAnnouncements();
+  } catch (e) { $("m-ann-msg").textContent = "✗ " + e.message; }
+};
+
+/* ---------- 模板管理：分组 ---------- */
+async function loadTemplates() {
+  try {
+    const [g, t] = await Promise.all([api("/template-groups"), api("/templates")]);
+    TPL_GROUPS = g.items; TPLS = t.items;
+    renderGroupTable(); renderTplFilter(); renderTplTable();
+  } catch (e) { console.error(e); }
+}
+
+function renderGroupTable() {
+  const t = $("grp-table");
+  t.innerHTML = "<thead><tr><th>分组名</th><th>ID</th><th>模板数</th><th>排序</th><th>启用</th><th style='width:150px'>操作</th></tr></thead><tbody></tbody>";
+  const tbody = t.tBodies[0];
+  if (!TPL_GROUPS.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">还没有分组</td></tr>'; return; }
+  TPL_GROUPS.forEach((g) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td class="cell-title">${esc(g.name)}</td>
+       <td><code>${esc(g.id)}</code></td>
+       <td>${g.template_count ?? 0}</td>
+       <td>${esc(g.sort)}</td>
+       <td><span class="badge ${g.enabled ? "green" : ""}">${g.enabled ? "启用" : "停用"}</span></td>
+       <td><div class="row-actions">
+         <button class="btn-ghost btn-small" onclick="openGroupModal('${g.id}')">编辑</button>
+         <button class="btn-danger btn-small" ${(g.template_count ?? 0) > 0 ? "disabled title='组内还有模板'" : ""}
+           onclick="delGroup('${g.id}')">删除</button></div></td>`;
+    tbody.appendChild(tr);
+  });
+}
+function openGroupModal(id) {
+  const g = id ? TPL_GROUPS.find((x) => x.id === id) : null;
+  openModal(`
+    <div class="modal-head"><b>${g ? "编辑分组" : "新建分组"}</b>
+      <button class="icon-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="field"><label>分组名（≤20 字）</label><input type="text" id="m-grp-name" maxlength="20" value="${esc(g?.name || "")}" placeholder="如：国风水墨"></div>
+        <div class="field"><label>排序<small>数字小的排前面</small></label><input type="number" id="m-grp-sort" value="${g ? g.sort : 99}"></div>
+      </div>
+      <label class="check"><input type="checkbox" id="m-grp-enabled" ${!g || g.enabled ? "checked" : ""}> 启用（小程序可见）</label>
+    </div>
+    <div class="modal-foot"><span class="msg" id="m-grp-msg"></span>
+      <button class="btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn-primary" onclick="saveGroup('${g ? g.id : ""}')">保存</button></div>
+  `);
+}
+window.saveGroup = async (id) => {
+  const payload = { name: $("m-grp-name").value, sort: parseInt($("m-grp-sort").value, 10) || 0,
+                    enabled: $("m-grp-enabled").checked };
+  try {
+    if (id) await api("/template-groups/" + id, { method: "PUT", body: payload });
+    else await api("/template-groups", { method: "POST", body: payload });
+    closeModal(); toast("分组已保存"); loadTemplates();
+  } catch (e) { $("m-grp-msg").textContent = "✗ " + e.message; }
+};
+window.delGroup = async (id) => {
+  if (!confirm("确定删除这个分组？（组内有模板时会拒绝）")) return;
+  try { await api("/template-groups/" + id, { method: "DELETE" }); toast("分组已删除"); loadTemplates(); }
+  catch (e) { toast(e.message, "bad"); }
+};
+
+/* ---------- 模板管理：模板 ---------- */
+function renderTplFilter() {
+  const sel = $("tpl-filter");
+  const cur = sel.value;
+  sel.innerHTML = `<option value="">全部分组（${TPLS.length}）</option>` +
+    TPL_GROUPS.map((g) => {
+      const n = TPLS.filter((t) => t.group_id === g.id).length;
+      return `<option value="${esc(g.id)}">${esc(g.name)}（${n}）</option>`;
+    }).join("");
+  if (cur) sel.value = cur;
+}
+
+function renderTplTable() {
+  const filter = $("tpl-filter").value;
+  const rows = TPLS.filter((t) => !filter || t.group_id === filter);
+  const gname = (id) => (TPL_GROUPS.find((x) => x.id === id) || {}).name || id;
+  $("tpl-count").textContent = filter ? "" : `共 ${TPLS.length} 个`;
+  const t = $("tpl-table");
+  t.innerHTML = "<thead><tr><th>封面</th><th>模板</th><th>分组</th><th>引擎</th><th>价格</th>" +
+                "<th>输出</th><th>使用</th><th>启用</th><th style='width:150px'>操作</th></tr></thead><tbody></tbody>";
+  const tbody = t.tBodies[0];
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">这个分组下还没有模板</td></tr>'; return; }
+  rows.forEach((tpl) => {
+    const tr = document.createElement("tr");
+    const extra = [
+      tpl.output_size > 0 ? tpl.output_size + "px 长边" : "",
+      tpl.model_override ? "模型 " + tpl.model_override : "",
+      tpl.gateway_size ? "size " + tpl.gateway_size : "",
+    ].filter(Boolean).join(" · ");
+    tr.innerHTML =
+      `<td>${tpl.cover_url
+          ? `<img class="thumb" src="${esc(tpl.cover_url)}" alt="">`
+          : `<div class="thumb-fallback">${esc((tpl.name || "?")[0])}</div>`}</td>
+       <td><span class="cell-title">${esc(tpl.name)}</span>
+           <span class="sub">${esc(tpl.subtitle || "")}</span>
+           ${extra ? `<span class="sub">${esc(extra)}</span>` : ""}</td>
+       <td>${esc(gname(tpl.group_id))}</td>
+       <td><span class="badge ${tpl.engine === "fine" ? "indigo" : ""}">${esc(tpl.engine)}</span></td>
+       <td>${tpl.price > 0 ? tpl.price + " 干" : '<span class="muted">按档位</span>'}</td>
+       <td>${tpl.output_size > 0 ? esc(tpl.output_size + "px") : "—"}</td>
+       <td>${tpl.usage_count ?? 0}</td>
+       <td><label class="switch"><input type="checkbox" ${tpl.enabled ? "checked" : ""}
+         onchange="toggleTpl('${tpl.id}', this)"><span class="knob"></span></label></td>
+       <td><div class="row-actions">
+         <button class="btn-ghost btn-small" onclick="openTplModal('${tpl.id}')">编辑</button>
+         <button class="btn-danger btn-small" onclick="delTpl('${tpl.id}')">删除</button></div></td>`;
+    tbody.appendChild(tr);
+  });
+}
+window.toggleTpl = async (id, box) => {
+  try {
+    await api("/templates/" + id, { method: "PUT", body: { enabled: box.checked } });
+    toast(box.checked ? "模板已启用" : "模板已停用");
+  } catch (e) { box.checked = !box.checked; toast(e.message, "bad"); }
+};
+window.delTpl = async (id) => {
+  if (!confirm("确定删除这个模板？")) return;
+  try { await api("/templates/" + id, { method: "DELETE" }); toast("模板已删除"); loadTemplates(); }
+  catch (e) { toast(e.message, "bad"); }
+};
+
+const ROLE_NAMES = { title: "标题", subtitle: "副标题", date: "日期", sign: "落款", body: "正文" };
+const FIELD_ROLES = ["title", "subtitle", "date", "sign", "body"];
+const LAYOUT_NAMES = { "": "无文字排版", postcard_bottom: "明信片 · 底部卡带",
+                       poster_center: "海报 · 下三分之一居中", stamp_corner: "邮票 · 右上角标" };
+
+function openTplModal(id) {
+  const t = id ? TPLS.find((x) => x.id === id) : null;
+  const groupOpts = TPL_GROUPS.map((g) =>
+    `<option value="${esc(g.id)}" ${t && t.group_id === g.id ? "selected" : ""}>${esc(g.name)}</option>`).join("");
+  const layoutOpts = Object.entries(LAYOUT_NAMES).map(([v, n]) =>
+    `<option value="${v}" ${t && (t.layout || "") === v ? "selected" : ""}>${n}</option>`).join("");
+  openModal(`
+    <div class="modal-head"><b id="m-tpl-title">${t ? "编辑模板 · " + esc(t.name) : "新建模板"}</b>
+      <button class="icon-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="m-tpl-id" value="${t ? esc(t.id) : ""}">
+      <div class="modal-section">基本信息</div>
+      <div class="form-grid">
+        <div class="field"><label>名称（≤20 字）</label><input type="text" id="m-tpl-name" maxlength="20" value="${esc(t?.name || "")}"></div>
+        <div class="field"><label>所属分组</label><select id="m-tpl-group">${groupOpts}</select></div>
+        <div class="field"><label>引擎档位</label><select id="m-tpl-engine">
+          <option value="light" ${t && t.engine === "light" ? "selected" : ""}>light（轻量模型）</option>
+          <option value="fine" ${t && t.engine === "fine" ? "selected" : ""}>fine（精细模型）</option></select></div>
+        <div class="field"><label>排序</label><input type="number" id="m-tpl-sort" value="${t ? t.sort : 99}"></div>
+        <div class="field" style="grid-column: 1 / -1"><label>副标题（≤60 字，小程序卡片展示）</label>
+          <input type="text" id="m-tpl-subtitle" maxlength="60" value="${esc(t?.subtitle || "")}"></div>
+      </div>
+      <label class="check"><input type="checkbox" id="m-tpl-enabled" ${!t || t.enabled ? "checked" : ""}> 启用（小程序可见）</label>
+
+      <div class="modal-section">生成参数</div>
+      <div class="field"><label>提示词（发给模型的完整指令，≤4000 字）</label>
+        <textarea id="m-tpl-prompt" style="min-height:130px">${esc(t?.prompt || "")}</textarea>
+        <span class="muted">要叠加文字的模板，务必写明"画面本身不要包含任何文字"，文字由排版引擎保证正确</span></div>
+      <div class="form-grid" style="margin-top:14px">
+        <div class="field"><label>小鱼干价格<small>0 = 按档位默认价</small></label><input type="number" id="m-tpl-price" min="0" max="9999" value="${t ? t.price : 0}"></div>
+        <div class="field"><label>输出长边<small>0 = 不处理；印刷级填 2048</small></label><input type="number" id="m-tpl-outsize" min="0" max="8192" value="${t ? t.output_size : 0}"></div>
+        <div class="field"><label>网关 size 参数<small>如 2048x2048；不支持会自动忽略</small></label><input type="text" id="m-tpl-gsize" value="${esc(t?.gateway_size || "")}" placeholder="留空不传"></div>
+        <div class="field"><label>模型覆盖<small>如供应商原生 2K/4K 模型名</small></label><input type="text" id="m-tpl-model" value="${esc(t?.model_override || "")}" placeholder="留空用档位默认模型"></div>
+      </div>
+
+      <div class="modal-section">文字排版
+        <span class="field" style="max-width:230px"><select id="m-tpl-layout">${layoutOpts}</select></span>
+      </div>
+      <div id="tf-rows"></div>
+      <p style="margin:10px 0 0"><button class="btn-ghost btn-small" onclick="addFieldRow()">＋ 加一个字段</button>
+        <span class="muted" style="margin-left:8px">代码叠加中文保证文字正确；默认值支持 {today}；最多 6 个</span></p>
+
+      <div class="modal-section">封面示例图</div>
+      <div class="cover-row">
+        <img id="m-cover-preview" class="cover-preview" alt="" src="${t?.cover_url || ""}" ${t?.cover_url ? "" : "hidden"}>
+        <div id="m-cover-fallback" class="cover-fallback" ${t?.cover_url ? "hidden" : ""}>暂无封面<br>上传或保存后设置</div>
+        <div style="flex:1;min-width:200px">
+          <input type="file" id="m-cover-file" accept="image/*" style="font-size:12.5px">
+          <p class="muted" style="margin:6px 0 10px">长边自动压到 720。配了 COS 走对象存储直链（不占服务器带宽），否则存本地由后端发放</p>
+          <button class="btn-ghost btn-small" id="m-cover-btn" onclick="uploadCover()">上传封面</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot"><span class="msg" id="m-tpl-msg"></span>
+      <button class="btn-ghost" onclick="closeModal()">关闭</button>
+      <button class="btn-primary" onclick="saveTpl()">保存模板</button></div>
+  `, true);
+  (t?.text_fields || []).forEach((f) => addFieldRow(f));
+}
+window.addFieldRow = (f) => {
+  f = f || {};
+  const box = $("tf-rows");
+  const row = document.createElement("div"); row.className = "line-item tf-row";
+  row.innerHTML =
+    `<select style="max-width:96px" data-f="role">${FIELD_ROLES.map((r) =>
+       `<option value="${r}" ${f.role === r ? "selected" : ""}>${ROLE_NAMES[r]}</option>`).join("")}</select>
+     <input type="text" placeholder="标签" style="max-width:100px" data-f="label" value="${esc(f.label || "")}">
+     <input type="text" placeholder="默认值（{today}=当天）" data-f="default" value="${esc(f.default || "")}">
+     <input type="number" placeholder="字数上限" style="max-width:90px" data-f="max_len" value="${f.max_len ?? 20}" min="1" max="200">
+     <button class="btn-danger btn-small" onclick="this.closest('.tf-row').remove()">删</button>`;
+  box.appendChild(row);
+};
+const collectFields = () => [...document.querySelectorAll("#tf-rows .tf-row")]
+  .map((row) => ({
+    role: row.querySelector("[data-f=role]").value,
+    label: row.querySelector("[data-f=label]").value.trim(),
+    default: row.querySelector("[data-f=default]").value,
+    max_len: parseInt(row.querySelector("[data-f=max_len]").value, 10) || 20,
+    key: row.querySelector("[data-f=label]").value.trim() || Math.random().toString(36).slice(2, 8),
+  }))
+  .filter((f) => f.label);
+
+window.saveTpl = async () => {
+  const id = $("m-tpl-id").value;
+  const payload = {
+    name: $("m-tpl-name").value.trim(), group_id: $("m-tpl-group").value,
+    engine: $("m-tpl-engine").value, subtitle: $("m-tpl-subtitle").value,
+    prompt: $("m-tpl-prompt").value, price: parseInt($("m-tpl-price").value, 10) || 0,
+    output_size: parseInt($("m-tpl-outsize").value, 10) || 0,
+    gateway_size: $("m-tpl-gsize").value.trim(), model_override: $("m-tpl-model").value.trim(),
+    sort: parseInt($("m-tpl-sort").value, 10) || 99, layout: $("m-tpl-layout").value,
+    enabled: $("m-tpl-enabled").checked, text_fields: collectFields(),
+  };
+  try {
+    let saved;
+    if (id) saved = await api("/templates/" + id, { method: "PUT", body: payload });
+    else saved = await api("/templates", { method: "POST", body: payload });
+    await loadTemplates();
+    // 停留在弹窗并转为编辑态，方便接着上传封面
+    $("m-tpl-id").value = saved.id;
+    $("m-tpl-title").textContent = "编辑模板 · " + saved.name;
+    $("m-tpl-msg").textContent = "✓ 已保存，小程序端即时生效" + (id ? "" : "，现在可以上传封面了");
+    toast("模板已保存");
+  } catch (e) { $("m-tpl-msg").textContent = "✗ " + e.message; }
+};
+
+window.uploadCover = async () => {
+  const id = $("m-tpl-id").value;
+  const msg = $("m-tpl-msg");
+  if (!id) { msg.textContent = "✗ 先保存模板，再上传封面"; return; }
+  const f = $("m-cover-file").files[0];
+  if (!f) { msg.textContent = "✗ 先选择图片文件"; return; }
+  const fd = new FormData(); fd.append("file", f);
+  try {
+    const res = await fetch("/admin/api/templates/" + id + "/cover", {
+      method: "POST", headers: { "X-Admin-Request": "1" },
+      credentials: "same-origin", body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || "HTTP " + res.status);
+    $("m-cover-preview").src = URL.createObjectURL(f);
+    $("m-cover-preview").hidden = false;
+    $("m-cover-fallback").hidden = true;
+    msg.textContent = "✓ 封面已更新";
+    toast("封面已更新");
+    loadTemplates();
+  } catch (e) { msg.textContent = "✗ " + e.message; }
+};
+
+function openImportModal() {
+  openModal(`
+    <div class="modal-head"><b>批量导入模板</b>
+      <button class="icon-btn" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label>JSON 数组，字段与单个模板一致，group_id 填已有分组 id</label>
+        <textarea id="m-import" style="min-height:170px" placeholder='[{"group_id":"anime","name":"像素小人","subtitle":"8-bit 像素风","prompt":"把照片变成像素风……","engine":"fine","price":3}]'></textarea></div>
+    </div>
+    <div class="modal-foot"><span class="msg" id="m-import-msg"></span>
+      <button class="btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn-primary" onclick="importTpls()">导入</button></div>
+  `);
+}
+window.importTpls = async () => {
+  const msg = $("m-import-msg");
+  let arr;
+  try { arr = JSON.parse($("m-import").value); }
+  catch (e) { msg.textContent = "✗ JSON 解析失败"; return; }
+  if (!Array.isArray(arr)) { msg.textContent = "✗ 需要一个 JSON 数组"; return; }
+  let ok = 0; const errs = [];
+  for (const item of arr) {
+    try { await api("/templates", { method: "POST", body: item }); ok++; }
+    catch (e) { errs.push((item.name || "?") + ": " + e.message); }
+  }
+  if (ok) { await loadTemplates(); }
+  msg.textContent = `✓ 导入 ${ok} 条` + (errs.length ? "，失败：" + errs.join("；") : "");
+  if (ok && !errs.length) { closeModal(); toast(`已导入 ${ok} 个模板`); }
+};
+
+/* ---------- 任务记录 ---------- */
+async function loadJobs() {
+  try {
+    const data = await api("/jobs?offset=" + JOBS_OFFSET + "&limit=50");
+    const t = $("jobs-table");
+    t.innerHTML = "<thead><tr><th>时间</th><th>ID</th><th>档位</th><th>模板</th><th>供应商</th>" +
+                  "<th>状态</th><th>成本</th><th>错误</th></tr></thead><tbody></tbody>";
+    const tbody = t.tBodies[0];
+    data.items.forEach((j) => {
+      const cost = j.cost_cny != null ? "¥" + (+j.cost_cny).toFixed(2)
+                 : j.cost_usd != null ? "$" + (+j.cost_usd).toFixed(4) : "—";
+      const badge = j.status === "succeeded" ? '<span class="badge green">成功</span>'
+                  : j.status === "failed" ? '<span class="badge red">失败</span>'
+                  : '<span class="badge amber">进行中</span>';
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td>${fmtTime(j.created_at)}</td><td><code>${esc(j.id)}</code></td>` +
+        `<td>${esc(j.quality)}</td><td>${esc(j.template_name || "—")}</td>` +
+        `<td>${esc(j.provider || "—")}</td><td>${badge}</td>` +
+        `<td>${cost}</td><td class="muted">${esc(j.error || "")}</td>`;
+      tbody.appendChild(tr);
+    });
+    if (!data.items.length) tbody.innerHTML = '<tr><td colspan="8" class="empty">暂无任务</td></tr>';
+    $("jobs-page").textContent = `第 ${JOBS_OFFSET / 50 + 1} 页 · 共 ${data.total} 条`;
+    $("jobs-prev").disabled = JOBS_OFFSET <= 0;
+    $("jobs-next").disabled = JOBS_OFFSET + 50 >= data.total;
+  } catch (e) { console.error(e); }
+}
+window.jobsPage = (dir) => { JOBS_OFFSET = Math.max(0, JOBS_OFFSET + dir * 50); loadJobs(); };
+
+/* ---------- 用户管理 ---------- */
+async function loadUsers() {
+  try {
+    const data = await api("/users?limit=30");
+    const t = $("users-table");
+    t.innerHTML = "<thead><tr><th>用户</th><th>首次使用</th><th>最近活跃</th><th>已修图</th><th>被拦截</th></tr></thead><tbody></tbody>";
+    const tbody = t.tBodies[0];
+    data.items.forEach((u) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td><code>${esc(u.openid.slice(0, 8))}…</code></td>` +
+        `<td>${fmtTime(u.created_at)}</td><td>${fmtTime(u.last_seen)}</td>` +
+        `<td>${u.total_jobs}</td><td>${u.blocked}</td>`;
+      tbody.appendChild(tr);
+    });
+    if (!data.items.length) tbody.innerHTML = '<tr><td colspan="5" class="empty">还没有用户</td></tr>';
+  } catch (e) { console.error(e); }
+}
+
+/* ---------- 周期刷新 ---------- */
+setInterval(() => {
+  if (!$("app").hidden && !$("page-dash").hidden) loadOverview();
+}, 30000);
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/compare/compare"
+  ],
+  "window": {
+    "backgroundTextStyle": "dark",
+    "navigationBarBackgroundColor": "#f5f2eb",
+    "navigationBarTitleText": "光影画质修复",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f5f2eb"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

@@ -1,0 +1,90 @@
+<view class="compare-page">
+  <!-- 顶部策展画廊导航栏 -->
+  <view class="gallery-nav">
+    <view class="nav-back" bindtap="onClose">
+      <text class="back-glyph">‹</text>
+      <text class="typewriter-label">ARCHIVE</text>
+    </view>
+
+    <view class="nav-spec">
+      <text class="spec-label">{{ quality === 'fine' ? 'EDITION II · 2K MASTER' : 'EDITION I · 1.5K HD' }}</text>
+    </view>
+
+    <view class="quick-export" bindtap="onDownload">
+      <text class="typewriter-label">EXPORT</text>
+    </view>
+  </view>
+
+  <!-- 艺术画廊观览台 (Core Stage) -->
+  <view
+    class="gallery-stage"
+    id="stage"
+    bindtouchstart="onTouchStart"
+    bindtouchmove="onTouchMove"
+    bindtouchend="onTouchEnd"
+  >
+    <!-- 底层：重构后的超高清艺术大画 -->
+    <image
+      class="mat-image"
+      src="{{ resultUrl }}"
+      mode="aspectFit"
+      binderror="onResultError"
+    ></image>
+
+    <!-- 顶层：原画裁剪遮罩层 -->
+    <view
+      class="clip-mat"
+      style="clip-path: inset(0 {{ isPressingOriginal ? 0 : (100 - splitPercent) }}% 0 0);"
+    >
+      <image
+        class="mat-image"
+        src="{{ originalUrl }}"
+        mode="aspectFit"
+        binderror="onOrigError"
+      ></image>
+    </view>
+
+    <!-- 浮动典藏标签 -->
+    <view class="floating-tag tag-before {{ isDragging ? 'tag-faded' : '' }}">
+      <text class="tag-serif">BEFORE</text>
+      <text class="typewriter-label">原始样张</text>
+    </view>
+    <view class="floating-tag tag-after {{ isDragging ? 'tag-faded' : '' }}">
+      <text class="tag-serif">AFTER</text>
+      <text class="typewriter-label">典藏重构</text>
+    </view>
+
+    <!-- 分割线与双向金环手柄 -->
+    <view
+      class="slider-wire"
+      style="left: {{ splitPercent }}%;"
+      hidden="{{ isPressingOriginal }}"
+    >
+      <view class="wire-seal">
+        <text class="seal-arrow">‹</text>
+        <view class="seal-dot"></view>
+        <text class="seal-arrow">›</text>
+      </view>
+    </view>
+
+    <!-- 长按即时检视原画胶囊 -->
+    <view
+      class="hold-capsule {{ isPressingOriginal ? 'capsule-held' : '' }}"
+      catchtouchstart="onPressOriginalStart"
+      catchtouchend="onPressOriginalEnd"
+    >
+      <text class="typewriter-label">{{ isPressingOriginal ? '[ INSPECTING ORIGINAL · 原始画质 ]' : '[ HOLD TO INSPECT ORIGINAL · 按住检视原画 ]' }}</text>
+    </view>
+  </view>
+
+  <!-- 底部典藏导出底栏 -->
+  <view class="gallery-dock">
+    <view class="btn-line dock-btn" bindtap="onChangePhoto">
+      <text class="typewriter-label">← NEW SPECIMEN</text>
+    </view>
+
+    <view class="btn-ink dock-btn-save" bindtap="onDownload">
+      <text class="dock-save-text">EXPORT MASTER ── 保存典藏大片</text>
+    </view>
+  </view>
+</view>

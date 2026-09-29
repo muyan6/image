@@ -1,0 +1,36 @@
+# 依赖与虚拟环境
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# 密钥：绝对不要提交
+.env
+.env.local
+*.key
+
+# 运行时设置与公告（内含供应商密钥，等同 .env 待遇）
+backend/data/
+
+# 运行时产物
+backend/uploads/
+backend/luts/
+*.log
+
+# 本地分析产物
+_recon/
+.zcode/
+_dns_probe.txt
+probes/_submit/
+
+
+# 微信开发者工具私有配置
+project.private.config.json
+miniprogram/project.private.config.json
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+

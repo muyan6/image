@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN" data-theme-mode="random">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#d7f545">
+  <meta name="description" content="James Xian 的个人现场。人类的直觉，机器的想象，一起搞点新东西。">
+  <title>错序现场 · James Xian</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+  <link rel="preload" as="image" href="./assets/collision-seed-mark.webp" type="image/webp">
+  <link rel="stylesheet" href="./collision.css?v=mail-8">
+  <link rel="stylesheet" href="./hero-motion.css?v=seed-4">
+  <link rel="stylesheet" href="./color-lab/fonts/fonts.css">
+  <link rel="stylesheet" href="./color-lab/theme.css?v=chroma-2">
+  <script src="./color-lab/themes.js"></script>
+  <script src="./color-lab/theme.js?v=signal-1"></script>
+  <!-- SIGNAL SEARCH START -->
+  <link rel="stylesheet" href="./signal-search.css?v=seed-4">
+  <script>
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      document.documentElement.classList.add('signal-pending');
+      window.signalSafety = setTimeout(() => {
+        const root = document.documentElement;
+        root.classList.remove('signal-pending', 'signal-tuning', 'motion-pending');
+        document.getElementById('signal-search')?.remove();
+        root.dataset.signalState = 'settled';
+        root.dataset.signalEnd = 'module-fallback';
+        document.dispatchEvent(new CustomEvent('signalsettled', { detail: { reason: 'module-fallback' } }));
+      }, 3200);
+    }
+  </script>
+  <script type="module" src="./signal-search.js?v=seed-4"></script>
+  <!-- SIGNAL SEARCH END -->
+  <script>
+    if (document.documentElement.dataset.themeMode !== 'random' && !document.documentElement.classList.contains('signal-pending') && !location.hash && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      document.documentElement.classList.add('motion-pending');
+      setTimeout(() => document.documentElement.classList.remove('motion-pending'), 1600);
+    }
+  </script>
+  <script src="./vendor/gsap/gsap.min.js"></script>
+  <script src="./vendor/gsap/ScrollTrigger.min.js"></script>
+  <script type="module" src="./collision.js?v=remix-4"></script>
+  <script type="module" src="./hero-motion.js?v=seed-4"></script>
+  <script type="module" src="./ai-usage.js?v=header-5"></script>
+  <script type="module" src="./ink-escape.js?v=seed-4"></script>
+</head>
+<body>
+  <a class="skip-link" href="#page">跳到主要内容</a>
+  <header class="site-header" id="top" tabindex="-1">
+    <a class="wordmark" href="#top" aria-label="James Xian，返回顶部">James <span class="seed-x">X<img src="./assets/collision-seed-mark.webp" alt="" aria-hidden="true" width="50" height="50"></span>ian</a>
+    <div class="usage-control">
+      <button class="header-usage" type="button" aria-expanded="false" aria-haspopup="dialog" aria-controls="usage-popover"><span>TOKEN 消耗</span><strong data-ai-total>读取中</strong><span aria-hidden="true">▣</span></button>
+      <section class="usage-popover" id="usage-popover" role="dialog" aria-labelledby="usage-popover-title" hidden>
+        <div class="usage-popover-head"><div><span class="usage-signal">SIGNAL 01 / AGENTS</span><div class="usage-popover-title" id="usage-popover-title">TOKEN<span> // </span>TRACE<span class="usage-title-channel usage-title-channel-pink" aria-hidden="true">TOKEN // TRACE</span><span class="usage-title-channel usage-title-channel-cyan" aria-hidden="true">TOKEN // TRACE</span></div></div><button class="usage-close" type="button" aria-label="关闭 Token 用量气泡">×</button></div>
+        <div class="usage-popover-total"><span>合计</span><strong data-usage-popover-total>读取中</strong></div>
+        <div class="usage-popover-list" data-usage-popover-list><p class="usage-popover-loading">正在接收统计快照…</p></div>
+        <div class="usage-popover-foot"><span data-usage-popover-updated>读取更新时间…</span><span>SNAPSHOT</span></div>
+        <div class="usage-interference" aria-hidden="true"><span></span><span></span><span></span></div>
+      </section>
+    </div>
+  </header>
+  <main id="page" class="story-stage" tabindex="-1">
+    <section class="hero" tabindex="-1" aria-labelledby="hero-title">
+      <div class="hero-top"><span>James Xian / AI NATIVE</span><span>CAUTION: IDEAS INSIDE</span></div>
+      <div class="hero-stage">
+        <div class="hero-type"><p class="hero-kicker">不按套路，也认真落地。</p><h1 id="hero-title"><span>WHY</span><span>NOT<span class="question">?</span></span></h1></div>
+        <div class="collage">
+          <img class="collage-image" src="./assets/collision-collage.avif" alt="" width="1254" height="1254" decoding="async">
+          <div class="pink-note movable"><span class="micro">NOTE TO THE WORLD</span><strong>别太<br>像别人。</strong><span class="pink-note-foot">STAY A LITTLE<br>UNREASONABLE.</span><span class="note-cross" aria-hidden="true">×</span></div>
+          <div class="seed-seal movable" aria-hidden="true"><img src="./assets/collision-seed-mark.webp" alt="" width="164" height="164"><span>IDEAS<br>HAVE NO<br>DRESS CODE.</span></div>
+          <div class="paper-note movable"><span class="tape"></span><p>人类的直觉。<br>机器的想象。<br><b>一起搞点新东西。</b></p><span class="hand-arrow" aria-hidden="true">↝</span></div>
+          <div class="black-sticker movable" aria-hidden="true">100%<br><strong>未定型</strong></div>
+        </div>
+      </div>
+      <div class="hero-bottom"><p>我是 James Xian。<br>写代码，也给常识打个问号。</p><div class="remix-group"><button id="remix-button" type="button">打乱一下 <span aria-hidden="true">⤨</span></button><span class="remix-status" role="status" aria-live="polite">构图 001</span></div></div>
+      <a class="scene-next" href="#manifesto">向下翻开 <span aria-hidden="true">↓</span></a>
+    </section>
+    <div class="ticker" role="region" aria-label="灵感字带"><div class="ticker-feed" aria-hidden="true"><div class="ticker-track"><span>MAKE A MESS. MAKE A POINT. ✳ 先打破，再创造。 ✳&nbsp;</span><span>MAKE A MESS. MAKE A POINT. ✳ 先打破，再创造。 ✳&nbsp;</span></div></div><span class="ticker-scan" aria-hidden="true"></span><button class="ticker-toggle" type="button" aria-label="暂停字带动画" aria-pressed="false">Ⅱ</button></div>
+    <section class="manifesto" id="manifesto" tabindex="-1" aria-labelledby="manifesto-title"><div class="manifesto-heading"><span class="micro">A SMALL MANIFESTO</span><h2 id="manifesto-title">创造力<br><span>不穿制服。</span></h2></div><div class="statements"><article><span>( A )</span><a class="skill-entry" href="./skills/?v=20260926-plates4" aria-label="技术是颜料，生活才是画布。进入公开 Skill 展场"><p>技术是颜料。<br>生活才是画布。</p><span class="skill-entry-arrow" aria-hidden="true">SKILLS ↗</span></a></article><article><span>( B )</span><p>先问「为什么不」。<br>然后，把它做出来。</p></article><article><span>( C )</span><p>不必处处合理。<br>但要处处是自己。</p></article></div><a class="scene-next" href="#about">接着，认识我 <span aria-hidden="true">↓</span></a></section>
+    <section class="about" id="about" tabindex="-1" aria-labelledby="about-title"><div><span class="micro">THE HUMAN BEHIND THE CHAOS</span><h2 id="about-title">James Xian</h2><p>AI native 开发者。喜欢那些暂时还没有名字的想法，以及把它们变成现实的过程。</p><a class="about-email" href="mailto:xianlinyi@outlook.com"><svg class="about-email-mark" viewBox="0 0 32 28" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="bevel" aria-hidden="true" focusable="false"><path d="M2 5h28v18H2z"/><path d="m2 6 14 10L30 6M3 22l9-9m17 9-9-9"/></svg><span>xianlinyi@outlook.com</span></a></div><a href="#manifesto">重读宣言 <span aria-hidden="true">↗</span></a></section>
+  </main>
+  <footer class="site-footer"><span>James Xian © <span id="year">2026</span></span><span>GOOD IDEAS DON’T STAND IN LINE.</span><a href="#top">返回顶部 ↑</a></footer>
+</body>
+</html>
