@@ -134,8 +134,16 @@ class OpenAIImagesEnhance:
             try:
                 try:
                     if image_url:
-                        payload = self._request_image_by_url(
-                            model, text, image_url, size=use_size)
+                        try:
+                            payload = self._request_image_by_url(
+                                model, text, image_url, size=use_size)
+                        except GatewayError as url_error:
+                            if url_error.status not in (400, 404, 415, 422):
+                                raise
+                            # URL transport and size compatibility are independent.
+                            self.last_notice = "网关不支持 URL 输入，已切换文件上传"
+                            image_url = None
+                            payload = self._request_image(model, text, image_bytes, size=use_size)
                     else:
                         payload = self._request_image(model, text, image_bytes,
                                                       size=use_size)

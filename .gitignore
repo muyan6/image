@@ -31,6 +31,8 @@ project.private.config.json
 miniprogram/project.private.config.json
 
 # 编辑器与系统
+backend/tests/*_results.json
+backend/tests/sandbox_*/
 .vscode/
 .idea/
 .DS_Store

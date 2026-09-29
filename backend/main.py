@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import glob
 import json
 import logging
@@ -42,6 +43,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from admin_api import ensure_admin_password, make_admin_router
+from cleanup_store import CleanupStore
 from cos_store import (CosError, get_object as cos_get,
                        head_exists as cos_head, presign as cos_presign,
                        put_object as cos_put)
@@ -51,7 +53,8 @@ from settings_store import AnnouncementStore, SettingsStore
 from templates_store import TemplateStore, covers_dir
 from text_overlay import apply as apply_text_overlay, collect_values
 from tencent_cs import ModerationError, moderate_image_bytes
-from user_store import UserStore
+from user_store import AdmissionError, UserStore
+from reward_verifier import verify_video
 import wechat_sec
 from wechat_sec import WechatSecError
 from wechat_auth import (WechatAuthError, bearer_of, code2session,
@@ -118,6 +121,9 @@ ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 # 任务保留
 JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", 30 * 24 * 3600))
 JOB_MAX_ENTRIES = int(os.environ.get("JOB_MAX_ENTRIES", 5000))
+ORIGINAL_TTL_SECONDS = int(os.environ.get("ORIGINAL_TTL_SECONDS", 24 * 3600))
+MEDIA_URL_TTL_SECONDS = 600
+_sweeper_stop = threading.Event()
 
 # 每日奖励（服务端记账，客户端只是展示）
 EARN_DEFS: Dict[str, Dict[str, Any]] = {
@@ -155,10 +161,13 @@ async def lifespan(_app: FastAPI):
     )
     if not h["configured"]:
         log.warning("没有任何 AI 后端，全部走本地 engine.py")
+    _sweeper_stop.clear()
+    jobs.sweep()
     _startup_file_gc()
     threading.Thread(target=_bg_sweeper, name="job-sweeper",
                      daemon=True).start()
     yield
+    _sweeper_stop.set()
     pool.shutdown(wait=False, cancel_futures=True)
     log.info("已停止")
 
@@ -185,7 +194,7 @@ engine = ImageRescueEngine(lut_dir=LUT_DIR)
 # --------------------------------------------------------------------------- #
 # 运行时设置 + 公告（backend/data/*.json，后台 /admin 可热改）
 # --------------------------------------------------------------------------- #
-DATA_DIR = os.path.join(BASE_DIR, "data")
+DATA_DIR = os.environ.get("DATA_DIR") or os.path.join(BASE_DIR, "data")
 
 
 def _migrate_env_keys(doc: Dict[str, Any]) -> None:
@@ -222,6 +231,7 @@ settings = SettingsStore(DATA_DIR, mutate_default=_migrate_env_keys)
 announcements = AnnouncementStore(DATA_DIR)
 templates = TemplateStore(DATA_DIR)
 users = UserStore(DATA_DIR)
+cleanup = CleanupStore(DATA_DIR, UPLOAD_DIR)
 
 
 # --------------------------------------------------------------------------- #
@@ -362,7 +372,7 @@ def _moderate_or_reject(image_bytes: bytes, job_ctx: str, openid: str) -> Option
             and len(image_bytes) <= wechat_sec.MAX_WECHAT_CHECK_BYTES:
         try:
             suggestion, label, score = wechat_sec.check_image(
-                settings, image_bytes, openid)
+                settings, image_bytes, openid, cleanup_store=cleanup)
             log.info("[%s] 微信免费审核完成: %s/%s/%s", job_ctx, suggestion, label, score)
         except WechatSecError as exc:
             log.warning("[%s] 微信免费审核不可用(%s)，回退腾讯云: %s",
@@ -394,16 +404,9 @@ def _moderate_or_reject(image_bytes: bytes, job_ctx: str, openid: str) -> Option
 
 
 def _refund_charged(openid: str, job_id: str, price: int) -> None:
-    """任务失败/被拦截时全额退还预扣的光子。"""
-    if price <= 0 or settings.free_mode():
-        return
-    try:
-        balance = users.add_balance(openid, int(price))
-        users.audit(openid, "refund", "job=%s +=%d balance=%d"
-                    % (job_id, price, balance))
-        log.info("[%s] 已退还 %d 光子（余额 %d）", job_id, price, balance)
-    except Exception:  # noqa: BLE001
-        log.exception("[%s] 退还光子失败", job_id)
+    """The price argument is display-only; the durable debit determines refund."""
+    balance = users.refund_job(openid, job_id)
+    log.info("[%s] 扣款流水已核对，余额 %d", job_id, balance)
 
 
 def _crop_aspect_ratio(img: Any, aspect_ratio: str = "") -> Any:
@@ -464,17 +467,15 @@ def _register_job(openid: str, quality: str, style: str,
     光子在提交时预扣（服务端记账，余额不足直接 402），任务失败自动退款。
     """
     price = _effective_price(quality, template)
-    charged = 0
-    balance = users.get_balance(openid)
-    if not settings.free_mode() and price > 0:
-        ok, balance = users.try_spend(openid, price)
-        if not ok:
-            raise HTTPException(
-                status_code=402,
-                detail="光子不足：本次需要 %d ✦，当前余额 %d ✦" % (price, balance))
-        charged = price
-
     job_id = uuid.uuid4().hex[:12]
+    free = settings.free_mode()
+    charged = 0 if free else price
+    try:
+        balance = users.reserve_job(openid, job_id, charged, settings.quota(), free)
+    except AdmissionError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+    orig_path = None
+    orig_cos = result_cos = None
     try:
         orig_file = "orig_%s%s" % (job_id, ext)
         orig_path = os.path.join(UPLOAD_DIR, orig_file)
@@ -505,6 +506,7 @@ def _register_job(openid: str, quality: str, style: str,
         if settings.cos_ready():
             try:
                 orig_cos = "origins/%s/%s%s" % (openid[:8], job_id, ext)
+                cleanup.schedule("cos", orig_cos, time.time() + ORIGINAL_TTL_SECONDS)
                 with open(orig_path, "rb") as fh:
                     cos_put(settings, orig_cos, fh.read())
                 result_cos = "results/%s/%s.jpg" % (openid[:8], job_id)
@@ -520,6 +522,7 @@ def _register_job(openid: str, quality: str, style: str,
             template_id=(template or {}).get("id", ""),
             template_name=(template or {}).get("name", ""),
             price=price,
+            charged_amount=charged,
             aspect_ratio=aspect_ratio,
             orig_file=orig_file,
             result_file=result_file,
@@ -529,26 +532,28 @@ def _register_job(openid: str, quality: str, style: str,
             orig_cos=orig_cos,
             result_cos=result_cos,
         )
-    except HTTPException:
-        _refund_charged(openid, job_id, charged)
-        raise
+        users.confirm_job(job_id, "job=%s quality=%s tpl=%s ar=%s price=%d charged=%d"
+                          % (job_id, quality, (template or {}).get("id", "-"),
+                             aspect_ratio or "-", price, charged))
+        cleanup.schedule("local", orig_file, time.time() + ORIGINAL_TTL_SECONDS)
+        if orig_cos:
+            cleanup.schedule("cos", orig_cos, time.time() + ORIGINAL_TTL_SECONDS)
+        pool.submit(_run_pipeline, job_id, quality, style,
+                    copy_template(template), dict(text_values or {}), aspect_ratio)
     except Exception:
-        _refund_charged(openid, job_id, charged)
+        users.refund_job(openid, job_id, cancel=True)
+        existing = jobs.get(job_id)
+        if existing:
+            jobs.update(job_id, status="failed", error="提交任务失败")
+            _cleanup_job_files([jobs.get(job_id)])
+        elif orig_path:
+            _safe_remove(orig_path)
+            if orig_cos:
+                cleanup.schedule("cos", orig_cos, time.time())
         raise
-
     jobs.sweep()
-    users.inc_total(openid)
-    users.audit(openid, "submitted", "job=%s quality=%s tpl=%s ar=%s price=%d"
-                % (job_id, quality, (template or {}).get("id", "-"),
-                   aspect_ratio or "-", price))
-    pool.submit(_run_pipeline, job_id, quality, style,
-                copy_template(template), dict(text_values or {}), aspect_ratio)
-    orig_url_val = "/api/images/%s" % orig_file
-    if orig_cos and settings.cos_ready():
-        try:
-            orig_url_val = cos_presign(settings, "get", orig_cos, ttl_seconds=7200)
-        except Exception:
-            pass
+    current = jobs.get(job_id)
+    orig_url_val = _job_media_url(current, "orig")
 
     return {
         "code": 0,
@@ -561,7 +566,8 @@ def _register_job(openid: str, quality: str, style: str,
         "price": price,
         "balance": balance,
         "orig_url": orig_url_val,
-        "result_url": "/api/images/%s" % result_file,
+        "result_url": _job_media_url(current, "result"),
+        "free_mode": free,
     }
 
 
@@ -597,7 +603,8 @@ class JobStore:
                 "cost_cny", "cost_usd", "scale", "error",
                 "orig_file", "result_file", "orig_url", "result_url",
                 "orig_cos", "result_cos", "norm_cos",
-                "created_at", "updated_at")
+                "created_at", "updated_at", "charged_amount", "deleted_at",
+                "completed_at", "width", "height", "style")
 
     def __init__(self, ttl: int, max_entries: int,
                  on_evict: Optional[Any] = None,
@@ -607,6 +614,7 @@ class JobStore:
         self._ttl = ttl
         self._max = max_entries
         self._on_evict = on_evict
+        self._startup_evicted: List[Dict[str, Any]] = []
         self._db_path = db_path or os.path.join(BASE_DIR, "data", "jobs.db")
         self._init_db()
 
@@ -631,6 +639,12 @@ class JobStore:
                            "ON jobs(openid, created_at DESC)")
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created "
                            "ON jobs(created_at DESC)")
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(jobs)")}
+        for field, kind in {"charged_amount": "INTEGER", "deleted_at": "REAL",
+                            "completed_at": "REAL", "width": "INTEGER", "height": "INTEGER",
+                            "style": "TEXT"}.items():
+            if field not in columns:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN %s %s" % (field, kind))
         self._conn.commit()
         self._reload()
 
@@ -638,10 +652,9 @@ class JobStore:
         """启动时把未过期的任务读回内存，重启不影响前端轮询。"""
         now = time.time()
         rows = self._conn.execute(
-            "SELECT id, %s FROM jobs WHERE created_at > ?"
-            % ", ".join(self._COLUMNS[1:]),
-            (now - self._ttl,)).fetchall()
+            "SELECT %s FROM jobs" % ", ".join(self._COLUMNS)).fetchall()
         interrupted = []
+        all_statuses = {}
         for row in rows:
             job = dict(zip(self._COLUMNS, row))
             # 重启时仍在 processing 的任务，其工作线程已随旧进程消失：
@@ -649,21 +662,23 @@ class JobStore:
             if job.get("status") == "processing":
                 job["status"] = "failed"
                 job["error"] = job.get("error") or "服务重启，任务中断"
+                if users.charged_amount(job["id"]) is None:
+                    job["error"] += "（历史扣款记录待核对）"
+                    users.audit(job.get("openid") or "", "charge_reconciliation_required", "job=" + job["id"])
                 interrupted.append(job)
+            all_statuses[job["id"]] = "deleted" if job.get("deleted_at") else job["status"]
+            if now > self._expires_at(job):
+                self._startup_evicted.append(job)
+                continue
             self._data[job["id"]] = job
         for job in interrupted:
+            # Refund first; re-running after a crash is harmless (ledger unique key).
+            users.refund_job(job.get("openid") or "", job["id"])
             self._persist(job)
-            price = int(job.get("price") or 0)
-            openid = job.get("openid") or ""
-            if openid and price > 0:
-                try:
-                    users.add_balance(openid, price)
-                    users.audit(openid, "refund", "job=%s +=%d (restart)"
-                                % (job["id"], price))
-                except Exception:  # noqa: BLE001
-                    log.exception("[%s] 重启退款失败", job["id"])
+        self._delete_rows([job["id"] for job in self._startup_evicted])
+        users.reconcile_charges(all_statuses)
         if rows:
-            log.info("任务表恢复：%d 条未过期记录（在途中断 %d 条，已退款）",
+            log.info("任务表恢复：%d 条记录（在途中断 %d 条，已执行扣款流水恢复）",
                      len(rows), len(interrupted))
 
     def _persist(self, job: Dict[str, Any]) -> None:
@@ -676,7 +691,8 @@ class JobStore:
                 % (", ".join(self._COLUMNS), placeholders), values)
             self._conn.commit()
         except sqlite3.Error:
-            log.exception("任务落盘失败 job=%s", job.get("id"))
+            self._conn.rollback()
+            raise
 
     def _delete_rows(self, job_ids: List[str]) -> None:
         """驱逐任务时同步删除落盘行。调用方必须持锁。"""
@@ -687,7 +703,8 @@ class JobStore:
                                    [(jid,) for jid in job_ids])
             self._conn.commit()
         except sqlite3.Error:
-            log.exception("任务落盘行删除失败: %s", job_ids)
+            self._conn.rollback()
+            raise
 
     def create(self, job_id: str, **fields: Any) -> Dict[str, Any]:
         now = time.time()
@@ -700,8 +717,11 @@ class JobStore:
             **fields,
         }
         with self._lock:
-            self._data[job_id] = job
+            if len(self._data) >= self._max and all(
+                    item.get("status") == "processing" for item in self._data.values()):
+                raise HTTPException(status_code=503, detail="任务队列已满，请稍后再试")
             self._persist(job)
+            self._data[job_id] = job
             evicted: List[Dict[str, Any]] = []
             if len(self._data) > self._max:
                 evicted = self._evict_locked(keep=job_id)
@@ -718,20 +738,38 @@ class JobStore:
             job = self._data.get(job_id)
             if job is None:
                 return
-            job.update(fields)
-            job["updated_at"] = time.time()
-            self._persist(job)
+            updated = {**job, **fields, "updated_at": time.time()}
+            # A running worker must never resurrect a deleted task.
+            if job.get("deleted_at") and fields.get("status") == "succeeded":
+                return
+            self._persist(updated)
+            self._data[job_id] = updated
+
+    def _expires_at(self, job: Dict[str, Any]) -> float:
+        return float(job.get("completed_at") or job.get("created_at") or 0) + self._ttl
+
+    def delete_for_openid(self, job_id: str, openid: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            job = self._data.get(job_id)
+            if job is None or job.get("openid") != openid:
+                return None
+            updated = {**job, "deleted_at": job.get("deleted_at") or time.time(), "updated_at": time.time()}
+            if job.get("status") == "processing":
+                updated.update(status="failed", error="作品已删除，任务已取消")
+            self._persist(updated)
+            self._data[job_id] = updated
+            return dict(updated)
 
     def _evict_locked(self, keep: Optional[str] = None) -> List[Dict[str, Any]]:
         """先删过期，再按创建时间删最旧。调用方必须持锁。返回被驱逐的任务。"""
         evicted: List[Dict[str, Any]] = []
         now = time.time()
         for jid in [k for k, v in self._data.items()
-                    if now - v.get("created_at", now) > self._ttl]:
+                    if now > self._expires_at(v)]:
             evicted.append(self._data.pop(jid))
         while len(self._data) > self._max:
             oldest = min(
-                (k for k in self._data if k != keep),
+                (k for k in self._data if k != keep and self._data[k].get("status") != "processing"),
                 key=lambda k: self._data[k].get("created_at", 0),
                 default=None,
             )
@@ -751,7 +789,8 @@ class JobStore:
 
     def sweep(self) -> None:
         with self._lock:
-            evicted = self._evict_locked()
+            evicted = self._startup_evicted + self._evict_locked()
+            self._startup_evicted = []
         self._notify_evicted(evicted)
 
     def list_recent(self, offset: int = 0, limit: int = 50):
@@ -772,57 +811,68 @@ class JobStore:
         with self._lock:
             matched = [
                 dict(j) for j in self._data.values()
-                if j.get("openid") == openid
+                if j.get("openid") == openid and not j.get("deleted_at")
             ]
             matched.sort(key=lambda j: j.get("created_at", 0), reverse=True)
             return matched[offset:offset + limit]
 
 
 def _cleanup_job_files(evicted_jobs: List[Dict[str, Any]]) -> None:
-    """任务被驱逐后删除其磁盘文件（只删已出结果/失败的，排队中的不动）。"""
+    """Invalidate deliverables locally and persist all remote deletions for retry."""
     for job in evicted_jobs:
+        if not job:
+            continue
         if job.get("status") == "processing":
-            continue  # 可能还在队列里，等下一轮 TTL 再收
+            users.refund_job(job.get("openid", ""), job["id"])
         for field in ("orig_file", "result_file"):
             name = job.get(field)
             if name:
+                cleanup.schedule("local", name, time.time())
                 _safe_remove(os.path.join(UPLOAD_DIR, name))
+        for field in ("orig_cos", "result_cos", "norm_cos"):
+            if job.get(field):
+                cleanup.schedule("cos", job[field], time.time())
 
 
 def _startup_file_gc() -> None:
-    """启动时清一次磁盘：临时文件超 1 天、任务产物超 TTL 的直接删。
-
-    任务表在内存里（重启即空），所以不能按"不在表里 = 孤儿"判断，
-    一律以文件 mtime 为准 —— TTL 之外的产物本来也不可达了。
-    """
-    cutoff_tmp = time.time() - 24 * 3600
-    cutoff_job = time.time() - JOB_TTL_SECONDS
-    removed = 0
+    """Independent retention clocks: originals 24h, completed results 30 days."""
+    now = time.time()
     for path in glob.glob(os.path.join(UPLOAD_DIR, "*")):
         base = os.path.basename(path)
         try:
             mtime = os.path.getmtime(path)
         except OSError:
             continue
-        if base.startswith(("incoming_", "tmp_", "norm_")):
-            stale = mtime < cutoff_tmp
-        elif base.startswith(("orig_", "result_")):
-            stale = mtime < cutoff_job
+        if base.startswith(("incoming_", "tmp_", "norm_", "orig_")):
+            ttl = ORIGINAL_TTL_SECONDS
+        elif base.startswith("result_"):
+            ttl = JOB_TTL_SECONDS
         else:
             continue
-        if stale and _safe_remove(path):
-            removed += 1
-    if removed:
-        log.info("启动清理：删除 %d 个过期上传/结果文件", removed)
+        if mtime < now - ttl:
+            _safe_remove(path)
+    # Register pre-existing job objects as well as newly created ones.
+    items, _ = jobs.list_recent(0, 10 ** 6)
+    for job in items:
+        if job.get("deleted_at"):
+            _cleanup_job_files([job])
+            continue
+        orig_due = float(job.get("created_at") or now) + ORIGINAL_TTL_SECONDS
+        result_due = float(job.get("completed_at") or job.get("created_at") or now) + JOB_TTL_SECONDS
+        for kind, field, due in (("local", "orig_file", orig_due), ("cos", "orig_cos", orig_due),
+                                 ("cos", "norm_cos", orig_due), ("local", "result_file", result_due),
+                                 ("cos", "result_cos", result_due)):
+            if job.get(field):
+                cleanup.schedule(kind, job[field], time.time() if field.startswith("result_") and job.get("status") == "failed" else due)
 
 
 def _bg_sweeper() -> None:
-    """后台定时清理过期任务（内存表 + 磁盘文件）。"""
-    while True:
-        time.sleep(600)
+    while not _sweeper_stop.wait(30):
         try:
             jobs.sweep()
-        except Exception:  # noqa: BLE001
+            _startup_file_gc()
+            cleanup.run(settings)
+        except Exception:
             log.exception("后台任务清理失败")
 
 
@@ -860,16 +910,30 @@ def _validate_image(path: str) -> None:
 
     if os.path.getsize(path) == 0:
         raise HTTPException(status_code=400, detail="上传文件为空")
-    probe = cv2.imread(path, cv2.IMREAD_REDUCED_COLOR_8)
-    if probe is None:
-        raise HTTPException(status_code=400, detail="无法识别的图片格式")
-    h, w = probe.shape[:2]
-    # 缩略图是 1/8 尺寸，换算回原图
-    if h * 8 * w * 8 > MAX_PIXELS:
+    try:
+        from PIL import Image
+        with Image.open(path) as image:
+            w, h = image.size
+            image.verify()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="无法识别的图片格式") from exc
+    if w * h > MAX_PIXELS:
         raise HTTPException(
             status_code=413,
             detail="图片像素过大（上限 %d 万像素），请先缩小。" % (MAX_PIXELS // 10_000),
         )
+    if cv2.imread(path, cv2.IMREAD_REDUCED_COLOR_8) is None:
+        raise HTTPException(status_code=400, detail="无法识别的图片格式")
+
+
+def _validate_output(path: str) -> Tuple[int, int]:
+    _validate_image(path)
+    import cv2
+    decoded = cv2.imread(path, cv2.IMREAD_COLOR)
+    if decoded is None:
+        raise ValueError("增强结果不是可解码的图片")
+    h, w = decoded.shape[:2]
+    return w, h
 
 
 def _normalize_long_side(src: str, dst: str, target: int = 0,
@@ -907,6 +971,38 @@ def _normalize_long_side(src: str, dst: str, target: int = 0,
     return dst
 
 
+def _media_expires_at(job: Dict[str, Any], kind: str) -> float:
+    origin = float(job.get("created_at") or 0)
+    return origin + ORIGINAL_TTL_SECONDS if kind == "orig" else \
+        float(job.get("completed_at") or origin) + JOB_TTL_SECONDS
+
+
+def _media_signature(job: Dict[str, Any], filename: str, expiry: int) -> str:
+    key = hashlib.sha256(("rescue-media:" + ensure_admin_password()).encode("utf-8")).digest()
+    payload = "%s|%s|%s|view|%d" % (filename, job["id"], job["openid"], expiry)
+    return hmac.new(key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _job_media_url(job: Dict[str, Any], kind: str) -> Optional[str]:
+    if not job or job.get("deleted_at") or time.time() >= _media_expires_at(job, kind):
+        return None
+    if kind == "result" and job.get("status") != "succeeded":
+        return None
+    ttl = min(MEDIA_URL_TTL_SECONDS, int(_media_expires_at(job, kind) - time.time()))
+    if ttl <= 0:
+        return None
+    if job.get(kind + "_cos") and settings.cos_ready():
+        try:
+            return cos_presign(settings, "get", job[kind + "_cos"], ttl_seconds=ttl)
+        except CosError:
+            pass
+    filename = job.get(kind + "_file")
+    if not filename:
+        return None
+    expiry = int(time.time()) + ttl
+    return "/api/images/%s?expires=%d&sig=%s" % (filename, expiry, _media_signature(job, filename, expiry))
+
+
 def _media_type(path: str) -> str:
     return mimetypes.guess_type(path)[0] or "application/octet-stream"
 
@@ -927,7 +1023,7 @@ def _run_pipeline(job_id: str, quality: str, style: str,
     就算它被关掉，全链失败时也会强制跑一次。
     """
     job = jobs.get(job_id)
-    if job is None:
+    if job is None or job.get("deleted_at") or job.get("status") != "processing":
         return
 
     src = os.path.join(UPLOAD_DIR, job["orig_file"])
@@ -952,6 +1048,7 @@ def _run_pipeline(job_id: str, quality: str, style: str,
             try:
                 norm_key = "norms/%s/%s.jpg" % ((job.get("openid") or "anon")[:8],
                                                 job_id)
+                cleanup.schedule("cos", norm_key, time.time() + ORIGINAL_TTL_SECONDS)
                 with open(norm, "rb") as fh:
                     cos_put(settings, norm_key, fh.read())
                 gateway_url = cos_presign(settings, "get", norm_key,
@@ -993,6 +1090,7 @@ def _run_pipeline(job_id: str, quality: str, style: str,
                                    image_url=gateway_url)
                 else:
                     client.enhance(norm, tmp, quality=quality, style=style)
+                _validate_output(tmp)
                 enhanced = True
                 provider_used = name
                 cost_cny = getattr(client, "last_cost_cny", None)
@@ -1021,6 +1119,10 @@ def _run_pipeline(job_id: str, quality: str, style: str,
             engine.process(norm, tmp, quality=quality, upscale_2k=False,
                            style=style)
             provider_used = "local"
+
+        current = jobs.get(job_id)
+        if not current or current.get("deleted_at"):
+            raise RuntimeError("作品已删除，停止交付")
 
         # --- 3.5 几何画幅守恒：校验模型生成图与输入图比例，若有偏差做居中对齐，杜绝对比滑块双图错位 ---
         try:
@@ -1058,6 +1160,7 @@ def _run_pipeline(job_id: str, quality: str, style: str,
 
         # --- 6. 输出 ---
         _finalize(tmp, out)
+        width, height = _validate_output(out)
         # 结果图也要过一道审核：AI 输出可能触发边界内容
         with open(out, "rb") as fh:
             reject = _moderate_or_reject(fh.read(), job_id, job.get("openid", ""))
@@ -1072,24 +1175,45 @@ def _run_pipeline(job_id: str, quality: str, style: str,
             log.warning("[%s] 结果被审核拦截: %s", job_id, reject)
             return
         # 结果图上传 COS（登记时预留的 result_cos 键），用户下载走 COS 直链
+        current = jobs.get(job_id)
+        if not current or current.get("deleted_at"):
+            raise RuntimeError("作品已删除，停止交付")
         if job.get("result_cos"):
             try:
+                # Crash-safe provisional expiry, tightened after completion.
+                cleanup.schedule("cos", job["result_cos"], time.time() + 2 * JOB_TTL_SECONDS)
                 with open(out, "rb") as fh:
                     cos_put(settings, job["result_cos"], fh.read())
             except CosError as exc:
                 log.warning("[%s] 结果传 COS 失败，退本地直链: %s", job_id, exc)
+                cleanup.schedule("cos", job["result_cos"], time.time())
                 jobs.update(job_id, result_cos=None)
         jobs.update(job_id, status="succeeded", stage="done",
-                    provider=provider_used)
+                    provider=provider_used, completed_at=time.time(), width=width, height=height)
+        current = jobs.get(job_id)
+        if not current or current.get("deleted_at"):
+            raise RuntimeError("作品已删除，停止交付")
+        users.complete_charge(job_id)
+        cleanup.schedule("local", job["result_file"], current["completed_at"] + JOB_TTL_SECONDS)
+        if current.get("result_cos"):
+            cleanup.schedule("cos", current["result_cos"], current["completed_at"] + JOB_TTL_SECONDS)
         users.audit(job.get("openid", ""), "completed", "job=%s" % job_id)
         log.info("[%s] 任务完成 -> %s", job_id, os.path.basename(out))
 
     except Exception as exc:  # noqa: BLE001
         log.exception("[%s] 处理失败（stage=%s）", job_id, stage)
-        jobs.update(job_id, status="failed", error=str(exc)[:500], stage=stage)
-        _refund_charged(job.get("openid", ""), job_id,
-                        int(job.get("price") or 0))
+        try:
+            jobs.update(job_id, status="failed", error=str(exc)[:500], stage=stage)
+        finally:
+            _refund_charged(job.get("openid", ""), job_id,
+                            int(job.get("price") or 0))
+            _safe_remove(out)
+            if job.get("result_cos"):
+                cleanup.schedule("cos", job["result_cos"], time.time())
     finally:
+        current = jobs.get(job_id)
+        if current and current.get("deleted_at"):
+            _cleanup_job_files([current])
         for path in (norm, tmp):
             try:
                 if os.path.exists(path):
@@ -1108,6 +1232,7 @@ def _finalize(src: str, dst: str) -> None:
 
     if not os.path.exists(src) or os.path.getsize(src) == 0:
         raise RuntimeError("增强结果为空")
+    _validate_output(src)
 
     with open(src, "rb") as fh:
         magic = fh.read(3)
@@ -1117,9 +1242,7 @@ def _finalize(src: str, dst: str) -> None:
 
     img = cv2.imread(src, cv2.IMREAD_COLOR)
     if img is None:
-        # 某些编码 cv2 读不了，直接搬过去，至少不让任务失败
-        shutil.copyfile(src, dst)
-        return
+        raise RuntimeError("增强结果不是可解码的图片")
     ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
     if not ok:
         raise RuntimeError("结果编码失败")
@@ -1279,10 +1402,17 @@ def public_community() -> Dict[str, Any]:
             "quality": "fine" if str(raw.get("quality")) == "fine" else "light",
             "resultUrl": str(raw.get("result_url") or ""),
             "origUrl": str(raw.get("orig_url") or ""),
-            "likes": int(raw.get("likes") or 0),
+            "likes": _community_likes(raw.get("likes")),
             "liked": False,
         })
     return {"enabled": True, "items": items}
+
+
+def _community_likes(value: Any) -> int:
+    try:
+        return max(0, min(1_000_000_000, int(value or 0)))
+    except (TypeError, ValueError, OverflowError):
+        return 0
 
 
 @app.get("/api/announcements")
@@ -1490,6 +1620,13 @@ class _LoginBody(BaseModel):
 
 class _EarnBody(BaseModel):
     kind: str = ""
+    receipt: str = ""
+
+
+class _UploadBody(BaseModel):
+    filename: str = "photo.jpg"
+    byte_size: int = 0
+    byteSize: Optional[int] = None  # Compatibility with the previous mini-program.
 
 
 class _InviteBody(BaseModel):
@@ -1583,8 +1720,15 @@ def earn_points(body: _EarnBody, request: Request):
     if kind == "video" and not settings.ads()["rewarded_video_ready"]:
         raise HTTPException(status_code=403,
                             detail="激励视频广告未配置，暂不可领取")
-    ok, balance, count = users.earn(user["openid"], kind,
-                                    conf["reward"], conf["limit"])
+    if kind == "video":
+        try:
+            event_id = verify_video(settings, user["openid"], body.receipt)
+            ok, balance, count = users.claim_video_reward(user["openid"], event_id,
+                                                         conf["reward"], conf["limit"])
+        except ValueError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+    else:
+        ok, balance, count = users.earn(user["openid"], kind, conf["reward"], conf["limit"])
     if not ok:
         raise HTTPException(status_code=429,
                             detail="今日%s奖励已领完，明天再来吧" % conf["label"])
@@ -1605,13 +1749,10 @@ def bind_invite(body: _InviteBody, request: Request):
         raise HTTPException(status_code=400, detail="邀请码不存在")
     if inviter["openid"] == openid:
         raise HTTPException(status_code=400, detail="不能填写自己的邀请码")
-    if users.action_count(openid, "invite_bound") > 0:
-        raise HTTPException(status_code=400, detail="已经绑定过邀请码了")
-    inviter_balance = users.add_balance(inviter["openid"], 30)
-    my_balance = users.add_balance(openid, 30)
-    users.audit(openid, "invite_bound", "by=%s" % inviter["invite_code"])
-    users.audit(inviter["openid"], "invite_reward",
-                "invitee=%s***" % openid[:6])
+    try:
+        my_balance, inviter_balance = users.bind_invite_once(openid, code)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "balance": my_balance,
             "inviter_balance": inviter_balance}
 
@@ -1620,11 +1761,11 @@ def bind_invite(body: _InviteBody, request: Request):
 
 
 @app.post("/api/uploads")
-def create_upload(request: Request,
-                  filename: str = Form("photo.jpg"),
-                  byte_size: int = Form(0)):
+def create_upload(payload: _UploadBody, request: Request):
     """申请 COS 预签名直传地址。未配置 COS 时返回 503。"""
     user = _current_user(request)
+    filename = payload.filename
+    byte_size = payload.byteSize if payload.byteSize is not None else payload.byte_size
     if not settings.cos_ready():
         raise HTTPException(status_code=503, detail="对象存储未配置")
     ext = os.path.splitext(filename or "")[1].lower() or ".jpg"
@@ -1634,9 +1775,12 @@ def create_upload(request: Request,
     if byte_size > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="图片不能超过 %d MB"
                             % (MAX_UPLOAD_BYTES // 1024 // 1024))
+    if byte_size < 0:
+        raise HTTPException(status_code=400, detail="图片大小必须是非负整数")
     upload_id = uuid.uuid4().hex[:16]
     key = "uploads/%s/%s%s" % (user["openid"][:8], upload_id, ext)
     url = cos_presign(settings, "put", key, ttl_seconds=3600)
+    cleanup.schedule("cos", key, time.time() + 3600)
     with _uploads_lock:
         _sweep_uploads_locked()
         _uploads[upload_id] = {"openid": user["openid"], "key": key,
@@ -1653,7 +1797,7 @@ def complete_upload(upload_id: str, request: Request):
         raise HTTPException(status_code=503, detail="对象存储未配置")
     with _uploads_lock:
         rec = _uploads.get(upload_id)
-    if rec is None or rec["openid"] != user["openid"]:
+    if rec is None or rec["openid"] != user["openid"] or time.time() - rec["created_at"] > 3600:
         raise HTTPException(status_code=404, detail="上传登记不存在")
     if not cos_head(settings, rec["key"]):
         raise HTTPException(status_code=400,
@@ -1764,9 +1908,10 @@ def create_rescue_job_by_upload(payload: _RescueByUploadBody,
         payload.style)
 
     with _uploads_lock:
-        rec = _uploads.pop(upload_id, None)  # 登记用后即焚，同一 upload_id 不能重复提交
-    if rec is None or rec["openid"] != user["openid"]:
-        raise HTTPException(status_code=404, detail="上传登记不存在")
+        rec = _uploads.get(upload_id)
+        if rec is None or rec["openid"] != user["openid"] or time.time() - rec["created_at"] > 3600:
+            raise HTTPException(status_code=404, detail="上传登记不存在或已过期")
+        _uploads.pop(upload_id)
     if not cos_head(settings, rec["key"]):
         raise HTTPException(status_code=400, detail="COS 上没有这个文件")
 
@@ -1774,16 +1919,21 @@ def create_rescue_job_by_upload(payload: _RescueByUploadBody,
     job_tmp = os.path.join(UPLOAD_DIR,
                            "incoming_%s%s" % (uuid.uuid4().hex[:8], ext))
     try:
-        data = cos_get(settings, rec["key"])
+        data = cos_get(settings, rec["key"], max_bytes=MAX_UPLOAD_BYTES)
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="图片超过上传大小上限")
         with open(job_tmp, "wb") as fh:
             fh.write(data)
         _validate_image(job_tmp)
     except CosError as exc:
         _safe_remove(job_tmp)
-        raise HTTPException(status_code=502, detail="对象存储读取失败") from exc
+        raise HTTPException(status_code=413 if exc.code == "TOO_LARGE" else 502,
+                            detail="图片超过上传大小上限" if exc.code == "TOO_LARGE" else "对象存储读取失败") from exc
     except HTTPException:
         _safe_remove(job_tmp)
         raise
+    finally:
+        cleanup.schedule("cos", rec["key"], time.time())
 
     with open(job_tmp, "rb") as fh:
         reject = _moderate_or_reject(fh.read(), "upload", user["openid"])
@@ -1806,18 +1956,8 @@ def query_job_status(job_id: str, request: Request):
     user = _current_user(request)
     job_id = _safe_job_id(job_id)
     job = jobs.get(job_id)
-    if job is None or job.get("openid") != user["openid"]:
+    if job is None or job.get("deleted_at") or job.get("openid") != user["openid"]:
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
-    def _media_url(kind: str, fallback: Optional[str]) -> Optional[str]:
-        """COS 可用时给签名直链（免服务器带宽），否则本地路径。"""
-        key = job.get("%s_cos" % kind)
-        if key and settings.cos_ready():
-            try:
-                return cos_presign(settings, "get", key, ttl_seconds=7200)
-            except CosError:
-                pass
-        return fallback
-
     return {
         "id": job["id"],
         "status": job["status"],
@@ -1828,9 +1968,12 @@ def query_job_status(job_id: str, request: Request):
         "template_name": job.get("template_name", ""),
         "price": job.get("price"),
         "provider": job.get("provider"),
+        "width": job.get("width"),
+        "height": job.get("height"),
+        "balance": users.get_balance(user["openid"]),
         "error": job.get("error"),
-        "orig_url": _media_url("orig", job.get("orig_url")),
-        "result_url": _media_url("result", job.get("result_url")),
+        "orig_url": _job_media_url(job, "orig"),
+        "result_url": _job_media_url(job, "result"),
         "created_at": job.get("created_at"),
     }
 
@@ -1839,45 +1982,76 @@ def query_job_status(job_id: str, request: Request):
 def get_my_jobs(request: Request, limit: int = 30):
     """查询当前登录用户最近提交的任务历史列表（支持跨端同步与切屏恢复）。"""
     user = _current_user(request)
-    raw_list = jobs.list_for_openid(user["openid"], limit=limit)
+    raw_list = jobs.list_for_openid(user["openid"], limit=min(max(1, limit), 100))
     res = []
     for job in raw_list:
-        def _media_url(kind: str, fallback: Optional[str]) -> Optional[str]:
-            key = job.get("%s_cos" % kind)
-            if key and settings.cos_ready():
-                try:
-                    return cos_presign(settings, "get", key, ttl_seconds=7200)
-                except CosError:
-                    pass
-            return fallback
-
         res.append({
             "id": job["id"],
             "status": job["status"],
             "stage": job.get("stage"),
             "quality": job.get("quality"),
+            "provider": job.get("provider"),
+            "width": job.get("width"),
+            "height": job.get("height"),
             "aspect_ratio": job.get("aspect_ratio", ""),
             "template_id": job.get("template_id", ""),
             "template_name": job.get("template_name", ""),
             "error": job.get("error"),
-            "orig_url": _media_url("orig", job.get("orig_url")),
-            "result_url": _media_url("result", job.get("result_url")),
+            "orig_url": _job_media_url(job, "orig"),
+            "result_url": _job_media_url(job, "result"),
             "created_at": job.get("created_at"),
         })
     return {"jobs": res}
 
 
+@app.delete("/api/my/jobs/{job_id}")
+def delete_my_job(job_id: str, request: Request):
+    user = _current_user(request)
+    job = jobs.delete_for_openid(_safe_job_id(job_id), user["openid"])
+    if job is None:
+        raise HTTPException(status_code=404, detail="作品不存在")
+    if job.get("status") == "failed":
+        users.refund_job(user["openid"], job_id)
+    _cleanup_job_files([job])
+    users.audit(user["openid"], "deleted", "job=" + job_id)
+    return {"ok": True, "balance": users.get_balance(user["openid"])}
+
+
+@app.delete("/api/my/jobs")
+def delete_all_my_jobs(request: Request):
+    user = _current_user(request)
+    items = jobs.list_for_openid(user["openid"], limit=10 ** 6)
+    for item in items:
+        delete_my_job(item["id"], request)
+    return {"ok": True, "deleted": len(items), "balance": users.get_balance(user["openid"])}
+
+
 @app.get("/api/images/{filename}")
-def get_image(filename: str) -> FileResponse:
-    """静态图片访问。文件名经过白名单校验，防路径穿越。"""
+def get_image(filename: str, request: Request) -> FileResponse:
     path = _resolve_upload(filename)
-    if not os.path.isfile(path):
+    match = re.fullmatch(r"(orig|result)_([0-9a-f]{6,32})[.][A-Za-z0-9]+", filename)
+    job = jobs.get(match[2]) if match else None
+    if not job or job.get("deleted_at") or filename != job.get(match[1] + "_file"):
         raise HTTPException(status_code=404, detail="图片不存在")
-    return FileResponse(
-        path,
-        media_type=_media_type(path),
-        headers={"Cache-Control": "private, max-age=86400"},
-    )
+    kind = match[1]
+    if kind == "result" and job.get("status") != "succeeded":
+        raise HTTPException(status_code=404, detail="图片尚未完成")
+    if time.time() >= _media_expires_at(job, kind) or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="图片已过期或不存在")
+    token = bearer_of({k.lower(): v for k, v in request.headers.items()})
+    owner = verify_user_token(token) if token else None
+    if owner != job["openid"]:
+        try:
+            expiry = int(request.query_params.get("expires", "0"))
+            valid = time.time() < expiry <= time.time() + MEDIA_URL_TTL_SECONDS + 5
+            signature = request.query_params.get("sig", "")
+            valid = valid and hmac.compare_digest(signature, _media_signature(job, filename, expiry))
+        except (ValueError, TypeError):
+            valid = False
+        if not valid:
+            raise HTTPException(status_code=403, detail="图片访问凭据已失效")
+    return FileResponse(path, media_type=_media_type(path),
+                        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @app.exception_handler(Exception)

@@ -438,6 +438,9 @@
           <label class="check"><span class="switch"><input type="checkbox" id="ad-enabled"><span class="knob"></span></span>启用激励视频补给</label>
           <div class="form-grid" style="margin-top:10px">
             <div class="field"><label>激励视频广告位 ID<small>微信公众平台 → 流量主 → 广告位管理</small></label><input type="text" id="ad-unit" placeholder="adunit-xxxxxxxxxxxxxxxx"></div>
+            <div class="field"><label>可信广告凭据验证服务（HTTPS）</label><input type="url" id="ad-verifier-url" placeholder="https://verification.example/verify"></div>
+            <div class="field"><label>验证服务密钥（仅服务端使用）</label><input type="password" id="ad-verifier-key" autocomplete="new-password"></div>
+            <p class="muted">服务端必须独立验证广告完成事件；仅设置广告位不会开启奖励。广告桥接SDK须提供观看凭据。</p>
           </div>
           <p class="muted" style="margin:8px 0 0">只有「启用」勾上且广告位 ID 非空，小程序才会显示「看视频得光子」。</p>
           <p style="margin:14px 0 0"><button class="btn-primary" onclick="saveConf()">保存通用设置</button></p>
@@ -751,6 +754,8 @@ function renderConf() {
   $("cm-items").value = JSON.stringify(SETTINGS.community?.items || [], null, 2);
   $("ad-enabled").checked = SETTINGS.ads?.rewarded_video_enabled || false;
   $("ad-unit").value = SETTINGS.ads?.rewarded_video_unit_id || "";
+  $("ad-verifier-url").value = SETTINGS.ads?.rewarded_video_verifier_url || "";
+  $("ad-verifier-key").value = SETTINGS.ads?.rewarded_video_verifier_key || "";
 }
 window.saveConf = async () => {
   let items;
@@ -775,7 +780,9 @@ window.saveConf = async () => {
       free_mode: $("free-mode").checked,
       community: { enabled: $("cm-enabled").checked, items: items },
       ads: { rewarded_video_enabled: $("ad-enabled").checked,
-             rewarded_video_unit_id: $("ad-unit").value.trim() } } });
+             rewarded_video_unit_id: $("ad-unit").value.trim(),
+             rewarded_video_verifier_url: $("ad-verifier-url").value.trim(),
+             rewarded_video_verifier_key: $("ad-verifier-key").value.trim() } } });
     renderConf();
     toast("已保存并即时生效");
   } catch (e) { toast(e.message, "bad"); }

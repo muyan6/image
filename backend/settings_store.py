@@ -90,7 +90,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "community": {"enabled": False, "items": []},
     # 激励视频广告位：ad_unit_id 留空 = 未开通，小程序端隐藏入口且不发光子。
     # 广告位 ID 在微信公众平台创建后填到这里（后台 /admin 通用设置）。
-    "ads": {"rewarded_video_enabled": False, "rewarded_video_unit_id": ""},
+    "ads": {"rewarded_video_enabled": False, "rewarded_video_unit_id": "",
+            "rewarded_video_verifier_url": "", "rewarded_video_verifier_key": ""},
 }
 
 
@@ -235,6 +236,9 @@ def _validate(doc: Dict[str, Any]) -> None:
     for idx, item in enumerate(items):
         if not isinstance(item, dict):
             raise ValueError("community.items[%d] 必须是对象" % idx)
+        likes = item.get("likes", 0)
+        if type(likes) is not int or not 0 <= likes <= 1_000_000_000:
+            raise ValueError("community.items[%d].likes 必须是非负整数" % idx)
         for field in ("title", "story", "template_name"):
             if not isinstance(item.get(field, ""), str):
                 raise ValueError("community.items[%d].%s 必须是文本" % (idx, field))
@@ -250,6 +254,13 @@ def _validate(doc: Dict[str, Any]) -> None:
     unit_id = ads.get("rewarded_video_unit_id", "")
     if not isinstance(unit_id, str) or len(unit_id) > 64:
         raise ValueError("ads.rewarded_video_unit_id 必须是不超过 64 字的文本")
+    verifier_url = ads.get("rewarded_video_verifier_url", "")
+    if not isinstance(verifier_url, str) or len(verifier_url) > 1000 or \
+            (verifier_url and not re.fullmatch(r"https://[^\s]+", verifier_url)):
+        raise ValueError("广告验证服务必须是 HTTPS 地址")
+    verifier_key = ads.get("rewarded_video_verifier_key", "")
+    if not isinstance(verifier_key, str) or len(verifier_key) > 256:
+        raise ValueError("广告验证服务密钥最多 256 字")
 
 
 class SettingsStore:
@@ -317,8 +328,8 @@ class SettingsStore:
             candidate = _deep_merge(self._data, patch)
             _rebase_defaults(candidate)
             _validate(candidate)
+            self._save_locked(candidate)
             self._data = candidate
-            self._save_locked(self._data)
             return copy.deepcopy(self._data)
 
     # ------------------------------------------------------------------ #
@@ -388,7 +399,8 @@ class SettingsStore:
         items = conf.get("items")
         return {
             "enabled": bool(conf.get("enabled")),
-            "items": copy.deepcopy(items) if isinstance(items, list) else [],
+            "items": [copy.deepcopy(item) for item in items[:200] if isinstance(item, dict)]
+            if isinstance(items, list) else [],
         }
 
     def ads(self) -> Dict[str, Any]:
@@ -397,10 +409,15 @@ class SettingsStore:
         if not isinstance(conf, dict):
             conf = {}
         unit_id = str(conf.get("rewarded_video_unit_id") or "").strip()
+        verifier_url = str(conf.get("rewarded_video_verifier_url") or "").strip()
+        verifier_key = str(conf.get("rewarded_video_verifier_key") or "").strip()
         return {
             "rewarded_video_enabled": bool(conf.get("rewarded_video_enabled")),
             "rewarded_video_unit_id": unit_id,
-            "rewarded_video_ready": bool(conf.get("rewarded_video_enabled")) and bool(unit_id),
+            "rewarded_video_ready": bool(conf.get("rewarded_video_enabled")) and bool(unit_id)
+            and verifier_url.startswith("https://") and bool(verifier_key),
+            "rewarded_video_verifier_url": verifier_url,
+            "rewarded_video_verifier_key": verifier_key,
         }
 
 

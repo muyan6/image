@@ -4,7 +4,7 @@ const api = require('../../utils/api.js');
 /**
  * 激励视频广告配置全部来自后端 GET /api/config 的 ads 字段，
  * 在 /admin「通用设置 → 激励视频广告」里维护：
- *   ads.rewarded_video_enabled = true 且 ads.rewarded_video_unit_id 非空
+ *   开关、广告位、可信服务端验证服务和密钥均已配置
  *   => 后端返回 ads.rewarded_video_ready = true
  *
  * ready = false（未开启 / 广告位 ID 为空）时：
@@ -143,14 +143,21 @@ Page({
       });
       return;
     }
+    if (this._videoBusy) return;
+    this._videoBusy = true;
     this._playRewardedAd();
   },
 
-  /** 微信官方激励式视频：完整观看后 onClose 里 isEnded 才发奖 */
+  /** onClose only triggers a request; a trusted platform receipt decides credit. */
   _playRewardedAd() {
     const unitId = this._videoAdUnitId;
     if (!unitId) return;
+    if (this._rewardedAd && this._rewardedAdUnitId !== unitId) {
+      if (this._rewardedAd.destroy) this._rewardedAd.destroy();
+      this._rewardedAd = null;
+    }
     if (!this._rewardedAd) {
+      this._rewardedAdUnitId = unitId;
       this._rewardedAd = wx.createRewardedVideoAd({ adUnitId: unitId });
       this._rewardedAd.onError((err) => {
         console.warn('激励视频加载失败', err);
@@ -160,8 +167,10 @@ Page({
     const ad = this._rewardedAd;
     const onClose = (res) => {
       ad.offClose(onClose);
+      this._videoBusy = false;
       if (res && res.isEnded) {
-        this._grantVideoReward();
+        // A platform/bridge receipt is independently verified on the backend.
+        this._grantVideoReward(res.receipt || res.transactionId || '');
       } else {
         wx.showToast({ title: '完整观看才能领取补给哦', icon: 'none' });
       }
@@ -171,14 +180,19 @@ Page({
       // 广告拉取失败时先 load 再 show 一次
       ad.load().then(() => ad.show()).catch(() => {
         ad.offClose(onClose);
+        this._videoBusy = false;
         wx.showToast({ title: '广告暂时拉取失败，稍后再试', icon: 'none' });
       });
     });
   },
 
   /** 向服务端领取视频奖励（次数、发放与广告开关都在服务端校验） */
-  _grantVideoReward() {
-    api.earn('video')
+  _grantVideoReward(receipt) {
+    if (!receipt) {
+      wx.showToast({title: '广告观看凭据待验证，奖励尚未到账', icon: 'none'});
+      return;
+    }
+    api.earn('video', receipt)
       .then((d) => {
         if (d && typeof d.balance === 'number') app.setBalance(d.balance);
         this.refreshUserData();

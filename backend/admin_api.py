@@ -33,6 +33,7 @@ _MASK_SCHEMA = {
     ("providers", "baidu"): ("api_key", "secret_key"),
     ("wechat",): ("app_secret",),
     ("tencent",): ("secret_id", "secret_key"),
+    ("ads",): ("rewarded_video_verifier_key",),
 }
 
 log = logging.getLogger("rescue.admin")

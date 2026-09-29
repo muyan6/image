@@ -29,6 +29,7 @@ if [ ! -x .venv/bin/python ]; then
 fi
 
 echo "启动后端（端口 ${PORT}，日志: backend/${LOG_FILE}）..."
+bash ../deploy/ensure-fonts.sh "$PWD/.venv/bin/python"
 nohup .venv/bin/python -m uvicorn main:app --host "$HOST" --port "$PORT" \
     >> "$LOG_FILE" 2>&1 &
 echo $! > backend.pid

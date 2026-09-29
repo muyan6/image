@@ -76,9 +76,11 @@ function setToken(token) {
 /**
  * 确保已登录：有 token 直接用；没有或 force 时走 wx.login → /api/auth/login。
  */
+let loginPromise = null;
 function ensureLogin(force) {
+  if (loginPromise) return loginPromise;
   if (!force && getToken()) return Promise.resolve(getToken());
-  return new Promise((resolve, reject) => {
+  loginPromise = new Promise((resolve, reject) => {
     wx.login({
       success: (r) => {
         if (!r.code) { reject(new Error('微信登录失败')); return; }
@@ -103,21 +105,30 @@ function ensureLogin(force) {
       fail: () => reject(networkError({ errMsg: 'wx.login 失败' }))
     });
   });
+  return loginPromise.finally(() => { loginPromise = null; });
 }
 
 /** 带 token 的请求封装：401 时自动重新登录并重试一次 */
 function authedCall(fn) {
-  return ensureLogin().then(() =>
-    fn().catch((err) => {
+  return ensureLogin().then(() => {
+    const attemptedToken = getToken();
+    return fn().catch((err) => {
       if (err && err.code === 'UNAUTHORIZED') {
-        return ensureLogin(true).then(fn);
+        const ready = getToken() && getToken() !== attemptedToken
+          ? Promise.resolve(getToken()) : ensureLogin(true);
+        return ready.then(fn);
       }
       throw err;
-    })
-  );
+    });
+  });
 }
 
 function request(path, options) {
+  const protectedPath = /^\/api\/(me(?:\/|$)|my\/|jobs\/|uploads(?:\/|$)|rescue(?:\/|$))/.test(path);
+  return protectedPath ? authedCall(() => rawRequest(path, options)) : rawRequest(path, options);
+}
+
+function rawRequest(path, options) {
   const opts = options || {};
   return new Promise((resolve, reject) => {
     wx.request({
@@ -131,7 +142,7 @@ function request(path, options) {
       ),
       timeout: opts.timeout || REQUEST_TIMEOUT,
       success(res) {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data);
+        if (res.statusCode >= 200 && res.statusCode < 300) { syncAccount(res.data); resolve(res.data); }
         else {
           const err = makeError(res);
           if (res.statusCode === 401) err.code = 'UNAUTHORIZED';
@@ -144,6 +155,10 @@ function request(path, options) {
 }
 
 function upload(filePath, formData, options) {
+  return authedCall(() => rawUpload(filePath, formData, options));
+}
+
+function rawUpload(filePath, formData, options) {
   const opts = options || {};
   return new Promise((resolve, reject) => {
     wx.uploadFile({
@@ -201,6 +216,9 @@ async function waitForJob(jobId, options) {
     }
     try {
       const job = await request('/api/jobs/' + jobId);
+      if (opts.isCanceled && opts.isCanceled()) {
+        const err = new Error('任务已转入后台'); err.code = 'USER_BACKGROUND'; throw err;
+      }
       if (job.status !== lastStatus) {
         lastStatus = job.status;
         if (opts.onTick) opts.onTick(job);
@@ -212,7 +230,8 @@ async function waitForJob(jobId, options) {
         throw err;
       }
     } catch (e) {
-      if (e && e.code === 'JOB_FAILED') throw e;
+      if (e && (e.code === 'JOB_FAILED' || e.code === 'USER_BACKGROUND' ||
+          e.code === 'UNAUTHORIZED' || (e.status && e.status < 500 && e.status !== 429))) throw e;
       const msg = String((e && e.message) || '');
       // 用户切屏或小程序进入后台，微信可能抛 request:fail canceled / abort
       if (opts.isCanceled && opts.isCanceled()) {
@@ -261,30 +280,30 @@ function templates() {
 
 /** 当前用户资料：光子余额、邀请码、今日奖励进度 */
 function me() {
-  return authedCall(() => request('/api/me'));
+  return request('/api/me');
 }
 
 /** 每日奖励：kind = 'checkin'（1次/天）| 'video'（3次/天），服务端记账 */
-function earn(kind) {
-  return authedCall(() => request('/api/me/earn', {
-    method: 'POST', data: { kind: kind }
-  }));
+function earn(kind, receipt) {
+  return request('/api/me/earn', {
+    method: 'POST', data: { kind: kind, receipt: receipt || '' }
+  });
 }
 
 /** 绑定邀请码（每人一次，双方 +30 光子） */
 function bindInvite(code) {
-  return authedCall(() => request('/api/me/invite', {
+  return request('/api/me/invite', {
     method: 'POST', data: { code: code }
-  }));
+  });
 }
 
 /* ------------------------- COS 直传三件套 ------------------------- */
 
 function createUpload(filename, byteSize) {
-  return authedCall(() => request('/api/uploads', {
+  return request('/api/uploads', {
     method: 'POST',
-    data: { filename: filename || 'photo.jpg', byteSize: byteSize || 0 }
-  }));
+    data: { filename: filename || 'photo.jpg', byte_size: byteSize || 0 }
+  });
 }
 
 function putToCos(url, arrayBuffer) {
@@ -305,15 +324,15 @@ function putToCos(url, arrayBuffer) {
 }
 
 function completeUpload(uploadId) {
-  return authedCall(() => request('/api/uploads/' + uploadId + '/complete', {
+  return request('/api/uploads/' + uploadId + '/complete', {
     method: 'POST', data: {}
-  }));
+  });
 }
 
 function rescueByUpload(payload) {
-  return authedCall(() => request('/api/rescue/by-upload', {
+  return request('/api/rescue/by-upload', {
     method: 'POST', data: payload, timeout: UPLOAD_TIMEOUT
-  }));
+  });
 }
 
 /** multipart 里的表单值必须是字符串 */
@@ -326,7 +345,7 @@ function _stringifyFormData(formData) {
   return out;
 }
 
-/** COS 直传提交一条任务；任何一步失败向上抛，由 submitJob 统一回退 multipart */
+/** COS上传前失败可回退；任务提交结果不确定时不重复提交。 */
 async function _submitViaCos(filePath, formData) {
   const fs = wx.getFileSystemManager();
   const stat = fs.statSync(filePath);
@@ -351,27 +370,40 @@ async function _submitViaCos(filePath, formData) {
     }
   });
   body.upload_id = up.upload_id;
-  return rescueByUpload(body);
+  try {
+    return await rescueByUpload(body);
+  } catch (err) {
+    // The server may already have accepted a timed-out request; don't submit twice.
+    err.jobSubmissionAttempted = true;
+    throw err;
+  }
 }
 
 /**
  * 统一任务提交入口：后端 cos_ready 时优先 COS 直传（图片字节不过服务器），
- * 直传链路任何一步失败自动回退 multipart，对调用方透明。
+ * 上传链路故障可回退multipart；业务拒绝或疑似已受理的提交不自动重交。
  * 成功时响应里的 balance 已同步进 app.globalData。
  */
 async function submitJob(filePath, formData) {
+  await ensureLogin();
   const form = _stringifyFormData(formData);
-  try {
-    const cfg = await config();
-    if (cfg && cfg.cos_ready) {
-      try {
-        return await _submitViaCos(filePath, form);
-      } catch (err) {
-        console.warn('COS 直传失败，回退 multipart：', err);
-      }
+  let cfg = null;
+  try { cfg = await config(); } catch (e) { /* multipart may still be reachable */ }
+  if (cfg && cfg.cos_ready) {
+    try { return await _submitViaCos(filePath, form); }
+    catch (err) {
+      if (err.jobSubmissionAttempted || (err.status && err.status < 500)) throw err;
+      console.warn('COS 上传链路异常，回退 multipart：', err);
     }
-  } catch (e) { /* 连 config 都拿不到说明网络有问题，让 multipart 再试一次 */ }
+  }
   return upload(filePath, form);
+}
+
+function deleteJob(jobId) {
+  return request('/api/my/jobs/' + encodeURIComponent(jobId), {method: 'DELETE'});
+}
+function deleteAllJobs() {
+  return request('/api/my/jobs', {method: 'DELETE'});
 }
 
 module.exports = {
@@ -383,6 +415,8 @@ module.exports = {
   submitJob,
   waitForJob,
   myJobs,
+  deleteJob,
+  deleteAllJobs,
   health,
   config,
   announcements,

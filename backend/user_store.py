@@ -24,6 +24,12 @@ WELCOME_BALANCE = 90
 INVITE_REWARD = 30
 
 
+class AdmissionError(ValueError):
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+
+
 def invite_code_of(openid: str) -> str:
     """由 openid 派生稳定邀请码：INV-XXXXXXXX（无需额外存储/索引反查）。"""
     return "INV-" + hashlib.sha256(
@@ -65,6 +71,23 @@ class UserStore:
                 CREATE INDEX IF NOT EXISTS idx_audit_openid ON audit(openid);
                 CREATE INDEX IF NOT EXISTS idx_audit_user_action_ts
                     ON audit(openid, action, ts);
+                CREATE TABLE IF NOT EXISTS job_charges (
+                    job_id TEXT PRIMARY KEY, openid TEXT NOT NULL,
+                    amount INTEGER NOT NULL CHECK(amount >= 0),
+                    state TEXT NOT NULL DEFAULT 'reserved',
+                    refunded INTEGER NOT NULL DEFAULT 0,
+                    created_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_charges_user_ts
+                    ON job_charges(openid, created_at);
+                CREATE TABLE IF NOT EXISTS invite_bindings (
+                    invitee TEXT PRIMARY KEY, inviter TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS ad_rewards (
+                    event_id TEXT PRIMARY KEY, openid TEXT NOT NULL,
+                    created_at REAL NOT NULL, reward INTEGER NOT NULL
+                );
             """)
             # 老库平滑迁移：补光子余额与邀请码两列
             cols = {row[1] for row in self._conn.execute("PRAGMA table_info(users)")}
@@ -78,6 +101,138 @@ class UserStore:
                 self._conn.execute(
                     "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0")
             self._conn.commit()
+
+    def reserve_job(self, openid: str, job_id: str, amount: int,
+                    quota: Dict[str, int], free_mode: bool = False) -> int:
+        """Balance and quota reservation share one durable, serialized transaction."""
+        now = time.time()
+        amount = max(0, int(amount))
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            row = self._conn.execute(
+                "SELECT balance, banned FROM users WHERE openid=?", (openid,)).fetchone()
+            if row is None or row[1]:
+                raise AdmissionError(403, "账号状态不允许提交任务")
+            existing = self._conn.execute(
+                "SELECT openid FROM job_charges WHERE job_id=?", (job_id,)).fetchone()
+            if existing:
+                raise AdmissionError(409, "任务已经登记")
+            for field, start, message in (
+                ("per_minute", now - 60, "提交太频繁，请稍后再试"),
+                ("daily", _local_midnight(), "今日次数已用完，明天再来吧"),
+            ):
+                limit = int(quota.get(field, 0))
+                if limit <= 0 or (field == "daily" and free_mode):
+                    continue
+                count = self._conn.execute(
+                    "SELECT COUNT(*) FROM audit WHERE openid=? AND action='submitted' AND ts>=?",
+                    (openid, start)).fetchone()[0]
+                reserved = self._conn.execute(
+                    "SELECT COUNT(*) FROM job_charges WHERE openid=? "
+                    "AND state='reserved' AND created_at>=?", (openid, start)).fetchone()[0]
+                if count + reserved >= limit:
+                    raise AdmissionError(429, message)
+            balance = int(row[0])
+            if balance < amount:
+                raise AdmissionError(402, "光子不足：本次需要 %d ✦，当前余额 %d ✦" % (amount, balance))
+            self._conn.execute("UPDATE users SET balance=balance-? WHERE openid=?", (amount, openid))
+            self._conn.execute("INSERT INTO job_charges(job_id,openid,amount,created_at) VALUES(?,?,?,?)",
+                               (job_id, openid, amount, now))
+            return balance - amount
+
+    def confirm_job(self, job_id: str, detail: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            row = self._conn.execute("SELECT openid,state FROM job_charges WHERE job_id=?", (job_id,)).fetchone()
+            if row is None or row[1] != "reserved":
+                return
+            self._conn.execute("UPDATE job_charges SET state='submitted' WHERE job_id=?", (job_id,))
+            self._conn.execute("UPDATE users SET total_jobs=total_jobs+1 WHERE openid=?", (row[0],))
+            self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
+                               (time.time(), row[0], "submitted", detail[:500]))
+
+    def charged_amount(self, job_id: str) -> Optional[int]:
+        with self._lock:
+            row = self._conn.execute("SELECT amount FROM job_charges WHERE job_id=?", (job_id,)).fetchone()
+        return int(row[0]) if row else None
+
+    def refund_job(self, openid: str, job_id: str, cancel: bool = False) -> int:
+        """Exactly-once refund from the actual debit ledger, never current prices."""
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            row = self._conn.execute("SELECT amount,refunded FROM job_charges WHERE job_id=? AND openid=?",
+                                     (job_id, openid)).fetchone()
+            if row and not row[1]:
+                amount = int(row[0])
+                self._conn.execute("UPDATE users SET balance=balance+? WHERE openid=?", (amount, openid))
+                self._conn.execute("UPDATE job_charges SET refunded=1,state=? WHERE job_id=?",
+                                   ("cancelled" if cancel else "failed", job_id))
+                if amount:
+                    self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
+                                       (time.time(), openid, "refund", "job=%s +=%d" % (job_id, amount)))
+            if row and cancel:
+                self._conn.execute("UPDATE job_charges SET state='cancelled' WHERE job_id=?", (job_id,))
+                removed = self._conn.execute("DELETE FROM audit WHERE openid=? AND action='submitted' "
+                                             "AND detail LIKE ?", (openid, "job=" + job_id + " %")).rowcount
+                if removed:
+                    self._conn.execute("UPDATE users SET total_jobs=MAX(0,total_jobs-1) WHERE openid=?", (openid,))
+            result = self._conn.execute("SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
+            return int(result[0]) if result else 0
+
+    def reconcile_charges(self, statuses: Dict[str, str]) -> None:
+        """Recover debits left between the user DB commit and job DB commit."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT job_id,openid,state FROM job_charges WHERE refunded=0 "
+                "AND state IN ('reserved','submitted')").fetchall()
+        for job_id, openid, state in rows:
+            status = statuses.get(job_id)
+            if status in (None, "failed", "deleted"):
+                self.refund_job(openid, job_id, cancel=status is None and state == "reserved")
+            elif status == "succeeded":
+                self.complete_charge(job_id)
+
+    def complete_charge(self, job_id: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE job_charges SET state='succeeded' WHERE job_id=? AND refunded=0", (job_id,))
+
+    def bind_invite_once(self, openid: str, code: str) -> Tuple[int, int]:
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            inviter = self._conn.execute("SELECT openid FROM users WHERE invite_code=?", (code,)).fetchone()
+            if inviter is None or inviter[0] == openid:
+                raise ValueError("邀请码不存在或属于自己")
+            # Honor historical audit rows when upgrading an existing installation.
+            bound = self._conn.execute("SELECT 1 FROM audit WHERE openid=? AND action='invite_bound' LIMIT 1", (openid,)).fetchone()
+            if bound or self._conn.execute("SELECT 1 FROM invite_bindings WHERE invitee=?", (openid,)).fetchone():
+                raise ValueError("已经绑定过邀请码了")
+            self._conn.execute("INSERT INTO invite_bindings VALUES(?,?,?)", (openid, inviter[0], time.time()))
+            for target, action, detail in ((openid, "invite_bound", "by=" + code),
+                                            (inviter[0], "invite_reward", "invitee=%s***" % openid[:6])):
+                self._conn.execute("UPDATE users SET balance=balance+? WHERE openid=?", (INVITE_REWARD, target))
+                self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
+                                   (time.time(), target, action, detail))
+            return tuple(int(self._conn.execute("SELECT balance FROM users WHERE openid=?", (target,)).fetchone()[0])
+                         for target in (openid, inviter[0]))
+
+    def claim_video_reward(self, openid: str, event_id: str, reward: int, limit: int) -> Tuple[bool, int, int]:
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            prior = self._conn.execute("SELECT openid FROM ad_rewards WHERE event_id=?", (event_id,)).fetchone()
+            count = self._conn.execute("SELECT COUNT(*) FROM audit WHERE openid=? AND action='earn_video' AND ts>=?",
+                                       (openid, _local_midnight())).fetchone()[0]
+            balance = self._conn.execute("SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()[0]
+            if prior:
+                if prior[0] != openid:
+                    raise ValueError("广告凭据已经使用")
+                return True, int(balance), count
+            if count >= limit:
+                return False, int(balance), count
+            self._conn.execute("INSERT INTO ad_rewards VALUES(?,?,?,?)", (event_id, openid, time.time(), reward))
+            self._conn.execute("UPDATE users SET balance=balance+? WHERE openid=?", (reward, openid))
+            self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
+                               (time.time(), openid, "earn_video", "event=%s +%d" % (event_id, reward)))
+            return True, int(balance) + reward, count + 1
 
     _USER_COLS = ("openid, created_at, last_seen, total_jobs, blocked, "
                   "balance, invite_code, banned")

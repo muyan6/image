@@ -1,0 +1,17 @@
+.git
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+.env
+.env.*
+!.env.example
+data
+uploads
+logs
+luts
+tools
+tests
+**/*.db
+**/*.db-wal
+**/*.db-shm

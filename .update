@@ -92,6 +92,7 @@ if ! "$PY" -c "import cv2" >/dev/null 2>&1; then
 fi
 echo "$REQ_AFTER" > "$REQ_HASH_FILE" 2>/dev/null || true
 ok "环境就绪"
+bash deploy/ensure-fonts.sh "$PY"
 
 # ---------------------------------------------------------------- 3. 重启
 step "3/5 重启后端服务"

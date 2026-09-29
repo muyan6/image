@@ -7,7 +7,7 @@
     </view>
 
     <view class="nav-spec">
-      <text class="spec-label">{{ quality === 'fine' ? 'EDITION II · 2K MASTER' : 'EDITION I · 1.5K HD' }}</text>
+      <text class="spec-label">{{ label }}</text>
     </view>
 
     <view class="quick-export" bindtap="onDownload">
@@ -50,7 +50,7 @@
     <!-- 浮动典藏标签 -->
     <view class="floating-tag tag-before {{ isDragging ? 'tag-faded' : '' }}">
       <text class="tag-serif">BEFORE</text>
-      <text class="typewriter-label">原始样张</text>
+      <text class="typewriter-label">{{ originalUnavailable ? '原图已到期' : '原始样张' }}</text>
     </view>
     <view class="floating-tag tag-after {{ isDragging ? 'tag-faded' : '' }}">
       <text class="tag-serif">AFTER</text>
@@ -76,7 +76,7 @@
       catchtouchstart="onPressOriginalStart"
       catchtouchend="onPressOriginalEnd"
     >
-      <text class="typewriter-label">{{ isPressingOriginal ? '[ INSPECTING ORIGINAL · 原始画质 ]' : '[ HOLD TO INSPECT ORIGINAL · 按住检视原画 ]' }}</text>
+      <text class="typewriter-label">{{ originalUnavailable ? '[ 原图已到期 · 当前展示结果 ]' : (isPressingOriginal ? '[ INSPECTING ORIGINAL · 原始画质 ]' : '[ HOLD TO INSPECT ORIGINAL · 按住检视原画 ]') }}</text>
     </view>
   </view>
 

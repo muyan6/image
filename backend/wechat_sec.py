@@ -102,7 +102,7 @@ def get_access_token(settings: SettingsStore, force_refresh: bool = False) -> st
         return token
 
 
-def check_image(settings: SettingsStore, image_bytes: bytes, openid: str
+def check_image(settings: SettingsStore, image_bytes: bytes, openid: str, cleanup_store=None
                 ) -> Tuple[str, str, int]:
     """送审一张 ≤10M 的图片（异步接口同步等待）。
 
@@ -115,6 +115,8 @@ def check_image(settings: SettingsStore, image_bytes: bytes, openid: str
         raise WechatSecError("图片超过微信审核 10M 上限", code="TOO_LARGE")
 
     key = "moderation/%s/%s.jpg" % ((openid or "anon")[:8], uuid.uuid4().hex[:12])
+    if cleanup_store is not None:
+        cleanup_store.schedule("cos", key, time.time() + 3600)
     try:
         cos_put(settings, key, image_bytes)
         media_url = cos_presign(settings, "get", key, ttl_seconds=3600)

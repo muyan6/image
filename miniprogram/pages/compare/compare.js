@@ -12,7 +12,8 @@ Page({
     splitPercent: 50,
     demo: false,
     saving: false,
-    label: '2K 深度超分',
+    label: '精细修复',
+    originalUnavailable: false,
     isDragging: false,
     isPressingOriginal: false,
     // 舞台实测宽度(px)：clip-mat 内层原画按整块舞台锁定，避免裁剪后重新缩放
@@ -42,7 +43,7 @@ Page({
       resultUrl: demo ? DEMO_RESULT : res,
       quality: quality,
       demo: demo,
-      label: quality === 'fine' ? '2K 深度超分' : '1.5K 标准修复',
+      label: quality === 'fine' ? '精细修复' : '标准修复',
       stageW: winW
     });
 
@@ -61,9 +62,12 @@ Page({
     return api.request('/api/jobs/' + this._jobId)
       .then((job) => {
         if (!job || job.status !== 'succeeded' || !job.result_url) return false;
-        const orig = api.absolute(job.orig_url || this.data.originalUrl);
         const res = api.absolute(job.result_url);
-        this.setData({ originalUrl: orig, resultUrl: res });
+        const orig = job.orig_url ? api.absolute(job.orig_url) : res;
+        const dimensions = job.width && job.height ? `${job.width} × ${job.height}` : '';
+        this.setData({ originalUrl: orig, resultUrl: res,
+          originalUnavailable: !job.orig_url,
+          label: (job.provider === 'local' ? '本地增强' : 'AI 修复') + (dimensions ? ' · ' + dimensions : '') });
         return true;
       })
       .catch(() => false);

@@ -77,10 +77,8 @@ Page({
     api.templates()
       .then((d) => {
         const items = (d && d.items) || [];
-        if (items.length > 0) {
-          try { wx.setStorageSync('cached_templates_items', items); } catch (e) {}
-          this._renderFeatured(items);
-        }
+        try { wx.setStorageSync('cached_templates_items', items); } catch (e) {}
+        this._renderFeatured(items);
       })
       .catch((err) => {
         console.warn('获取服务端模板失败，使用预设模板', err);
@@ -98,9 +96,7 @@ Page({
         costText: cost
       });
     });
-    if (featured.length > 0) {
-      this.setData({ featuredTemplates: featured });
-    }
+    this.setData({ featuredTemplates: featured });
   },
 
   onGoToTemplates() {

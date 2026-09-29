@@ -23,6 +23,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 # 中文字体候选：按序找到第一个存在的（Windows -> Linux -> macOS）
 _FONT_CANDIDATES = [
+    os.environ.get("TEXT_FONT_PATH", ""),
     "C:/Windows/Fonts/msyhbd.ttc",     # 微软雅黑 Bold
     "C:/Windows/Fonts/msyh.ttc",
     "C:/Windows/Fonts/simhei.ttf",
@@ -30,6 +31,7 @@ _FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
     "/System/Library/Fonts/PingFang.ttc",
     "/System/Library/Fonts/STHeiti Light.ttc",
 ]
@@ -52,11 +54,11 @@ def _font_path() -> str:
 def _font(size: int) -> ImageFont.FreeTypeFont:
     path = _font_path()
     if not path:
-        return ImageFont.load_default()
+        raise RuntimeError("中文字体未就绪：请安装 fonts-noto-cjk 或设置 TEXT_FONT_PATH")
     try:
         return ImageFont.truetype(path, size)
     except OSError:
-        return ImageFont.load_default()
+        raise RuntimeError("中文字体读取失败：请检查 TEXT_FONT_PATH")
 
 
 def _text_width(draw: ImageDraw.ImageDraw, text: str,

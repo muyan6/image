@@ -73,7 +73,20 @@ Page({
   },
 
   onShow() {
+    this._foreground = true;
     this.setData({ lightPoints: app.globalData.lightPoints });
+  },
+
+  onHide() {
+    this._foreground = false;
+    this._generation = (this._generation || 0) + 1;
+    this.setData({processing: false});
+  },
+
+  onUnload() {
+    this._foreground = false;
+    this._unloaded = true;
+    this._generation = (this._generation || 0) + 1;
   },
 
   loadUserData() {
@@ -326,6 +339,8 @@ Page({
   },
 
   onCancelOrMinimizeWait() {
+    this._foreground = false;
+    this._generation = (this._generation || 0) + 1;
     this.setData({ processing: false });
     wx.showToast({
       title: '已转入后台，完成后自动存入作品',
@@ -340,6 +355,9 @@ Page({
   async executeUpload(path) {
     const tpl = this.data.selectedTemplate;
     const ratio = this.data.currentRatioKey;
+    const generation = (this._generation || 0) + 1;
+    this._generation = generation;
+    const inactive = () => this._foreground === false || this._unloaded || this._generation !== generation || !this.data.processing;
 
     try {
       const formData = {
@@ -391,6 +409,7 @@ Page({
       if (app.globalData.historyList.length > 50) app.globalData.historyList.length = 50;
       app.persist();
 
+      if (this._foreground === false || this._unloaded || this._generation !== generation) return;
       this.setData({
         currentJobId: jobId,
         processingText: `正在进行${tpl ? tpl.name : 'AI'}风格重构…`
@@ -400,7 +419,7 @@ Page({
       let job = null;
       try {
         job = await api.waitForJob(jobId, {
-          isCanceled: () => !this.data.processing,
+          isCanceled: inactive,
           onTick: (j) => {
             if (j.stage === 'enhance') {
               this.setData({ processingText: 'AI 深度重构光影与细节中…' });
@@ -417,6 +436,7 @@ Page({
         throw waitErr;
       }
 
+      if (inactive()) return;
       if (!job || job.status !== 'succeeded') {
         throw new Error((job && job.error) || '生成未完成，请在作品中查看');
       }
@@ -451,6 +471,7 @@ Page({
       });
 
     } catch (err) {
+      if (this._foreground === false || this._unloaded || this._generation !== generation) return;
       console.error('生成失败', err);
       this.setData({ processing: false });
       this.setData({ lightPoints: app.globalData.lightPoints });

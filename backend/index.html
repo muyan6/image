@@ -584,6 +584,7 @@
       const jobId = data.job_id;
       processingText.textContent = 'AI 正在深度重构光影细节…';
 
+      let finished = false;
       const start = Date.now();
       while (Date.now() - start < 180000) {
         await new Promise(r => setTimeout(r, 1500));
@@ -594,12 +595,14 @@
         }
         const job = await q.json();
         if (job.status === 'succeeded') {
-          showResult(job.orig_url, job.result_url);
+          finished = true;
+          showResult(job.orig_url || job.result_url, job.result_url);
           break;
         } else if (job.status === 'failed') {
           throw new Error(job.error || '增强失败');
         }
       }
+      if (!finished) throw new Error('等待超时，任务仍在云端处理，请稍后在作品中查看。任务编号：' + jobId);
     } catch (e) {
       alert('拯救失败: ' + e.message);
       processingMask.style.display = 'none';

@@ -20,7 +20,7 @@ import hashlib
 import hmac
 import logging
 import time
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import requests
 
@@ -101,25 +101,35 @@ def put_object(settings: SettingsStore, key: str, data: bytes,
             if not internal:
                 raise CosError("COS 上传失败 HTTP %s: %s" % (resp.status_code, resp.text[:120]),
                                status=resp.status_code)
-        except requests.RequestException:
+        except requests.RequestException as exc:
             if not internal:
-                raise
+                raise CosError("COS 上传网络异常", code="NETWORK") from exc
 
 
-def get_object(settings: SettingsStore, key: str) -> bytes:
+def get_object(settings: SettingsStore, key: str, max_bytes: Optional[int] = None) -> bytes:
     """服务端直接读取对象。优先走腾讯云同地域内网专线（0 流量费，不占公网带宽）。"""
     for internal in (True, False):
         try:
             url = presign(settings, "get", key, internal=internal)
-            resp = requests.get(url, timeout=(8, 45))
-            if resp.status_code == 200:
-                return resp.content
+            with requests.get(url, timeout=(8, 45), stream=True) as resp:
+                if resp.status_code == 200:
+                    length = resp.headers.get("Content-Length", "")
+                    if max_bytes is not None and length.isdigit() and int(length) > max_bytes:
+                        raise CosError("COS 对象超过上传大小上限", status=413, code="TOO_LARGE")
+                    chunks = []
+                    total = 0
+                    for chunk in resp.iter_content(1024 * 1024):
+                        total += len(chunk)
+                        if max_bytes is not None and total > max_bytes:
+                            raise CosError("COS 对象超过上传大小上限", status=413, code="TOO_LARGE")
+                        chunks.append(chunk)
+                    return b"".join(chunks)
+                if not internal:
+                    raise CosError("COS 读取失败 HTTP %s" % resp.status_code,
+                                   status=resp.status_code)
+        except requests.RequestException as exc:
             if not internal:
-                raise CosError("COS 读取失败 HTTP %s" % resp.status_code,
-                               status=resp.status_code)
-        except requests.RequestException:
-            if not internal:
-                raise
+                raise CosError("COS 读取网络异常", code="NETWORK") from exc
     raise CosError("COS 读取异常")
 
 
@@ -133,6 +143,20 @@ def head_exists(settings: SettingsStore, key: str) -> bool:
         except requests.RequestException:
             pass
     return False
+
+
+def delete_object(settings: SettingsStore, key: str) -> None:
+    """Idempotent delete: a missing object is already cleaned up."""
+    for internal in (True, False):
+        try:
+            response = requests.delete(presign(settings, "delete", key, internal=internal), timeout=(6, 15))
+            if response.status_code in (200, 204, 404):
+                return
+            if not internal:
+                raise CosError("COS 删除失败 HTTP %s" % response.status_code, status=response.status_code)
+        except requests.RequestException as exc:
+            if not internal:
+                raise CosError("COS 删除网络异常", code="NETWORK") from exc
 
 
 def check_internal(settings: SettingsStore) -> Dict[str, Any]:
@@ -157,4 +181,3 @@ def check_internal(settings: SettingsStore) -> Dict[str, Any]:
             "error": str(exc),
             "desc": "内网未连通，自动降级为公网（本地开发机正常现象）"
         }
-

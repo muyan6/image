@@ -44,7 +44,7 @@ App({
 
     // 历史作品
     const history = wx.getStorageSync(STORAGE_HISTORY);
-    if (Array.isArray(history)) this.globalData.historyList = history;
+    this.globalData.historyList = Array.isArray(history) ? history : [];
 
     // 用户唯一 ID（本地档案编号，仅展示用；服务端身份是 openid）
     let uid = wx.getStorageSync(STORAGE_USER_ID);

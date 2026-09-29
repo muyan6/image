@@ -442,13 +442,9 @@ class TemplateStore:
                 raise ValueError("groups/templates 缺失")
             candidate = {"groups": groups, "templates": templates}
             _validate(candidate)  # 坏数据直接回种子，不带病运行
-            # 自动补齐缺失的新种子模板（如日漫错彩网点、毛毡等）
-            migrated = False
-            existing_ids = {t["id"] for t in templates}
-            for st in _seed_templates():
-                if st["id"] not in existing_ids:
-                    templates.append(st)
-                    migrated = True
+            # Persisted templates are authoritative: deletion is not a migration.
+            # Future seed additions must have an explicit, one-time versioned migration.
+            migrated = loaded.get("version", 1) < 2
 
             # 旧版本数据没有 guide 字段：读入时统一补齐并归一化；
             # 种子模板指南为空的回填种子内容（一次性迁移），自建模板不动
@@ -481,7 +477,7 @@ class TemplateStore:
 
     def _save_locked(self) -> None:
         tmp = self._path + ".tmp"
-        doc = {"version": 1, "groups": self._groups, "templates": self._templates}
+        doc = {"version": 2, "groups": self._groups, "templates": self._templates}
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, ensure_ascii=False, indent=2)
             fh.write("\n")

@@ -20,75 +20,43 @@ Page({
   },
 
   async loadWorks() {
-    let list = app.globalData.historyList || [];
-    // 自动清洗历史记录中被污染了额外 query 参数的直链，恢复 COS 签名
-    let needClean = false;
-    list.forEach((item) => {
-      if (item && item.result && api.cleanUrl) {
-        const cleaned = api.cleanUrl(item.result);
-        if (cleaned !== item.result) { item.result = cleaned; needClean = true; }
-      }
-      if (item && item.original && api.cleanUrl) {
-        const cleaned = api.cleanUrl(item.original);
-        if (cleaned !== item.original) { item.original = cleaned; needClean = true; }
-      }
-    });
-    if (needClean) app.persist();
-    this.setData({ works: list });
-
-    // 1. 同步云端最近任务（支持切屏后自动取回、跨端同步）
+    const version = (this._loadVersion || 0) + 1;
+    this._loadVersion = version;
+    this.setData({ works: app.globalData.historyList || [] });
     try {
-      if (api.myJobs) {
-        const res = await api.myJobs(20);
-        if (res && res.jobs && res.jobs.length) {
-          const existingIds = new Set(list.map((w) => w.jobId));
-          let changed = false;
-          for (const cj of res.jobs) {
-            const orig = api.absolute(cj.orig_url);
-            const resUrl = cj.result_url ? api.absolute(cj.result_url) : '';
-            if (existingIds.has(cj.id)) {
-              const item = list.find((w) => w.jobId === cj.id);
-              if (item) {
-                if (cj.status === 'succeeded' && resUrl && item.status !== 'succeeded') {
-                  item.status = 'succeeded';
-                  item.result = resUrl;
-                  changed = true;
-                } else if (cj.status === 'failed' && item.status !== 'failed') {
-                  item.status = 'failed';
-                  item.error = cj.error;
-                  changed = true;
-                }
-              }
-            } else {
-              list.push({
-                original: orig,
-                result: resUrl,
-                status: cj.status,
-                quality: cj.quality,
-                templateName: cj.template_name || '',
-                jobId: cj.id,
-                time: cj.created_at ? this.formatTime(new Date(cj.created_at * 1000)) : '近期'
-              });
-              changed = true;
-            }
-          }
-          if (changed) {
-            app.persist();
-            this.setData({ works: list });
-          }
-        }
-      }
-    } catch (e) {
-      // 网络波动静默忽略
-    }
-
-    // 2. 检查是否有未完成的任务
-    this.refreshPendingWorks();
+      const res = await api.myJobs(100);
+      if (this._loadVersion !== version) return;
+      const list = app.globalData.historyList || [];
+      const deleted = this._deletedIds || new Set();
+      const cloud = (res && res.jobs) || [];
+      const localOnly = list.filter(w => !w.jobId);
+      const byId = new Map(list.filter(w => w.jobId && !deleted.has(w.jobId)).map(w => [w.jobId, w]));
+      cloud.forEach(cj => {
+        if (deleted.has(cj.id)) return;
+        const old = byId.get(cj.id) || {};
+        byId.set(cj.id, Object.assign({}, old, {
+          jobId: cj.id, original: api.absolute(cj.orig_url || ''),
+          result: cj.status === 'succeeded' ? api.absolute(cj.result_url || '') : '',
+          status: cj.status, error: cj.error || '', quality: cj.quality,
+          provider: cj.provider, width: cj.width, height: cj.height,
+          templateName: cj.template_name || '', createdAt: cj.created_at || old.createdAt || 0,
+          time: cj.created_at ? this.formatTime(new Date(cj.created_at * 1000)) : old.time || '近期'
+        }));
+      });
+      // A successful empty/full cloud response is authoritative for server jobs.
+      const cloudIds = new Set(cloud.map(j => j.id));
+      const merged = localOnly.concat([...byId.values()].filter(w => cloudIds.has(w.jobId)))
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      app.globalData.historyList = merged;
+      app.persist();
+      this.setData({works: merged});
+    } catch (e) { /* keep local cache for a transient network failure */ }
+    if (this._loadVersion === version) await this.refreshPendingWorks();
   },
 
   async refreshPendingWorks() {
     const list = app.globalData.historyList || [];
-    const pendings = list.filter((w) => w && w.jobId && (w.status === 'processing' || !w.result));
+    const pendings = list.filter((w) => w && w.jobId && w.status === 'processing');
     if (!pendings.length) return;
 
     let hasUpdate = false;
@@ -115,7 +83,7 @@ Page({
         let changed = false;
         if (job.status === 'succeeded' && job.result_url) {
           fresh.status = 'succeeded';
-          fresh.original = api.absolute(job.orig_url || item.original);
+          fresh.original = api.absolute(job.orig_url || '');
           fresh.result = api.absolute(job.result_url);
           changed = true;
         } else if (job.status === 'failed') {
@@ -141,9 +109,19 @@ Page({
     const index = e.currentTarget.dataset.index;
     const item = this.data.works[index];
     if (!item) return;
+    if (item.status === 'failed') {
+      wx.showActionSheet({
+        itemList: ['查看失败原因', '删除此件作品'],
+        success: (r) => {
+          if (r.tapIndex === 1) this.deleteSingleWork(index);
+          else wx.showModal({title: '生成未完成', content: item.error || '生成失败，光子已按扣款流水核对', showCancel: false});
+        }
+      });
+      return;
+    }
 
     // 如果该作品还在后台运算中
-    if (item.status === 'processing' || !item.result) {
+    if (item.status === 'processing' || item.status === 'failed' || !item.result) {
       wx.showLoading({ title: '检查最新进度…' });
       this.refreshWork(item).then((fresh) => {
         wx.hideLoading();
@@ -166,7 +144,7 @@ Page({
       return;
     }
 
-    this.showWorkActions(item, index);
+    this.refreshWork(item).then(fresh => this.showWorkActions(fresh, index));
   },
 
   showWorkActions(item, index) {
@@ -197,30 +175,39 @@ Page({
       confirmText: '删除',
       confirmColor: '#9e4b3c',
       cancelText: '保留',
-      success: (res) => {
-        if (res.confirm) {
-          app.globalData.historyList.splice(index, 1);
+      success: async (res) => {
+        if (!res.confirm) return;
+        const item = this.data.works[index] || (app.globalData.historyList || [])[index];
+        if (!item) return;
+        this._loadVersion = (this._loadVersion || 0) + 1;
+        try {
+          if (item.jobId) await api.deleteJob(item.jobId);
+          this._deletedIds = this._deletedIds || new Set();
+          if (item.jobId) this._deletedIds.add(item.jobId);
+          app.globalData.historyList = (app.globalData.historyList || []).filter(w => w !== item && w.jobId !== item.jobId);
           app.persist();
-          this.loadWorks();
-          wx.showToast({ title: '已移除作品', icon: 'success' });
-        }
+          this.setData({works: app.globalData.historyList});
+          await this.loadWorks();
+          wx.showToast({title: '已删除作品', icon: 'success'});
+        } catch (err) { wx.showToast({title: err.message || '删除失败，请重试', icon: 'none'}); }
       }
     });
   },
 
   onClearAllWorks() {
     wx.showModal({
-      title: '清空作品集',
-      content: '确定要清空全部已留存的作品吗？操作后不可恢复。',
-      confirmText: '清空全部',
-      confirmColor: '#9e4b3c',
-      cancelText: '保留',
-      success: (res) => {
-        if (res.confirm) {
+      title: '清空作品集', content: '确定删除全部云端作品和本地记录吗？',
+      confirmText: '清空全部', confirmColor: '#9e4b3c', cancelText: '保留',
+      success: async (res) => {
+        if (!res.confirm) return;
+        this._loadVersion = (this._loadVersion || 0) + 1;
+        try {
+          await api.deleteAllJobs();
           app.clearHistory();
-          this.loadWorks();
-          wx.showToast({ title: '作品集已清空', icon: 'success' });
-        }
+          this.setData({works: []});
+          await this.loadWorks();
+          wx.showToast({title: '作品集已清空', icon: 'success'});
+        } catch (err) { wx.showToast({title: err.message || '清空失败，请重试', icon: 'none'}); }
       }
     });
   },

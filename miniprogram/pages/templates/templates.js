@@ -39,10 +39,8 @@ Page({
       .then((data) => {
         const groups = (data && data.groups) || [];
         const rawItems = (data && data.items) || [];
-        if (rawItems.length > 0) {
-          try { wx.setStorageSync('cached_templates_data', data); } catch (e) {}
-          this._renderData(groups, rawItems);
-        }
+        try { wx.setStorageSync('cached_templates_data', data); } catch (e) {}
+        this._renderData(groups, rawItems);
         this.setData({ loading: false });
         if (typeof callback === 'function') callback();
       })

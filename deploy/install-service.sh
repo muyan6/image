@@ -55,6 +55,7 @@ if ! "$PY" -c "import cv2" >/dev/null 2>&1; then
         || die "cv2 仍不可用：可把 requirements.txt 的 opencv-python 换成 opencv-python-headless 后重跑"
 fi
 ok "依赖就绪"
+bash deploy/ensure-fonts.sh "$PY"
 
 # ---- 2. 生成 systemd 单元 ----
 step "2/4 写入 systemd 服务（${SERVICE_NAME}）"
