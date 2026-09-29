@@ -7,7 +7,7 @@
  * apiBase 通过 ext.json / 编译配置注入更佳，这里保留默认值 + 运行时可改。
  * 真机调试时必须改成局域网 IP 或已备案域名，127.0.0.1 在手机上指向手机自己。
  */
-const DEFAULT_API_BASE = 'http://127.0.0.1:8000';
+const DEFAULT_API_BASE = 'https://image.myil.top';
 const STORAGE_BALANCE = 'lightPoints';
 const LEGACY_BALANCE = 'fishTokens'; // 旧版本地积分，仅作一次性迁移展示
 const STORAGE_HISTORY = 'historyList';

@@ -17,7 +17,7 @@ const POLL_TIMEOUT = 180000; // 3 分钟，覆盖精细档最慢的情况
 function apiBase() {
   const app = getApp();
   const base = app && app.globalData && app.globalData.apiBase;
-  return base || 'http://127.0.0.1:8000';
+  return base || 'https://image.myil.top';
 }
 
 /** 把后端返回的相对路径补成完整 URL */
