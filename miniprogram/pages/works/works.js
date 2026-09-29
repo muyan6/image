@@ -21,6 +21,19 @@ Page({
 
   async loadWorks() {
     let list = app.globalData.historyList || [];
+    // 自动清洗历史记录中被污染了额外 query 参数的直链，恢复 COS 签名
+    let needClean = false;
+    list.forEach((item) => {
+      if (item && item.result && api.cleanUrl) {
+        const cleaned = api.cleanUrl(item.result);
+        if (cleaned !== item.result) { item.result = cleaned; needClean = true; }
+      }
+      if (item && item.original && api.cleanUrl) {
+        const cleaned = api.cleanUrl(item.original);
+        if (cleaned !== item.original) { item.original = cleaned; needClean = true; }
+      }
+    });
+    if (needClean) app.persist();
     this.setData({ works: list });
 
     // 1. 同步云端最近任务（支持切屏后自动取回、跨端同步）
@@ -32,7 +45,7 @@ Page({
           let changed = false;
           for (const cj of res.jobs) {
             const orig = api.absolute(cj.orig_url);
-            const resUrl = cj.result_url ? (api.absolute(cj.result_url) + '?t=' + Date.now()) : '';
+            const resUrl = cj.result_url ? api.absolute(cj.result_url) : '';
             if (existingIds.has(cj.id)) {
               const item = list.find((w) => w.jobId === cj.id);
               if (item) {
@@ -103,7 +116,7 @@ Page({
         if (job.status === 'succeeded' && job.result_url) {
           fresh.status = 'succeeded';
           fresh.original = api.absolute(job.orig_url || item.original);
-          fresh.result = api.absolute(job.result_url) + (job.result_url.includes('?') ? '&' : '?') + 't=' + Date.now();
+          fresh.result = api.absolute(job.result_url);
           changed = true;
         } else if (job.status === 'failed') {
           fresh.status = 'failed';

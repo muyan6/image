@@ -20,11 +20,25 @@ function apiBase() {
   return base || 'https://image.myil.top';
 }
 
-/** 把后端返回的相对路径补成完整 URL */
+/** 保护 COS 预签名直链：剥离被错误拼接的外挂 query 参数（如 &t=, &retry=），防止破坏 HMAC 签名导致 403 */
+function cleanUrl(url) {
+  if (!url || typeof url !== 'string') return url || '';
+  if (url.includes('q-signature=') || url.includes('myqcloud.com')) {
+    return url.replace(/([&?])(t|retry)=\d+/g, (m, p) => (p === '?' ? '?' : ''))
+              .replace(/\?&/, '?')
+              .replace(/[?&]$/, '');
+  }
+  return url;
+}
+
+/** 把后端返回的相对路径补成完整 URL，并保护 COS 预签名不被破坏 */
 function absolute(path) {
   if (!path) return '';
-  if (/^https?:\/\//i.test(path)) return path;
-  return apiBase() + (path[0] === '/' ? path : '/' + path);
+  let full = path;
+  if (!/^https?:\/\//i.test(path)) {
+    full = apiBase() + (path[0] === '/' ? path : '/' + path);
+  }
+  return cleanUrl(full);
 }
 
 function makeError(res) {
@@ -363,6 +377,7 @@ async function submitJob(filePath, formData) {
 module.exports = {
   apiBase,
   absolute,
+  cleanUrl,
   request,
   upload,
   submitJob,

@@ -18,8 +18,10 @@ Page({
   },
 
   onLoad(options) {
-    const orig = options.original ? decodeURIComponent(options.original) : '';
-    const res = options.result ? decodeURIComponent(options.result) : '';
+    const rawOrig = options.original ? decodeURIComponent(options.original) : '';
+    const rawRes = options.result ? decodeURIComponent(options.result) : '';
+    const orig = api.cleanUrl ? api.cleanUrl(rawOrig) : rawOrig;
+    const res = api.cleanUrl ? api.cleanUrl(rawRes) : rawRes;
     const quality = options.quality === 'light' ? 'light' : 'fine';
     const demo = !!options.demo || (!orig && !res);
 
@@ -118,23 +120,19 @@ Page({
 
   onResultError() {
     const url = this.data.resultUrl;
-    if (!url || this.data.demo || /[?&]retry=/.test(url)) return;
-    // 先向服务端换新鲜直链（COS 签名过期场景），换不到再做本地缓存击穿
-    this.refreshUrls().then((ok) => {
-      if (ok) return;
-      const sep = url.indexOf('?') >= 0 ? '&' : '?';
-      this.setData({ resultUrl: url + sep + 'retry=' + Date.now() });
+    if (!url || this.data.demo || this._refreshingResult) return;
+    this._refreshingResult = true;
+    this.refreshUrls().finally(() => {
+      this._refreshingResult = false;
     });
   },
 
   onOrigError() {
-    console.warn('原图加载失败，尝试换取有效直链重试');
     const url = this.data.originalUrl;
-    if (!url || this.data.demo || /[?&]retry=/.test(url)) return;
-    this.refreshUrls().then((ok) => {
-      if (ok) return;
-      const sep = url.indexOf('?') >= 0 ? '&' : '?';
-      this.setData({ originalUrl: url + sep + 'retry=' + Date.now() });
+    if (!url || this.data.demo || this._refreshingOrig) return;
+    this._refreshingOrig = true;
+    this.refreshUrls().finally(() => {
+      this._refreshingOrig = false;
     });
   },
 

@@ -386,8 +386,8 @@ Page({
         throw new Error((job && job.error) || '生成未完成，请在作品中查看');
       }
 
+      // 注意：COS 预签名 URL 包含 HMAC 校验，绝不可外挂拼接 &t=Date.now()，否则直接报 403 SignatureDoesNotMatch
       const resUrl = api.absolute(job.result_url || created.result_url);
-      const bustUrl = resUrl + (resUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
 
       // 提取最新的原图直链（服务端可能已同步居中裁剪）
       const finalOrigUrl = api.absolute(job.orig_url || created.orig_url || origUrl);
@@ -397,7 +397,7 @@ Page({
       // 更新历史记录为完成状态
       const finishedItem = {
         original: finalOrigUrl,
-        result: bustUrl,
+        result: resUrl,
         status: 'succeeded',
         quality: created.quality || this.data.quality,
         templateName: tpl ? tpl.name : '',
@@ -413,7 +413,7 @@ Page({
 
       // 跳转至全屏拖拽滑块对比页
       wx.redirectTo({
-        url: `/pages/compare/compare?original=${encodeURIComponent(compareOrig)}&result=${encodeURIComponent(bustUrl)}&quality=${finishedItem.quality}&job=${encodeURIComponent(jobId)}`
+        url: `/pages/compare/compare?original=${encodeURIComponent(compareOrig)}&result=${encodeURIComponent(resUrl)}&quality=${finishedItem.quality}&job=${encodeURIComponent(jobId)}`
       });
 
     } catch (err) {
