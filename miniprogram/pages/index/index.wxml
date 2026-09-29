@@ -49,6 +49,8 @@
       </view>
     </view>
 
+    <text class="generation-warning">请勿上传违规内容：审核违规不予生图并扣除本次点数；7天内累计3次将永久封禁账号，剩余点数不予退还。</text>
+
     <!-- 底部历史记录轻量入口 (不堆砌) -->
     <view
       class="history-entry"
@@ -83,7 +85,7 @@
             <image
               class="showcase-cover"
               src="{{ item.coverUrl || '/images/logo.jpg' }}"
-              mode="aspectFill"
+              mode="aspectFit"
             ></image>
             <view class="showcase-tag">
               <text>{{ item.engine === 'fine' ? '2K精细' : '1.5K增强' }}</text>

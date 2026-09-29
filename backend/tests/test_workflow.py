@@ -202,6 +202,67 @@ class WorkflowTests(unittest.TestCase):
         try:self.assertEqual(store.list_users(),[]);store.ensure_user('legacy');self.assertEqual(len(store.list_users()),1)
         finally:store.close()
 
+    def test_upload_violation_deducts_and_bans_on_third_with_feedback_review(self):
+        with patch.object(m, '_moderate_or_reject', return_value='图片内容未通过安全审核'):
+            results = [self.client.post('/api/rescue', headers=self.headers,
+                         files={'image': ('photo.jpg', self.image(), 'image/jpeg')},
+                         data={'quality': 'light'}) for _ in range(3)]
+        self.assertEqual([r.status_code for r in results], [422, 422, 422])
+        ids = [r.json()['detail']['violation_id'] for r in results]
+        self.assertEqual([r.json()['detail']['weekly_count'] for r in results], [1, 2, 3])
+        self.assertTrue(results[-1].json()['detail']['banned'])
+        self.assertEqual(m.users.get_balance('sample_user'), 87)
+        self.assertEqual(m.users.get_user('sample_user')['blocked'], 3)
+        refused = self.client.post('/api/rescue', headers=self.headers,
+            files={'image': ('photo.jpg', self.image(), 'image/jpeg')})
+        self.assertEqual(refused.status_code, 403)
+        feedback = self.client.post('/api/me/violation-feedback', headers=self.headers,
+                                    json={'violation_id': ids[-1], 'message': '照片误判，请复核'})
+        self.assertEqual(feedback.status_code, 200)
+        listed = self.admin.get('/admin/api/violations').json()['items']
+        self.assertEqual(listed[0]['feedback'], '照片误判，请复核')
+        reviewed = self.admin.post('/admin/api/violations/' + ids[-1] + '/review',
+                                   json={'accepted': True})
+        self.assertEqual(reviewed.json()['balance'], 88)
+        self.assertFalse(m.users.get_user('sample_user')['banned'])
+
+    def test_custom_prompt_and_template_text_moderated_before_registration(self):
+        with patch.object(m, '_moderate_or_reject', return_value=None), \
+             patch.object(m, '_moderate_text_or_reject', return_value=None) as moderate, \
+             patch.object(m, '_register_job', return_value={'code': 0, 'job_id': 'sample'}) as register:
+            result = self.client.post('/api/rescue', headers=self.headers,
+                files={'image': ('photo.jpg', self.image(), 'image/jpeg')},
+                data={'quality': 'fine', 'custom_prompt': '移除背景人群，保留主体'})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(register.call_args.kwargs['custom_prompt'], '移除背景人群，保留主体')
+        self.assertEqual(moderate.call_args.args[0], '移除背景人群，保留主体')
+
+    def test_custom_prompt_never_silently_uses_non_prompt_engine(self):
+        with patch.object(m, '_moderate_or_reject', return_value=None), \
+             patch.object(m, '_moderate_text_or_reject', return_value=None), \
+             patch.object(m.settings, 'provider_enabled', return_value=False):
+            before = m.users.get_balance('sample_user')
+            result = self.client.post('/api/rescue', headers=self.headers,
+                files={'image': ('photo.jpg', self.image(), 'image/jpeg')},
+                data={'custom_prompt': '改变人物动作'})
+        self.assertEqual(result.status_code, 503)
+        self.assertEqual(m.users.get_balance('sample_user'), before)
+
+    def test_text_violation_and_service_failure_have_different_billing(self):
+        with patch.object(m, '_moderate_text_or_reject', return_value='文字内容未通过安全审核'):
+            blocked = self.client.post('/api/rescue', headers=self.headers,
+                files={'image': ('photo.jpg', self.image(), 'image/jpeg')},
+                data={'custom_prompt': '测试文字'})
+        self.assertEqual(blocked.status_code, 422)
+        self.assertEqual(blocked.json()['detail']['charged'], 1)
+        before = m.users.get_balance('sample_user')
+        with patch.object(m, '_moderate_text_or_reject', side_effect=m.HTTPException(503, '审核服务不可用')):
+            failed = self.client.post('/api/rescue', headers=self.headers,
+                files={'image': ('photo.jpg', self.image(), 'image/jpeg')},
+                data={'custom_prompt': '测试文字'})
+        self.assertEqual(failed.status_code, 503)
+        self.assertEqual(m.users.get_balance('sample_user'), before)
+
 if __name__=='__main__':
     suite=unittest.defaultTestLoader.loadTestsFromTestCase(WorkflowTests);names=[t._testMethodName for t in suite]
     result=unittest.TextTestRunner(verbosity=2).run(suite)

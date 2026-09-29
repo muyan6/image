@@ -54,7 +54,7 @@ from gateway_ai import OpenAIImagesEnhance
 from settings_store import AnnouncementStore, SettingsStore
 from templates_store import TemplateStore, covers_dir
 from text_overlay import apply as apply_text_overlay, collect_values
-from tencent_cs import ModerationError, moderate_image_bytes
+from tencent_cs import ModerationError, moderate_image_bytes, moderate_text
 from user_store import AdmissionError, UserStore
 from reward_verifier import verify_video
 import wechat_sec
@@ -426,12 +426,52 @@ def _moderate_or_reject(image_bytes: bytes, job_ctx: str, openid: str) -> Option
             return None
 
     if str(suggestion).lower() != "pass":
-        users.audit(openid, "blocked",
-                    "label=%s score=%s suggest=%s" % (label, score, suggestion))
-        users.inc_blocked(openid)
         desc = _sec_label_desc(label)
         return "图片内容未通过安全审核（%s）" % desc if desc and desc != "100" else "图片内容未通过安全审核"
     return None
+
+
+def _moderate_text_or_reject(content: str, openid: str) -> Optional[str]:
+    if not content.strip() or not settings.moderation().get("enabled"):
+        return None
+    verdict = None
+    if not openid.startswith("web-") and wechat_sec.wechat_text_ready(settings):
+        try:
+            verdict = wechat_sec.check_text(settings, content, openid)
+        except WechatSecError as exc:
+            users.audit(openid, "text_moderation_error", exc.code)
+    if verdict is None and settings.moderation_ready():
+        try:
+            verdict = moderate_text(content, settings)
+        except ModerationError as exc:
+            users.audit(openid, "text_moderation_error", exc.code)
+    if verdict is None:
+        raise HTTPException(status_code=503, detail="文字审核服务不可用，请稍后重试")
+    suggestion, label, score = verdict
+    if suggestion.lower() != "pass":
+        return "文字内容未通过安全审核（%s）" % _sec_label_desc(label)
+    return None
+
+
+def _user_text(prompt: str, text_values: Dict[str, str], template: Optional[Dict[str, Any]]) -> Tuple[str, str]:
+    custom = str(prompt or "").strip()
+    if len(custom) > 500:
+        raise HTTPException(status_code=400, detail="修复需求最多 500 字")
+    if template and custom:
+        raise HTTPException(status_code=400, detail="自定义修复需求仅适用于原片修复")
+    combined = "\n".join([custom] + [str(v) for v in text_values.values() if v])
+    return custom, combined
+
+
+def _reject_uploaded_content(openid: str, kind: str, reason: str,
+                             quality: str, template: Optional[Dict[str, Any]]) -> None:
+    """只对明确的用户输入违规执行扣点；审核服务故障、AI 输出违规均不处罚。"""
+    if "审核服务" in reason:
+        raise HTTPException(status_code=503, detail=reason)
+    price = 0 if settings.free_mode() else _effective_price(quality, template)
+    event = users.record_violation(openid, uuid.uuid4().hex[:12], kind, reason, price)
+    raise HTTPException(status_code=422, detail={"code": "CONTENT_VIOLATION",
+                        "message": reason, **event})
 
 
 def _refund_charged(openid: str, job_id: str, price: int) -> None:
@@ -490,7 +530,7 @@ def _register_job(openid: str, quality: str, style: str,
                   orig_tmp_path: str, ext: str,
                   template: Optional[Dict[str, Any]] = None,
                   text_values: Optional[Dict[str, str]] = None,
-                  aspect_ratio: str = "") -> Dict[str, Any]:
+                  aspect_ratio: str = "", custom_prompt: str = "") -> Dict[str, Any]:
     """把已落盘的原图登记为任务（ multipart 与 COS 直传共用这条尾巴）。
 
     template 非空时，引擎档位/提示词/输出尺寸/文字排版全部以模板为准，
@@ -500,6 +540,10 @@ def _register_job(openid: str, quality: str, style: str,
     # 模板构图由模板/模型决定，旧客户端传来的比例也不能裁掉原始素材。
     if template:
         aspect_ratio = ""
+    if custom_prompt and not template:
+        prompt_client = _get_client("worldcodes")
+        if not settings.provider_enabled("worldcodes") or prompt_client is None or not prompt_client.configured:
+            raise HTTPException(status_code=503, detail="自定义修复需求当前不可用，请稍后重试")
     price = _effective_price(quality, template)
     job_id = uuid.uuid4().hex[:12]
     free = settings.free_mode()
@@ -574,7 +618,7 @@ def _register_job(openid: str, quality: str, style: str,
         if orig_cos:
             cleanup.schedule("cos", orig_cos, time.time() + ORIGINAL_TTL_SECONDS)
         pool.submit(_run_pipeline, job_id, quality, style,
-                    copy_template(template), dict(text_values or {}), aspect_ratio)
+                    copy_template(template), dict(text_values or {}), aspect_ratio, custom_prompt)
     except Exception:
         users.refund_job(openid, job_id, cancel=True)
         existing = jobs.get(job_id)
@@ -1048,7 +1092,7 @@ def _media_type(path: str) -> str:
 def _run_pipeline(job_id: str, quality: str, style: str,
                   template: Optional[Dict[str, Any]] = None,
                   text_values: Optional[Dict[str, str]] = None,
-                  aspect_ratio: str = "") -> None:
+                  aspect_ratio: str = "", custom_prompt: str = "") -> None:
     """后台执行：归一化 -> 按 settings.chain 依次尝试 -> 本地兜底
     -> 模板输出尺寸 -> 模板文字排版。
 
@@ -1102,8 +1146,12 @@ def _run_pipeline(job_id: str, quality: str, style: str,
         # 模板提示词优先；无模板按档位取全局提示词
         tier_prompt = str(template.get("prompt") or "").strip() \
             or settings.prompt_for(quality)
+        if custom_prompt and not template:
+            tier_prompt += "\n用户修复需求：" + custom_prompt
 
-        for name in settings.chain():
+        # 自定义要求必须由支持提示词的编辑引擎处理，不能静默退化为忽略要求的超分/本地引擎。
+        chain = ["worldcodes"] if custom_prompt and not template else settings.chain()
+        for name in chain:
             if enhanced:
                 break
             if name == "local":
@@ -1150,6 +1198,8 @@ def _run_pipeline(job_id: str, quality: str, style: str,
 
         # --- 3. 本地兜底：链路全挂（或全部被停用）时强制跑一次 ---
         if not enhanced:
+            if custom_prompt and not template:
+                raise RuntimeError("自定义修复引擎本次未完成，请重试；本次光子将退回")
             log.info("[%s] 外部链路全部失败，走本地引擎（quality=%s, style=%s）",
                      job_id, quality, style)
             # 前面已经归一化过，这里关掉 2K 上采样，避免把 1536 插值回 2000
@@ -1697,6 +1747,12 @@ class _RescueByUploadBody(BaseModel):
     template_id: str = ""
     text_fields: str = ""
     aspect_ratio: str = ""
+    custom_prompt: str = ""
+
+
+class _ViolationFeedbackBody(BaseModel):
+    violation_id: str = ""
+    message: str = ""
 
 
 def _login_response(openid: str, account_type: str = "wechat", app_id: str = "") -> Dict[str, Any]:
@@ -1780,6 +1836,17 @@ def get_me(request: Request):
             "video_today": users.earn_count_today(openid, "video"),
         },
     }
+
+
+@app.post("/api/me/violation-feedback")
+def violation_feedback(body: _ViolationFeedbackBody, request: Request):
+    user = _current_user(request)
+    message = body.message.strip()
+    if not message or len(message) > 500:
+        raise HTTPException(status_code=400, detail="反馈内容需为 1～500 字")
+    if not users.submit_violation_feedback(user["openid"], body.violation_id, message):
+        raise HTTPException(status_code=404, detail="违规记录不存在或已经反馈")
+    return {"ok": True, "message": "反馈已提交，等待人工复核"}
 
 
 @app.post("/api/me/earn")
@@ -1902,6 +1969,7 @@ def create_rescue_job(
     template_id: str = Form(""),
     text_fields: str = Form(""),
     aspect_ratio: str = Form(""),
+    custom_prompt: str = Form(""),
 ):
     """提交修图任务（multipart 路径；启用 COS 直传后小程序走 /by-upload）。
 
@@ -1916,6 +1984,7 @@ def create_rescue_job(
     tpl, tpl_quality, text_values = _resolve_template(template_id, text_fields)
     quality, style = _validate_quality_style(
         _chosen_quality((quality or "").strip().lower(), tpl_quality), style)
+    custom_prompt, combined_text = _user_text(custom_prompt, text_values, tpl)
 
     ext = os.path.splitext(image.filename or "")[1].lower()
     if ext not in ALLOWED_EXT:
@@ -1956,17 +2025,21 @@ def create_rescue_job(
         _safe_remove(job_tmp)
         raise
 
+    text_reject = _moderate_text_or_reject(combined_text, user["openid"])
+    if text_reject:
+        _safe_remove(job_tmp)
+        _reject_uploaded_content(user["openid"], "text", text_reject, quality, tpl)
     # 上传侧内容审核：AI 调用之前拦，省钱也合规
     with open(job_tmp, "rb") as fh:
         reject = _moderate_or_reject(fh.read(), "upload", user["openid"])
     if reject:
         _safe_remove(job_tmp)
-        raise HTTPException(status_code=400, detail=reject)
+        _reject_uploaded_content(user["openid"], "image", reject, quality, tpl)
 
     try:
         return _register_job(user["openid"], quality, style, job_tmp, ext,
                              template=tpl, text_values=text_values,
-                             aspect_ratio=aspect_ratio)
+                             aspect_ratio=aspect_ratio, custom_prompt=custom_prompt)
     except Exception:
         _safe_remove(job_tmp)  # 含 402 光子不足等失败路径，别留下孤儿临时文件
         raise
@@ -1984,6 +2057,7 @@ def create_rescue_job_by_upload(payload: _RescueByUploadBody,
     quality, style = _validate_quality_style(
         _chosen_quality((payload.quality or "").strip().lower(), tpl_quality),
         payload.style)
+    custom_prompt, combined_text = _user_text(payload.custom_prompt, text_values, tpl)
 
     with _uploads_lock:
         rec = _uploads.get(upload_id)
@@ -2013,16 +2087,20 @@ def create_rescue_job_by_upload(payload: _RescueByUploadBody,
     finally:
         cleanup.schedule("cos", rec["key"], time.time())
 
+    text_reject = _moderate_text_or_reject(combined_text, user["openid"])
+    if text_reject:
+        _safe_remove(job_tmp)
+        _reject_uploaded_content(user["openid"], "text", text_reject, quality, tpl)
     with open(job_tmp, "rb") as fh:
         reject = _moderate_or_reject(fh.read(), "upload", user["openid"])
     if reject:
         _safe_remove(job_tmp)
-        raise HTTPException(status_code=400, detail=reject)
+        _reject_uploaded_content(user["openid"], "image", reject, quality, tpl)
 
     try:
         return _register_job(user["openid"], quality, style, job_tmp, ext,
                              template=tpl, text_values=text_values,
-                             aspect_ratio=payload.aspect_ratio)
+                             aspect_ratio=payload.aspect_ratio, custom_prompt=custom_prompt)
     except Exception:
         _safe_remove(job_tmp)
         raise

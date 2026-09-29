@@ -33,7 +33,7 @@
         <image
           class="card-cover-img"
           src="{{ item.coverUrl || '/images/logo.jpg' }}"
-          mode="aspectFill"
+          mode="aspectFit"
           lazy-load
         ></image>
         <view class="card-badge card-engine-badge">
@@ -74,6 +74,7 @@
     <view class="footer-divider"></view>
     <text class="footer-note">废片新生所 · 每一张模板均基于真实影调深度微调</text>
     <text class="footer-sub">保留面部特征与原图光影骨架 · 杜绝假人与塑料感</text>
+    <text class="footer-sub">请勿上传违规内容；审核违规不予生图并扣点，7天内累计3次将永久封禁，剩余点数不退还。</text>
   </view>
 
   <!-- 模板装裱详情模态框 (点击卡片展开) -->
@@ -103,7 +104,7 @@
               <image
                 class="detail-stage-img"
                 src="{{ item }}"
-                mode="aspectFill"
+                mode="aspectFit"
                 bindtap="onPreviewCovers"
                 data-url="{{ item }}"
               ></image>
@@ -113,7 +114,7 @@
             wx:else
             class="detail-stage-img"
             src="{{ selectedItem.coverUrl || '/images/logo.jpg' }}"
-            mode="aspectFill"
+            mode="aspectFit"
             bindtap="onPreviewCovers"
             data-url="{{ selectedItem.coverUrl }}"
           ></image>
@@ -193,6 +194,7 @@
             <text class="guide-fineprint">合适的原图能明显提高生成稳定性，但 AI 作品仍会保留一定随机变化。</text>
           </block>
 
+          <text class="guide-fineprint">上传违规内容将扣除本次点数且不予生图；7天内累计3次将永久封禁。</text>
           <button class="btn-ink apply-btn" bindtap="onApplyTemplate">
             选用此风格，开始创作 →
           </button>

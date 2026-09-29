@@ -656,3 +656,33 @@ page {
   font-size: 24rpx;
   color: #1a1917;
 }
+
+.custom-prompt-input, .feedback-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 190rpx;
+  padding: 20rpx;
+  border: 1rpx solid #d8d2c4;
+  border-radius: 10rpx;
+  background: #fff;
+  color: #1a1917;
+  font-size: 24rpx;
+  line-height: 1.6;
+}
+.prompt-hint, .feedback-hint, .violation-notice {
+  display: block;
+  color: #8d4038;
+  font-size: 21rpx;
+  line-height: 1.6;
+  margin-top: 14rpx;
+}
+.violation-notice { margin: 0 0 18rpx; }
+.feedback-sheet {
+  width: 88%;
+  padding: 32rpx;
+  border-radius: 18rpx;
+  background: #f8f6f1;
+}
+.feedback-input { margin-top: 18rpx; }
+.feedback-actions { display: flex; gap: 12rpx; margin-top: 22rpx; }
+.feedback-actions button { flex: 1; font-size: 23rpx; }

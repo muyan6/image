@@ -43,9 +43,14 @@ function absolute(path) {
 
 function makeError(res) {
   const body = (res && res.data) || {};
-  const msg = body.detail || body.message || ('请求失败 (' + res.statusCode + ')');
+  const detail = body.detail;
+  const msg = (detail && typeof detail === 'object' ? detail.message : detail) || body.message || ('请求失败 (' + res.statusCode + ')');
   const err = new Error(msg);
   err.status = res.statusCode;
+  if (detail && typeof detail === 'object') {
+    err.detail = detail;
+    syncAccount(detail);
+  }
   return err;
 }
 
@@ -249,8 +254,7 @@ function rawUpload(filePath, formData, options) {
           syncAccount(data);
           resolve(data);
         } else {
-          const err = new Error(data.detail || ('上传失败 (' + res.statusCode + ')'));
-          err.status = res.statusCode;
+          const err = makeError({data, statusCode: res.statusCode});
           if (res.statusCode === 401) err.code = 'UNAUTHORIZED';
           reject(err);
         }
@@ -366,6 +370,12 @@ function bindInvite(code) {
   });
 }
 
+function submitViolationFeedback(violationId, message) {
+  return request('/api/me/violation-feedback', {
+    method: 'POST', data: { violation_id: violationId, message }
+  });
+}
+
 /* ------------------------- COS 直传三件套 ------------------------- */
 
 function createUpload(filename, byteSize) {
@@ -433,7 +443,7 @@ async function _submitViaCos(filePath, formData) {
   await completeUpload(up.upload_id);
 
   const body = {};
-  ['quality', 'style', 'template_id', 'text_fields', 'aspect_ratio'].forEach((k) => {
+  ['quality', 'style', 'template_id', 'text_fields', 'aspect_ratio', 'custom_prompt'].forEach((k) => {
     if (formData && formData[k] !== undefined && formData[k] !== '') {
       body[k] = formData[k];
     }
@@ -496,6 +506,7 @@ module.exports = {
   me,
   earn,
   bindInvite,
+  submitViolationFeedback,
   createUpload,
   putToCos,
   completeUpload,

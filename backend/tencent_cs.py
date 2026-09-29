@@ -45,7 +45,8 @@ class ModerationError(RuntimeError):
 
 
 def _tc3_headers(conf: Dict[str, str], payload_json: str,
-                 region: Optional[str] = None) -> Dict[str, str]:
+                 region: Optional[str] = None, host: str = _HOST,
+                 service: str = _SERVICE, action: str = _ACTION) -> Dict[str, str]:
     """按腾讯云 TC3-HMAC-SHA256 规范生成签名请求头。"""
     secret_id = conf["secret_id"]
     secret_key = conf["secret_key"]
@@ -57,14 +58,14 @@ def _tc3_headers(conf: Dict[str, str], payload_json: str,
         "/",
         "",
         "content-type:application/json; charset=utf-8\nhost:%s\nx-tc-action:%s\n" % (
-            _HOST, _ACTION.lower()),
+            host, action.lower()),
         "content-type;host;x-tc-action",
         hashlib.sha256(payload_json.encode("utf-8")).hexdigest(),
     ])
     string_to_sign = "\n".join([
         "TC3-HMAC-SHA256",
         str(ts),
-        "%s/%s/tc3_request" % (date, _SERVICE),
+        "%s/%s/tc3_request" % (date, service),
         hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
     ])
 
@@ -72,7 +73,7 @@ def _tc3_headers(conf: Dict[str, str], payload_json: str,
         return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 
     k_date = _hmac(("TC3" + secret_key).encode("utf-8"), date)
-    k_service = _hmac(k_date, _SERVICE)
+    k_service = _hmac(k_date, service)
     k_signing = _hmac(k_service, "tc3_request")
     signature = hmac.new(k_signing, string_to_sign.encode("utf-8"),
                          hashlib.sha256).hexdigest()
@@ -80,12 +81,12 @@ def _tc3_headers(conf: Dict[str, str], payload_json: str,
     authorization = (
         "TC3-HMAC-SHA256 Credential=%s/%s/%s/tc3_request, "
         "SignedHeaders=content-type;host;x-tc-action, Signature=%s"
-        % (secret_id, date, _SERVICE, signature))
+        % (secret_id, date, service, signature))
     headers = {
         "Authorization": authorization,
         "Content-Type": "application/json; charset=utf-8",
-        "Host": _HOST,
-        "X-TC-Action": _ACTION,
+        "Host": host,
+        "X-TC-Action": action,
         "X-TC-Version": _VERSION,
         "X-TC-Timestamp": str(ts),
     }
@@ -155,6 +156,29 @@ def moderate_image_bytes(image_bytes: bytes,
         return suggestion, label, score
 
     raise last_error or ModerationError("重试耗尽", code="RETRY_EXHAUSTED")
+
+
+def moderate_text(text: str, settings: SettingsStore) -> Tuple[str, str, int]:
+    """腾讯云 TMS 文本审核；仅发送用户填写的文本，不发送模板系统提示词。"""
+    conf = settings.tencent()
+    if not conf.get("secret_id") or not conf.get("secret_key"):
+        raise ModerationError("腾讯云密钥未配置", code="NOT_CONFIGURED")
+    payload = json.dumps({"Content": base64.b64encode(text.encode("utf-8")).decode("ascii")})
+    host = "tms.tencentcloudapi.com"
+    headers = _tc3_headers(conf, payload, region=conf.get("cos_region") or "ap-guangzhou",
+                           host=host, service="tms", action="TextModeration")
+    try:
+        resp = requests.post("https://" + host, headers=headers,
+                             data=payload.encode("utf-8"), timeout=_TIMEOUT)
+        resp.raise_for_status()
+        result = resp.json().get("Response", {})
+    except (requests.RequestException, ValueError) as exc:
+        raise ModerationError("文本审核服务异常", code="NETWORK") from exc
+    if "Error" in result:
+        raise ModerationError("文本审核失败: %s" % result["Error"].get("Code", "UNKNOWN"),
+                              code="API_ERROR")
+    return (str(result.get("Suggestion") or "Review"),
+            str(result.get("Label") or ""), int(result.get("Score") or 0))
 
 
 def _squeeze(image_bytes: bytes, limit_mb: float = 4.0) -> bytes:

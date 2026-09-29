@@ -708,7 +708,7 @@
 .showcase-cover-wrap {
   position: relative;
   width: 100%;
-  height: 250rpx;
+  height: 320rpx;
   background: #ece7de;
   overflow: hidden;
 }
@@ -830,6 +830,14 @@
   display: flex;
   flex-direction: column;
   gap: 14rpx;
+}
+
+.generation-warning {
+  display: block;
+  margin: 18rpx 8rpx 0;
+  color: #8d4038;
+  font-size: 20rpx;
+  line-height: 1.6;
 }
 
 .tpl-texts-title {

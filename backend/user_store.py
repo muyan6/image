@@ -87,6 +87,13 @@ class UserStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_charges_user_ts
                     ON job_charges(openid, created_at);
+                CREATE TABLE IF NOT EXISTS violations (
+                    id TEXT PRIMARY KEY, openid TEXT NOT NULL, created_at REAL NOT NULL,
+                    kind TEXT NOT NULL, reason TEXT NOT NULL, charged INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active', feedback TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_violations_user_ts
+                    ON violations(openid, created_at);
                 CREATE TABLE IF NOT EXISTS invite_bindings (
                     invitee TEXT PRIMARY KEY, inviter TEXT NOT NULL,
                     created_at REAL NOT NULL
@@ -107,6 +114,8 @@ class UserStore:
             if "banned" not in cols:
                 self._conn.execute(
                     "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0")
+            if "auto_banned" not in cols:
+                self._conn.execute("ALTER TABLE users ADD COLUMN auto_banned INTEGER NOT NULL DEFAULT 0")
             if "account_type" not in cols:
                 self._conn.execute("ALTER TABLE users ADD COLUMN account_type TEXT NOT NULL DEFAULT ''")
             if "app_id" not in cols:
@@ -213,6 +222,76 @@ class UserStore:
     def complete_charge(self, job_id: str) -> None:
         with self._lock, self._conn:
             self._conn.execute("UPDATE job_charges SET state='succeeded' WHERE job_id=? AND refunded=0", (job_id,))
+
+    def record_violation(self, openid: str, violation_id: str, kind: str,
+                         reason: str, price: int) -> Dict[str, Any]:
+        """审核确定拦截后，原子记录、扣点和滚动七日封禁。服务故障不调用此方法。"""
+        now = time.time()
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            row = self._conn.execute("SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
+            if row is None:
+                raise ValueError("账号不存在")
+            charge = min(max(0, int(price)), int(row[0]))
+            self._conn.execute("UPDATE users SET balance=balance-?,blocked=blocked+1 WHERE openid=?",
+                               (charge, openid))
+            self._conn.execute("INSERT INTO violations VALUES(?,?,?,?,?,?,?,?)",
+                               (violation_id, openid, now, kind, reason[:200], charge, "active", ""))
+            count = self._conn.execute(
+                "SELECT COUNT(*) FROM violations WHERE openid=? AND status IN ('active','upheld') AND created_at>=?",
+                (openid, now - 7 * 86400)).fetchone()[0]
+            banned = count >= 3
+            if banned:
+                self._conn.execute("UPDATE users SET banned=1,auto_banned=1 WHERE openid=? AND banned=0", (openid,))
+            self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
+                               (now, openid, "blocked", "id=%s kind=%s charged=%d" % (violation_id, kind, charge)))
+            return {"violation_id": violation_id, "charged": charge,
+                    "balance": int(row[0]) - charge, "weekly_count": count, "banned": banned}
+
+    def submit_violation_feedback(self, openid: str, violation_id: str, message: str) -> bool:
+        with self._lock, self._conn:
+            row = self._conn.execute("SELECT status,feedback FROM violations WHERE id=? AND openid=?",
+                                     (violation_id, openid)).fetchone()
+            if not row or row[0] != "active" or row[1]:
+                return False
+            self._conn.execute("UPDATE violations SET feedback=? WHERE id=?", (message[:500], violation_id))
+            self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
+                               (time.time(), openid, "violation_feedback", "id=" + violation_id))
+            return True
+
+    def list_violations(self, limit: int = 100) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute("SELECT id,openid,created_at,kind,reason,charged,status,feedback "
+                                      "FROM violations ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(zip(("id", "openid", "created_at", "kind", "reason", "charged", "status", "feedback"), r))
+                for r in rows]
+
+    def resolve_violation(self, violation_id: str, accepted: bool) -> Optional[Dict[str, Any]]:
+        """管理员确认误判时原路退回处罚点数，并在无有效违规时解除自动封禁。"""
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            row = self._conn.execute("SELECT openid,charged,status FROM violations WHERE id=?",
+                                     (violation_id,)).fetchone()
+            if not row:
+                return None
+            openid, charged, status = row
+            if status != "active":
+                return {"status": status, "balance": self._conn.execute(
+                    "SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()[0]}
+            next_status = "overturned" if accepted else "upheld"
+            self._conn.execute("UPDATE violations SET status=? WHERE id=?", (next_status, violation_id))
+            if accepted:
+                self._conn.execute("UPDATE users SET balance=balance+?,blocked=MAX(0,blocked-1) WHERE openid=?",
+                                   (charged, openid))
+                remaining = self._conn.execute("SELECT COUNT(*) FROM violations WHERE openid=? "
+                                               "AND status IN ('active','upheld') AND created_at>=?",
+                                               (openid, time.time() - 7 * 86400)).fetchone()[0]
+                if remaining < 3:
+                    self._conn.execute("UPDATE users SET banned=0,auto_banned=0 WHERE openid=? AND auto_banned=1", (openid,))
+            self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
+                               (time.time(), openid, "violation_review", "id=%s status=%s" % (violation_id, next_status)))
+            balance = self._conn.execute("SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()[0]
+            return {"status": next_status, "balance": int(balance)}
 
     def bind_invite_once(self, openid: str, code: str) -> Tuple[int, int]:
         with self._lock, self._conn:
@@ -362,7 +441,7 @@ class UserStore:
         """封禁/解封：封禁后无法提交任务（登录与历史查看不受影响）。"""
         with self._lock:
             self._conn.execute(
-                "UPDATE users SET banned=? WHERE openid=?",
+                "UPDATE users SET banned=?,auto_banned=0 WHERE openid=?",
                 (1 if banned else 0, openid))
             self._conn.commit()
 

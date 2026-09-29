@@ -37,6 +37,7 @@ log = logging.getLogger("rescue.wechatsec")
 
 _TOKEN_URL = "https://api.weixin.qq.com/cgi-bin/stable_token"
 _CHECK_URL = "https://api.weixin.qq.com/wxa/media_check_async"
+_TEXT_CHECK_URL = "https://api.weixin.qq.com/wxa/msg_sec_check"
 
 # mediaCheckAsync 的图片大小上限
 MAX_WECHAT_CHECK_BYTES = 10 * 1024 * 1024
@@ -62,6 +63,29 @@ def wechat_sec_ready(settings: SettingsStore) -> bool:
     conf = settings.wechat()
     return bool(conf.get("app_id") and conf.get("app_secret")
                 and settings.cos_ready())
+
+
+def wechat_text_ready(settings: SettingsStore) -> bool:
+    conf = settings.wechat()
+    return bool(settings.moderation().get("enabled") and conf.get("app_id") and conf.get("app_secret"))
+
+
+def check_text(settings: SettingsStore, content: str, openid: str) -> Tuple[str, str, int]:
+    """微信 msgSecCheck v2 同步文本审核；仅用于已登录的小程序用户。"""
+    try:
+        resp = requests.post(_TEXT_CHECK_URL,
+                             params={"access_token": get_access_token(settings)},
+                             json={"content": content, "version": 2, "scene": 3, "openid": openid},
+                             timeout=(10, 15))
+        data = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise WechatSecError("文字审核网络或响应错误", code="NETWORK") from exc
+    if data.get("errcode"):
+        raise WechatSecError("文字审核接口错误", code="API_%s" % data["errcode"])
+    result = data.get("result") or {}
+    if not result.get("suggest"):
+        raise WechatSecError("文字审核缺少判定结果", code="BAD_RESPONSE")
+    return str(result["suggest"]), str(result.get("label") or ""), 0
 
 
 def get_access_token(settings: SettingsStore, force_refresh: bool = False) -> str:

@@ -99,7 +99,7 @@
 .card-cover-box {
   position: relative;
   width: 100%;
-  height: 330rpx;
+  height: 420rpx;
   background: #ece8df;
   overflow: hidden;
 }
@@ -324,7 +324,7 @@
 
 .detail-cover-stage {
   width: 100%;
-  height: 420rpx;
+  height: 620rpx;
   background: #ece8df;
   border: 1rpx solid var(--paper-border);
   overflow: hidden;

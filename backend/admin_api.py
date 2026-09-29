@@ -449,6 +449,22 @@ def make_admin_router(*, settings: SettingsStore,
         _guard(request)
         return {"items": users.recent_audit(min(max(1, limit), 200))}
 
+    @router.get("/violations")
+    def list_violations(request: Request, limit: int = 100) -> Dict[str, Any]:
+        _guard(request)
+        return {"items": users.list_violations(min(max(1, limit), 200))}
+
+    @router.post("/violations/{violation_id}/review")
+    async def review_violation(violation_id: str, request: Request) -> Dict[str, Any]:
+        _guard(request)
+        body = await _json_body(request)
+        if not isinstance(body.get("accepted"), bool):
+            raise HTTPException(status_code=400, detail="accepted 必须是布尔值")
+        result = users.resolve_violation(violation_id, body["accepted"])
+        if result is None:
+            raise HTTPException(status_code=404, detail="违规记录不存在")
+        return {"ok": True, **result}
+
     @router.get("/jobs")
     def list_jobs(request: Request, offset: int = 0, limit: int = 50) -> Dict[str, Any]:
         _guard(request)

@@ -130,6 +130,18 @@
       </view>
     </view>
 
+    <!-- 原片修复自定义需求 -->
+    <view class="card-section" wx:if="{{ !selectedTemplate }}">
+      <view class="section-header">
+        <text class="section-title">修复需求</text>
+        <text class="section-headline">告诉 AI 你想怎样调整</text>
+      </view>
+      <textarea class="custom-prompt-input" value="{{ customPrompt }}" maxlength="500"
+        placeholder="例如：移除背景中的人群，保留主体；自然美化皮肤，不改变五官。"
+        bindinput="onCustomPromptInput" />
+      <text class="prompt-hint">需求越多，废片概率可能越高；描述越具体，效果通常越稳定。自定义需求仅在支持提示词的生成引擎生效。</text>
+    </view>
+
     <!-- 卡片 4：模板自定义文字（代码叠加中文，保证文字正确） -->
     <view
       class="card-section"
@@ -160,6 +172,7 @@
 
     <!-- 版权与使用权勾选 (截图3) -->
     <view class="rights-card">
+      <text class="violation-notice">请勿上传或输入违规内容。审核违规将不予生成并扣除本次点数；7天内累计3次将永久封禁账号，剩余点数不予退还。若有误判，可提交反馈复核。</text>
       <view class="rights-row" bindtap="onToggleRights">
         <view class="custom-checkbox {{ rightsOk ? 'checkbox-checked' : '' }}">
           <text class="checkbox-symbol" wx:if="{{ rightsOk }}">✓</text>
@@ -184,11 +197,25 @@
   <view class="fixed-bar">
     <view class="bar-credit-info">
       <text class="bar-balance">余额 {{ freeMode ? '不限' : '✦ ' + lightPoints }}</text>
-      <text class="bar-deduct">{{ freeMode ? '体验免扣' : ('成功后扣 ✦' + currentQualityCost + ' 光子') }}</text>
+      <text class="bar-deduct">{{ freeMode ? '体验免扣' : ('提交预扣 ✦' + currentQualityCost + ' 光子') }}</text>
     </view>
     <button class="btn-generate" bindtap="onStartGenerate" loading="{{ processing }}" disabled="{{ processing }}">
       开始生成
     </button>
+  </view>
+
+  <view class="modal-mask" wx:if="{{ showViolationFeedback }}">
+    <view class="feedback-sheet">
+      <text class="sheet-title">提交误判反馈</text>
+      <text class="feedback-hint">请简要说明误判原因，后台将人工复核。</text>
+      <textarea class="feedback-input" value="{{ feedbackText }}" maxlength="500"
+        placeholder="例如：照片中的人物均已授权，内容不含违规元素。"
+        bindinput="onFeedbackInput" />
+      <view class="feedback-actions">
+        <button bindtap="onCloseViolationFeedback">取消</button>
+        <button bindtap="onSubmitViolationFeedback">提交反馈</button>
+      </view>
+    </view>
   </view>
 
   <!-- 画幅比例选择弹窗抽屉 -->

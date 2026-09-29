@@ -7,7 +7,7 @@ const rows=[],tick=()=>new Promise(r=>setImmediate(r));
 const app=()=>({globalData:{apiBase:'https://server.invalid',historyList:[],lightPoints:90},setBalance(){},persist(){}});
 function page(name,api={},wx={}) {
   let p;
-  const mocks={showToast(){},showLoading(){},hideLoading(){},vibrateShort(){},getWindowInfo:()=>({windowWidth:375}),...wx};
+  const mocks={showToast(){},showModal(){},showLoading(){},hideLoading(){},navigateTo(){},vibrateShort(){},getWindowInfo:()=>({windowWidth:375}),...wx};
   vm.runInNewContext(fs.readFileSync(path.join(root,`miniprogram/pages/${name}/${name}.js`),'utf8'),
     {getApp:app,require:()=>api,Page:x=>p=x,wx:mocks,setTimeout,console});
   p.data=JSON.parse(JSON.stringify(p.data));p.setData=d=>Object.assign(p.data,d);return p;
@@ -116,6 +116,23 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
   await test('new_pending_photo_defaults_to_light_and_light_price',async()=>{
     const p=page('adjust');assert.equal(p.data.quality,'light');assert.equal(p.data.currentQualityCost,1);
     p.data.costLight=2;p.refreshCurrentCost();assert.equal(p.data.currentQualityCost,2);
+  });
+  await test('plain_restore_sends_custom_requirement',async()=>{
+    let sent;
+    const p=page('adjust',{submitJob:async(_,form)=>{sent=form;throw new Error('fixture');}});
+    p._foreground=true;p.data.customPrompt='移除背景人群，保留主体';
+    await p.executeUpload('photo.jpg');assert.equal(sent.custom_prompt,p.data.customPrompt);
+  });
+  await test('violation_modal_offers_feedback_and_syncs_charged_balance',async()=>{
+    let modal,submitted;
+    const violation={code:'CONTENT_VIOLATION',violation_id:'event123',message:'图片内容未通过安全审核',charged:1,weekly_count:2,banned:false};
+    const p=page('adjust',{submitJob:async()=>{const e=new Error(violation.message);e.detail=violation;throw e;},
+      submitViolationFeedback:async(id,msg)=>{submitted=[id,msg];}},
+      {showModal:o=>{modal=o;}});
+    p._foreground=true;await p.executeUpload('photo.jpg');assert.equal(modal.confirmText,'我知道了');
+    assert.equal(modal.cancelText,'误判反馈');modal.success({cancel:true});
+    assert.equal(p.data.showViolationFeedback,true);p.data.feedbackText='误判说明';
+    await p.onSubmitViolationFeedback();assert.deepEqual(submitted,['event123','误判说明']);
   });
   await test('selecting_template_resets_old_crop_and_disables_ratio_picker',async()=>{
     const p=page('adjust');p._imgWidth=160;p._imgHeight=90;
