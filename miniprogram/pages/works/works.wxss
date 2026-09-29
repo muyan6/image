@@ -151,3 +151,29 @@
   padding: 20rpx 48rpx;
   font-size: 26rpx;
 }
+
+.work-processing-badge {
+  position: absolute;
+  top: 12rpx;
+  right: 12rpx;
+  background: rgba(22, 22, 24, 0.85);
+  color: #ffb74d;
+  font-size: 18rpx;
+  padding: 4rpx 14rpx;
+  border-radius: 20rpx;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  backdrop-filter: blur(4px);
+}
+
+.processing-dot {
+  font-size: 14rpx;
+  color: #ffb74d;
+  animation: blinkDot 1.2s infinite;
+}
+
+@keyframes blinkDot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}

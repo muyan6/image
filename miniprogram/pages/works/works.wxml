@@ -21,9 +21,13 @@
       data-index="{{ index }}"
     >
       <view class="work-photo-box">
-        <image class="work-img" src="{{ item.result }}" mode="aspectFill" lazy-load></image>
-        <view class="work-quality-tag">
+        <image class="work-img" src="{{ item.result || item.original }}" mode="aspectFill" lazy-load></image>
+        <view class="work-quality-tag" wx:if="{{ item.status !== 'processing' && item.result }}">
           <text>{{ item.quality === 'fine' ? '2K精细' : '1.5K' }}</text>
+        </view>
+        <view class="work-processing-badge" wx:if="{{ item.status === 'processing' || !item.result }}">
+          <text class="processing-dot">●</text>
+          <text>云端重构中</text>
         </view>
       </view>
       <view class="work-info">

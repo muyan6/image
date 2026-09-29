@@ -39,7 +39,8 @@ Page({
 
     // 状态
     processing: false,
-    processingText: '正在提交照片…'
+    processingText: '正在提交照片…',
+    currentJobId: null
   },
 
   onLoad(options) {
@@ -289,6 +290,18 @@ Page({
     });
   },
 
+  onCancelOrMinimizeWait() {
+    this.setData({ processing: false });
+    wx.showToast({
+      title: '已转入后台，完成后自动存入作品',
+      icon: 'none',
+      duration: 2500
+    });
+    setTimeout(() => {
+      wx.navigateTo({ url: '/pages/works/works' });
+    }, 600);
+  },
+
   async executeUpload(path) {
     const tpl = this.data.selectedTemplate;
     const ratio = this.data.currentRatioKey;
@@ -306,53 +319,108 @@ Page({
         }
       }
 
-      // COS 直传优先（图片字节不过服务器），失败自动回退 multipart
+      this.setData({
+        processing: true,
+        processingText: '正在提交照片并云端排队…',
+        currentJobId: null
+      });
+
+      // 1. COS 直传优先，失败自动回退 multipart（耗时仅 1~2 秒）
       const created = await api.submitJob(path, formData);
       if (!created || created.code !== 0 || !created.job_id) {
         throw new Error((created && created.detail) || '服务响应异常');
       }
       if (typeof created.balance === 'number') app.setBalance(created.balance);
 
-      this.setData({
-        processingText: `正在进行${tpl ? tpl.name : 'AI'}风格重构…`
-      });
+      const jobId = created.job_id;
+      const origUrl = api.absolute(created.orig_url || path);
 
-      const job = await api.waitForJob(created.job_id, {
-        onTick: (j) => {
-          if (j.stage === 'enhance') {
-            this.setData({ processingText: 'AI 深度重构光影与细节中…' });
-          }
-        }
-      });
-
-      const origUrl = api.absolute(job.orig_url || created.orig_url);
-      const resUrl = api.absolute(job.result_url || created.result_url);
-      const bustUrl = resUrl + (resUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
-
-      // 记录历史（存 jobId，展示时可向服务端换取新鲜签名直链）
-      const historyItem = {
+      // 【关键优化】：上传成功后立即写入作品集历史！
+      // 哪怕用户此刻立即切屏、关闭小程序或断网，作品都绝对不会丢失！
+      const initialItem = {
         original: origUrl,
-        result: bustUrl,
+        result: '',
+        status: 'processing',
         quality: created.quality || this.data.quality,
         templateName: tpl ? tpl.name : '',
-        jobId: created.job_id,
+        jobId: jobId,
         time: this.formatTime(new Date())
       };
       app.globalData.historyList = app.globalData.historyList || [];
-      app.globalData.historyList.unshift(historyItem);
+      const exIdx = app.globalData.historyList.findIndex((h) => h.jobId === jobId);
+      if (exIdx >= 0) {
+        app.globalData.historyList[exIdx] = initialItem;
+      } else {
+        app.globalData.historyList.unshift(initialItem);
+      }
       if (app.globalData.historyList.length > 50) app.globalData.historyList.length = 50;
+      app.persist();
+
+      this.setData({
+        currentJobId: jobId,
+        processingText: `正在进行${tpl ? tpl.name : 'AI'}风格重构…`
+      });
+
+      // 2. 轮询等待任务（用户若停留在本页等待则轮询；随时可关闭或切屏）
+      let job = null;
+      try {
+        job = await api.waitForJob(jobId, {
+          isCanceled: () => !this.data.processing,
+          onTick: (j) => {
+            if (j.stage === 'enhance') {
+              this.setData({ processingText: 'AI 深度重构光影与细节中…' });
+            }
+          }
+        });
+      } catch (waitErr) {
+        const msg = String((waitErr && waitErr.message) || '');
+        if (waitErr.code === 'USER_BACKGROUND' || msg.includes('canceled') || msg.includes('abort') || !this.data.processing) {
+          console.log('切屏或后台等待，任务已在云端继续运行:', jobId);
+          this.setData({ processing: false });
+          return;
+        }
+        throw waitErr;
+      }
+
+      if (!job || job.status !== 'succeeded') {
+        throw new Error((job && job.error) || '生成未完成，请在作品中查看');
+      }
+
+      const resUrl = api.absolute(job.result_url || created.result_url);
+      const bustUrl = resUrl + (resUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
+
+      // 更新历史记录为完成状态
+      const finishedItem = {
+        original: origUrl,
+        result: bustUrl,
+        status: 'succeeded',
+        quality: created.quality || this.data.quality,
+        templateName: tpl ? tpl.name : '',
+        jobId: jobId,
+        time: this.formatTime(new Date())
+      };
+      const list = app.globalData.historyList || [];
+      const idx = list.findIndex((h) => h.jobId === jobId);
+      if (idx >= 0) list[idx] = finishedItem;
       app.persist();
 
       this.setData({ processing: false, lightPoints: app.globalData.lightPoints });
 
-      // 跳转至全屏拖拽滑块对比页（带 jobId，供签名过期后刷新）
+      // 跳转至全屏拖拽滑块对比页
       wx.redirectTo({
-        url: `/pages/compare/compare?original=${encodeURIComponent(origUrl)}&result=${encodeURIComponent(bustUrl)}&quality=${historyItem.quality}&job=${encodeURIComponent(created.job_id)}`
+        url: `/pages/compare/compare?original=${encodeURIComponent(origUrl)}&result=${encodeURIComponent(bustUrl)}&quality=${finishedItem.quality}&job=${encodeURIComponent(jobId)}`
       });
+
     } catch (err) {
       console.error('生成失败', err);
       this.setData({ processing: false });
       this.setData({ lightPoints: app.globalData.lightPoints });
+
+      const msg = String((err && err.message) || '');
+      // 切屏取消类错误静默忽略（任务已在作品库中）
+      if (msg.includes('canceled') || msg.includes('abort')) {
+        return;
+      }
 
       // 402 = 服务端判定光子不足（余额是服务端记账，客户端预判可能过期）
       if (err && err.status === 402) {

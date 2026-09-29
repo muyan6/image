@@ -601,6 +601,16 @@ class JobStore:
                 len(ordered),
             )
 
+    def list_for_openid(self, openid: str, offset: int = 0, limit: int = 50) -> List[Dict[str, Any]]:
+        """按 openid 筛选当前用户的任务列表：按创建时间倒序。"""
+        with self._lock:
+            matched = [
+                dict(j) for j in self._data.values()
+                if j.get("openid") == openid
+            ]
+            matched.sort(key=lambda j: j.get("created_at", 0), reverse=True)
+            return matched[offset:offset + limit]
+
 
 def _cleanup_job_files(evicted_jobs: List[Dict[str, Any]]) -> None:
     """任务被驱逐后删除其磁盘文件（只删已出结果/失败的，排队中的不动）。"""
@@ -1638,6 +1648,38 @@ def query_job_status(job_id: str, request: Request):
         "result_url": _media_url("result", job.get("result_url")),
         "created_at": job.get("created_at"),
     }
+
+
+@app.get("/api/my/jobs")
+def get_my_jobs(request: Request, limit: int = 30):
+    """查询当前登录用户最近提交的任务历史列表（支持跨端同步与切屏恢复）。"""
+    user = _current_user(request)
+    raw_list = jobs.list_for_openid(user["openid"], limit=limit)
+    res = []
+    for job in raw_list:
+        def _media_url(kind: str, fallback: Optional[str]) -> Optional[str]:
+            key = job.get("%s_cos" % kind)
+            if key and settings.cos_ready():
+                try:
+                    return cos_presign(settings, "get", key, ttl_seconds=7200)
+                except CosError:
+                    pass
+            return fallback
+
+        res.append({
+            "id": job["id"],
+            "status": job["status"],
+            "stage": job.get("stage"),
+            "quality": job.get("quality"),
+            "aspect_ratio": job.get("aspect_ratio", ""),
+            "template_id": job.get("template_id", ""),
+            "template_name": job.get("template_name", ""),
+            "error": job.get("error"),
+            "orig_url": _media_url("orig", job.get("orig_url")),
+            "result_url": _media_url("result", job.get("result_url")),
+            "created_at": job.get("created_at"),
+        })
+    return {"jobs": res}
 
 
 @app.get("/api/images/{filename}")

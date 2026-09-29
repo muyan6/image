@@ -551,14 +551,47 @@ page {
 }
 
 .processing-box {
+  position: relative;
   background-color: #ffffff;
   border-radius: 32rpx;
-  padding: 48rpx 40rpx;
+  padding: 52rpx 40rpx 44rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
   width: 82%;
   box-shadow: 0 16rpx 40rpx rgba(0, 0, 0, 0.2);
+}
+
+.processing-close-btn {
+  position: absolute;
+  top: 24rpx;
+  right: 28rpx;
+  width: 50rpx;
+  height: 50rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32rpx;
+  color: #9a9a9f;
+  line-height: 1;
+}
+
+.processing-actions {
+  margin-top: 32rpx;
+  width: 100%;
+}
+
+.btn-leave-action {
+  width: 100% !important;
+  background: #f4f2ee;
+  color: #1a1a1c;
+  font-size: 26rpx;
+  font-weight: 600;
+  border-radius: 40rpx;
+  height: 76rpx;
+  line-height: 76rpx;
+  border: 1rpx solid #e2ded7;
+  padding: 0 24rpx;
 }
 
 .loading-ring {
@@ -585,12 +618,12 @@ page {
 .processing-sub {
   font-size: 26rpx;
   color: #55555c;
-  margin-bottom: 20rpx;
+  margin-bottom: 16rpx;
   text-align: center;
 }
 
 .processing-tip {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: #9a9a9f;
   text-align: center;
 }

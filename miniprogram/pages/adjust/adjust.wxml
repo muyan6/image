@@ -223,10 +223,19 @@
   <!-- 处理中遮罩/动画 -->
   <view class="processing-mask" wx:if="{{ processing }}">
     <view class="processing-box">
+      <!-- 右上角允许随时关闭浮层 -->
+      <view class="processing-close-btn" bindtap="onCancelOrMinimizeWait">✕</view>
       <view class="loading-ring"></view>
       <text class="processing-title">AI 重构进行中</text>
       <text class="processing-sub">{{ processingText }}</text>
-      <text class="processing-tip">采用深度神经网络运算，耗时约 15~25 秒</text>
+      <text class="processing-tip">已提交云端处理，运算约需 15~25 秒</text>
+
+      <!-- 快捷离开按钮（拿到任务ID后即可转后台） -->
+      <view class="processing-actions" wx:if="{{ currentJobId }}">
+        <button class="btn-leave-action" bindtap="onCancelOrMinimizeWait">
+          稍后在「作品」查看 →
+        </button>
+      </view>
     </view>
   </view>
 </view>

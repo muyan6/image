@@ -180,16 +180,37 @@ async function waitForJob(jobId, options) {
   let lastStatus = null;
 
   while (Date.now() < deadline) {
-    const job = await request('/api/jobs/' + jobId);
-    if (job.status !== lastStatus) {
-      lastStatus = job.status;
-      if (opts.onTick) opts.onTick(job);
-    }
-    if (job.status === 'succeeded') return job;
-    if (job.status === 'failed') {
-      const err = new Error(job.error || '修图失败，请重试');
-      err.code = 'JOB_FAILED';
+    if (opts.isCanceled && opts.isCanceled()) {
+      const err = new Error('用户已切换页面，后台继续处理');
+      err.code = 'USER_BACKGROUND';
       throw err;
+    }
+    try {
+      const job = await request('/api/jobs/' + jobId);
+      if (job.status !== lastStatus) {
+        lastStatus = job.status;
+        if (opts.onTick) opts.onTick(job);
+      }
+      if (job.status === 'succeeded') return job;
+      if (job.status === 'failed') {
+        const err = new Error(job.error || '修图失败，请重试');
+        err.code = 'JOB_FAILED';
+        throw err;
+      }
+    } catch (e) {
+      if (e && e.code === 'JOB_FAILED') throw e;
+      const msg = String((e && e.message) || '');
+      // 用户切屏或小程序进入后台，微信可能抛 request:fail canceled / abort
+      if (opts.isCanceled && opts.isCanceled()) {
+        const err = new Error('用户已切换页面，后台继续处理');
+        err.code = 'USER_BACKGROUND';
+        throw err;
+      }
+      if (msg.includes('canceled') || msg.includes('abort')) {
+        const err = new Error('切屏已转入后台，任务在云端继续运行');
+        err.code = 'USER_BACKGROUND';
+        throw err;
+      }
     }
     await sleep(interval);
   }
@@ -197,6 +218,11 @@ async function waitForJob(jobId, options) {
   const err = new Error('处理超时，请稍后在历史记录中查看');
   err.code = 'TIMEOUT';
   throw err;
+}
+
+/** 查询当前用户云端最近提交的任务历史列表 */
+function myJobs(limit = 30) {
+  return request('/api/my/jobs?limit=' + limit, { timeout: 8000 });
 }
 
 /** 后端连通性探测 */
@@ -341,6 +367,7 @@ module.exports = {
   upload,
   submitJob,
   waitForJob,
+  myJobs,
   health,
   config,
   announcements,

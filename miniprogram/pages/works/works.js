@@ -14,36 +14,110 @@ Page({
     this.loadWorks();
   },
 
-  onPullDownRefresh() {
-    this.loadWorks();
+  async onPullDownRefresh() {
+    await this.loadWorks();
     wx.stopPullDownRefresh();
   },
 
-  loadWorks() {
-    this.setData({
-      works: app.globalData.historyList || []
-    });
+  async loadWorks() {
+    let list = app.globalData.historyList || [];
+    this.setData({ works: list });
+
+    // 1. 同步云端最近任务（支持切屏后自动取回、跨端同步）
+    try {
+      if (api.myJobs) {
+        const res = await api.myJobs(20);
+        if (res && res.jobs && res.jobs.length) {
+          const existingIds = new Set(list.map((w) => w.jobId));
+          let changed = false;
+          for (const cj of res.jobs) {
+            const orig = api.absolute(cj.orig_url);
+            const resUrl = cj.result_url ? (api.absolute(cj.result_url) + '?t=' + Date.now()) : '';
+            if (existingIds.has(cj.id)) {
+              const item = list.find((w) => w.jobId === cj.id);
+              if (item) {
+                if (cj.status === 'succeeded' && resUrl && item.status !== 'succeeded') {
+                  item.status = 'succeeded';
+                  item.result = resUrl;
+                  changed = true;
+                } else if (cj.status === 'failed' && item.status !== 'failed') {
+                  item.status = 'failed';
+                  item.error = cj.error;
+                  changed = true;
+                }
+              }
+            } else {
+              list.push({
+                original: orig,
+                result: resUrl,
+                status: cj.status,
+                quality: cj.quality,
+                templateName: cj.template_name || '',
+                jobId: cj.id,
+                time: cj.created_at ? this.formatTime(new Date(cj.created_at * 1000)) : '近期'
+              });
+              changed = true;
+            }
+          }
+          if (changed) {
+            app.persist();
+            this.setData({ works: list });
+          }
+        }
+      }
+    } catch (e) {
+      // 网络波动静默忽略
+    }
+
+    // 2. 检查是否有未完成的任务
+    this.refreshPendingWorks();
+  },
+
+  async refreshPendingWorks() {
+    const list = app.globalData.historyList || [];
+    const pendings = list.filter((w) => w && w.jobId && (w.status === 'processing' || !w.result));
+    if (!pendings.length) return;
+
+    let hasUpdate = false;
+    for (const item of pendings) {
+      try {
+        const fresh = await this.refreshWork(item);
+        if (fresh && fresh.status === 'succeeded') hasUpdate = true;
+      } catch (err) {}
+    }
+    if (hasUpdate) {
+      this.setData({ works: app.globalData.historyList || [] });
+    }
   },
 
   /**
-   * 刷新单件作品的直链：历史里存的是 2 小时时效的 COS 签名 URL，
-   * 展示前向服务端用 jobId 换一张新鲜的（拿不到就维持原样）。
+   * 刷新单件作品的直链：向服务端用 jobId 换取新鲜签名或最新状态
    */
   refreshWork(item) {
     if (!item || !item.jobId) return Promise.resolve(item);
     return api.request('/api/jobs/' + item.jobId)
       .then((job) => {
-        if (!job || job.status !== 'succeeded' || !job.result_url) return item;
-        const fresh = Object.assign({}, item, {
-          original: api.absolute(job.orig_url || item.original),
-          result: api.absolute(job.result_url)
-        });
-        const list = app.globalData.historyList || [];
-        const idx = list.findIndex((w) => w.jobId === item.jobId);
-        if (idx >= 0) {
-          list[idx] = fresh;
-          app.persist();
-          this.loadWorks();
+        if (!job) return item;
+        const fresh = Object.assign({}, item);
+        let changed = false;
+        if (job.status === 'succeeded' && job.result_url) {
+          fresh.status = 'succeeded';
+          fresh.original = api.absolute(job.orig_url || item.original);
+          fresh.result = api.absolute(job.result_url) + (job.result_url.includes('?') ? '&' : '?') + 't=' + Date.now();
+          changed = true;
+        } else if (job.status === 'failed') {
+          fresh.status = 'failed';
+          fresh.error = job.error || '生成失败';
+          changed = true;
+        }
+        if (changed) {
+          const list = app.globalData.historyList || [];
+          const idx = list.findIndex((w) => w.jobId === item.jobId);
+          if (idx >= 0) {
+            list[idx] = fresh;
+            app.persist();
+            this.setData({ works: list });
+          }
         }
         return fresh;
       })
@@ -55,25 +129,51 @@ Page({
     const item = this.data.works[index];
     if (!item) return;
 
-    this.refreshWork(item).then((fresh) => {
-      wx.showActionSheet({
-        itemList: ['全屏高清查看并保存', '对比原图模式', '删除此件作品'],
-        itemColor: '#1a1917',
-        success: (res) => {
-          if (res.tapIndex === 0) {
-            wx.previewImage({
-              current: fresh.result,
-              urls: [fresh.result, fresh.original].filter(Boolean)
-            });
-          } else if (res.tapIndex === 1) {
-            wx.navigateTo({
-              url: `/pages/compare/compare?result=${encodeURIComponent(fresh.result)}&original=${encodeURIComponent(fresh.original || '')}&job=${encodeURIComponent(fresh.jobId || '')}`
-            });
-          } else if (res.tapIndex === 2) {
-            this.deleteSingleWork(index);
-          }
+    // 如果该作品还在后台运算中
+    if (item.status === 'processing' || !item.result) {
+      wx.showLoading({ title: '检查最新进度…' });
+      this.refreshWork(item).then((fresh) => {
+        wx.hideLoading();
+        if (fresh && fresh.result && fresh.status === 'succeeded') {
+          this.showWorkActions(fresh, index);
+        } else if (fresh && fresh.status === 'failed') {
+          wx.showModal({
+            title: '生成未完成',
+            content: fresh.error || '该照片生成未成功，已退回消耗光子',
+            showCancel: false
+          });
+        } else {
+          wx.showToast({
+            title: 'AI 仍在云端运算中，请稍候下拉刷新~',
+            icon: 'none',
+            duration: 2500
+          });
         }
       });
+      return;
+    }
+
+    this.showWorkActions(item, index);
+  },
+
+  showWorkActions(item, index) {
+    wx.showActionSheet({
+      itemList: ['全屏高清查看并保存', '对比原图模式', '删除此件作品'],
+      itemColor: '#1a1917',
+      success: (res) => {
+        if (res.tapIndex === 0) {
+          wx.previewImage({
+            current: item.result,
+            urls: [item.result, item.original].filter(Boolean)
+          });
+        } else if (res.tapIndex === 1) {
+          wx.navigateTo({
+            url: `/pages/compare/compare?result=${encodeURIComponent(item.result)}&original=${encodeURIComponent(item.original || '')}&job=${encodeURIComponent(item.jobId || '')}`
+          });
+        } else if (res.tapIndex === 2) {
+          this.deleteSingleWork(index);
+        }
+      }
     });
   },
 
@@ -116,5 +216,10 @@ Page({
     wx.switchTab({
       url: '/pages/index/index'
     });
+  },
+
+  formatTime(date) {
+    const pad = (n) => (n < 10 ? '0' + n : '' + n);
+    return `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
   }
 });
