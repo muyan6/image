@@ -8,7 +8,13 @@ Page({
     priceLight: 1,
     priceFine: 3,
     notice: null,
-    featuredTemplates: [],
+    featuredTemplates: [
+      { id: "t_anime_dots", name: "日漫错彩网点", subtitle: "复古日漫彩页肖像，荧光波普风格", engine: "fine", price: 0, coverUrl: "/images/logo.jpg" },
+      { id: "t_clarity", name: "冷白通透", subtitle: "去黄除暗，高光清爽，冷白皮质感", engine: "light", price: 0, coverUrl: "/images/logo.jpg" },
+      { id: "t_felt", name: "毛毡旅行档案", subtitle: "定格动画毛毡质感，复古手作肌理", engine: "fine", price: 0, coverUrl: "/images/logo.jpg" },
+      { id: "t_fuji", name: "富士胶片", subtitle: "微暖复古，温润通透，街拍人像百搭", engine: "light", price: 0, coverUrl: "/images/logo.jpg" },
+      { id: "t_poster", name: "复古电影海报", subtitle: "戏剧光影底图 + 中文标题排版", engine: "fine", price: 0, coverUrl: "/images/logo.jpg" }
+    ],
     activeTemplate: null,
     historyCount: 0
   },
@@ -59,19 +65,37 @@ Page({
   },
 
   loadTemplates() {
+    // 1. 尝试读本地缓存，保证秒开
+    try {
+      const cached = wx.getStorageSync('cached_templates_items');
+      if (Array.isArray(cached) && cached.length > 0) {
+        this._renderFeatured(cached);
+      }
+    } catch (e) {}
+
+    // 2. 异步拉取服务端最新模板
     api.templates()
       .then((d) => {
         const items = (d && d.items) || [];
-        const featured = items.slice(0, 5).map((t) => {
-          return Object.assign({}, t, {
-            coverUrl: t.cover ? api.absolute(t.cover) : '/images/logo.jpg'
-          });
-        });
-        if (featured.length > 0) {
-          this.setData({ featuredTemplates: featured });
+        if (items.length > 0) {
+          try { wx.setStorageSync('cached_templates_items', items); } catch (e) {}
+          this._renderFeatured(items);
         }
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.warn('获取服务端模板失败，使用预设模板', err);
+      });
+  },
+
+  _renderFeatured(items) {
+    const featured = items.slice(0, 6).map((t) => {
+      return Object.assign({}, t, {
+        coverUrl: t.cover ? api.absolute(t.cover) : '/images/logo.jpg'
+      });
+    });
+    if (featured.length > 0) {
+      this.setData({ featuredTemplates: featured });
+    }
   },
 
   onGoToTemplates() {

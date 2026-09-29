@@ -385,6 +385,39 @@ class TemplateStore:
         self._groups = _seed_groups()
         self._templates = _seed_templates()
         self._load_or_init()
+        self.ensure_placeholder_covers()
+
+    def ensure_placeholder_covers(self) -> None:
+        """检查所有模板，若未配置封面或本地封面文件缺失，自动生成专属占位封面。"""
+        out_dir = covers_dir()
+        migrated = False
+        with self._lock:
+            for t in self._templates:
+                cover = str(t.get("cover") or "").strip()
+                filename = "%s_v1.jpg" % t["id"]
+                local_path = os.path.join(out_dir, filename)
+                need_make = False
+                if not cover:
+                    need_make = True
+                elif cover.startswith("local:") and not os.path.isfile(local_path):
+                    need_make = True
+
+                if need_make:
+                    try:
+                        data = generate_placeholder_cover(
+                            t.get("name", ""), t.get("subtitle", ""), t.get("group_id", "")
+                        )
+                        if data:
+                            with open(local_path, "wb") as fh:
+                                fh.write(data)
+                            t["cover"] = "local:%s" % filename
+                            t["cover_v"] = max(int(t.get("cover_v", 0)), 1)
+                            migrated = True
+                    except Exception as exc:
+                        log.warning("[%s] 自动生成占位封面跳过: %s", t.get("id"), exc)
+            if migrated:
+                self._save_locked()
+                log.info("已自动为模板补充生成占位封面并更新数据")
 
     # ------------------------------------------------------------------ #
     # 持久化
@@ -670,6 +703,93 @@ def _norm_text_fields(raw: Any) -> List[Dict[str, Any]]:
     return out
 
 
+# 分组主题色（上 -> 下渐变）
+THEMES = {
+    "restore": [(214, 226, 235), (168, 196, 214)],
+    "anime": [(255, 224, 214), (244, 172, 154)],
+    "poster": [(38, 44, 58), (74, 85, 104)],
+    "postcard": [(240, 230, 210), (206, 186, 156)],
+}
+FALLBACK_THEME = [(226, 232, 240), (178, 190, 205)]
+
+FONT_CANDIDATES = [
+    "C:/Windows/Fonts/msyhbd.ttc",
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/simhei.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
+    "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+    "/System/Library/Fonts/PingFang.ttc",
+]
+
+
+def generate_placeholder_cover(name: str, subtitle: str, group: str) -> bytes:
+    """生成 720x900（3:4）的高清精美占位封面图。"""
+    import io
+    import random
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        return b""
+
+    W, H = 720, 900
+    top, bottom = THEMES.get(group, FALLBACK_THEME)
+    img = Image.new("RGB", (W, H))
+    for y in range(H):
+        t = y / H
+        color = tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3))
+        for x in range(0, W, 4):
+            for dx in range(4):
+                img.putpixel((min(x + dx, W - 1), y), color)
+
+    draw = ImageDraw.Draw(img, "RGBA")
+    rng = random.Random(name)
+    for _ in range(24):
+        r = rng.randint(8, 90)
+        x, y = rng.randint(-40, W + 40), rng.randint(-40, H + 40)
+        alpha = rng.randint(10, 34)
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=(255, 255, 255, alpha))
+    for _ in range(700):
+        x, y = rng.randint(0, W - 1), rng.randint(0, H - 1)
+        draw.point((x, y), fill=(255, 255, 255, rng.randint(8, 26)))
+
+    def _font(size: int):
+        for cand in FONT_CANDIDATES:
+            if os.path.isfile(cand):
+                try:
+                    return ImageFont.truetype(cand, size)
+                except OSError:
+                    continue
+        return ImageFont.load_default()
+
+    big = _font(int(H * 0.42))
+    ch = name[0] if name else "图"
+    try:
+        bw = draw.textlength(ch, font=big)
+    except AttributeError:
+        bw = big.getsize(ch)[0]
+    draw.text(((W - bw) / 2, H * 0.18), ch, font=big, fill=(255, 255, 255, 92))
+
+    band_top = int(H * 0.76)
+    draw.rectangle([0, band_top, W, H], fill=(20, 24, 33, 200))
+    pad = int(W * 0.06)
+    name_font = _font(int(W * 0.072))
+    sub_font = _font(int(W * 0.032))
+    draw.text((pad, band_top + int(H * 0.035)), name, font=name_font,
+              fill=(250, 250, 248, 255))
+    if subtitle:
+        draw.text((pad, band_top + int(H * 0.115)), subtitle[:24],
+                  font=sub_font, fill=(203, 213, 225, 235))
+    draw.text((pad, H - int(H * 0.035)), "PLACEHOLDER · 风格图鉴",
+              font=_font(int(W * 0.026)), fill=(148, 163, 184, 220))
+    draw.rectangle([6, 6, W - 7, H - 7], outline=(255, 255, 255, 150), width=3)
+
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=88)
+    return buf.getvalue()
+
+
 def resolve_cover(t: Dict[str, Any], settings) -> str:
     """把 cover 引用解析成可访问 URL。
 
@@ -677,7 +797,7 @@ def resolve_cover(t: Dict[str, Any], settings) -> str:
     - cos: 前缀：现场预签名（纯 HMAC 计算，零网络请求，2 小时有效），
       对象键自带版本号（covers/{id}_v{n}.jpg），图片流量走 COS/CDN；
     - local: 前缀：后端 /api/covers/ 本地服务（开发期用），?v= 刷缓存；
-    - 空：交由前端用分组占位色块兜底。
+    - 空：检查本地是否有 {id}_v1.jpg，若有直接返回本地 URL；
     """
     cover = str(t.get("cover") or "").strip()
     version = t.get("cover_v", 0)
@@ -695,6 +815,13 @@ def resolve_cover(t: Dict[str, Any], settings) -> str:
             return ""
     if cover.startswith("local:"):
         return "/api/covers/%s?v=%d" % (os.path.basename(cover[6:]), version)
+    
+    # 若 cover 为空但本地已有同名占位图，自动补充返回
+    tid = t.get("id", "")
+    if tid:
+        v1_name = "%s_v1.jpg" % tid
+        if os.path.isfile(os.path.join(_covers_dir(), v1_name)):
+            return "/api/covers/%s?v=1" % v1_name
     return cover
 
 

@@ -26,38 +26,24 @@ Page({
   fetchTemplates(callback) {
     this.setData({ loading: true });
 
+    // 1. 尝试读本地缓存，秒开
+    try {
+      const cached = wx.getStorageSync('cached_templates_data');
+      if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
+        this._renderData(cached.groups || [], cached.items);
+      }
+    } catch (e) {}
+
+    // 2. 异步请求后端
     api.templates()
       .then((data) => {
         const groups = (data && data.groups) || [];
         const rawItems = (data && data.items) || [];
-
-        const items = rawItems.map((item) => {
-          return Object.assign({}, item, {
-            coverUrl: item.cover ? api.absolute(item.cover) : '/images/logo.jpg'
-          });
-        });
-
-        // 统计各分类计数
-        const cats = [
-          { id: 'all', name: '全部风格', count: items.length }
-        ];
-
-        groups.forEach((g) => {
-          const count = items.filter((x) => x.group_id === g.id).length;
-          cats.push({
-            id: g.id,
-            name: g.name,
-            count: count
-          });
-        });
-
-        this.setData({
-          allTemplates: items,
-          categories: cats,
-          loading: false
-        });
-
-        this.filterByCategory(this.data.activeCategory);
+        if (rawItems.length > 0) {
+          try { wx.setStorageSync('cached_templates_data', data); } catch (e) {}
+          this._renderData(groups, rawItems);
+        }
+        this.setData({ loading: false });
         if (typeof callback === 'function') callback();
       })
       .catch((err) => {
@@ -65,6 +51,34 @@ Page({
         this.setData({ loading: false });
         if (typeof callback === 'function') callback();
       });
+  },
+
+  _renderData(groups, rawItems) {
+    const items = rawItems.map((item) => {
+      return Object.assign({}, item, {
+        coverUrl: item.cover ? api.absolute(item.cover) : '/images/logo.jpg'
+      });
+    });
+
+    const cats = [
+      { id: 'all', name: '全部风格', count: items.length }
+    ];
+
+    groups.forEach((g) => {
+      const count = items.filter((x) => x.group_id === g.id).length;
+      cats.push({
+        id: g.id,
+        name: g.name,
+        count: count
+      });
+    });
+
+    this.setData({
+      allTemplates: items,
+      categories: cats
+    });
+
+    this.filterByCategory(this.data.activeCategory);
   },
 
   onSelectCategory(e) {

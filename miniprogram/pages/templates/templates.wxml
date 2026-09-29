@@ -47,7 +47,7 @@
       <view class="card-content">
         <view class="card-name-row">
           <text class="card-name">{{ item.name }}</text>
-          <text class="card-cost">('✦ ' + (item.price > 0 ? item.price : '按档位') + ' 光子')</text>
+          <text class="card-cost">{{ '✦ ' + (item.price > 0 ? item.price : '按档位') + ' 光子' }}</text>
         </view>
         <text class="card-subtitle">{{ item.subtitle }}</text>
         
