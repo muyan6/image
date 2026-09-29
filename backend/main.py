@@ -29,6 +29,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import threading
 import time
 import uuid
@@ -86,6 +87,24 @@ UPLOAD_DIR = os.environ.get("UPLOAD_DIR") or os.path.join(BASE_DIR, "uploads")
 LUT_DIR = os.path.join(BASE_DIR, "luts")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(LUT_DIR, exist_ok=True)
+
+
+def _source_revision() -> str:
+    """Bind the running process to its checkout at startup, not to later file changes."""
+    root = os.path.realpath(os.path.join(BASE_DIR, ".."))
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=root,
+                             capture_output=True, text=True, timeout=3, check=True).stdout.strip()
+        if os.path.normcase(os.path.realpath(top)) != os.path.normcase(root):
+            return ""  # isolated tests and copied deployments are not this checkout
+        revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
+                                  capture_output=True, text=True, timeout=3, check=True).stdout.strip()
+        return revision if re.fullmatch(r"[0-9a-f]{40}", revision) else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+SOURCE_REVISION = _source_revision()
 
 
 def _load_dotenv_early() -> None:
@@ -1361,6 +1380,7 @@ def health() -> Dict[str, Any]:
     tc_ready = settings.moderation_ready()
     return {
         "ok": True,
+        "source_revision": SOURCE_REVISION,
         "gateway": gateway_ok,
         "fal": fal_conf,
         "baidu": baidu_conf,

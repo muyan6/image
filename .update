@@ -17,6 +17,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 PORT="${PORT:-8000}"
+PUBLIC_API_BASE="${PUBLIC_API_BASE:-https://image.myil.top}"
 SERVICE_NAME="photo-rescue"
 REQ_HASH_FILE="backend/.venv/.requirements.sha256"
 SUDO=""
@@ -106,25 +107,30 @@ else
 fi
 
 # ---------------------------------------------------------------- 4. 健康检查
-step "4/5 健康检查"
+step "4/5 健康检查与运行版本核对"
 HEALTH_OK=0
+EXPECTED_REVISION="$(git rev-parse HEAD)"
+CHECK_RESULT=""
 for _ in $(seq 1 15); do
-    if curl -sf -m 3 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
+    # 静态后台页面会随 git pull 更新；只查 HTTP 200 会把仍在跑的旧进程误判为新版本。
+    if CHECK_RESULT="$("$PY" backend/tools/verify_revision.py --port "$PORT" \
+         --expected "$EXPECTED_REVISION" --public "$PUBLIC_API_BASE" 2>&1)"; then
         HEALTH_OK=1
         break
     fi
     sleep 2
 done
 if [ "$HEALTH_OK" -ne 1 ]; then
+    warn "版本核对未通过: $CHECK_RESULT"
     warn "健康检查未通过，看最近日志："
     if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files 2>/dev/null | grep -q "^${SERVICE_NAME}.service"; then
         $SUDO journalctl -u "$SERVICE_NAME" -n 30 --no-pager || true
     else
         tail -n 30 backend/logs/backend_*.log 2>/dev/null || true
     fi
-    die "更新后服务未起来，按上面日志排查后可再次运行 ./.update"
+    die "本机或公开地址仍未运行当前提交；检查 systemd ExecStart/工作目录、8000 端口进程和反向代理目标"
 fi
-ok "服务健康: http://127.0.0.1:${PORT}/api/health"
+ok "本机及公开地址均已运行 ${EXPECTED_REVISION:0:12}"
 
 # ---------------------------------------------------------------- 5. 完成
 step "5/5 更新完成"
