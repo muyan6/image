@@ -59,8 +59,7 @@ ok "依赖就绪"
 # ---- 2. 生成 systemd 单元 ----
 step "2/4 写入 systemd 服务（${SERVICE_NAME}）"
 APP_DIR="$(pwd)"
-UNIT="$SUDO tee /etc/systemd/system/${SERVICE_NAME}.service >/dev/null"
-$UNIT <<EOF
+cat <<EOF | $SUDO tee "/etc/systemd/system/${SERVICE_NAME}.service" >/dev/null
 [Unit]
 Description=Photo Rescue Backend (废片拯救所)
 After=network-online.target
