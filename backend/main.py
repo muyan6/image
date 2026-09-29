@@ -926,6 +926,24 @@ def _run_pipeline(job_id: str, quality: str, style: str,
                            style=style)
             provider_used = "local"
 
+        # --- 3.5 几何画幅守恒：校验模型生成图与输入图比例，若有偏差做居中对齐，杜绝对比滑块双图错位 ---
+        try:
+            import cv2
+            _n_img = cv2.imread(norm)
+            _t_img = cv2.imread(tmp)
+            if _n_img is not None and _t_img is not None:
+                nh, nw = _n_img.shape[:2]
+                th, tw = _t_img.shape[:2]
+                norm_ratio = nw / float(nh) if nh > 0 else 1.0
+                tmp_ratio = tw / float(th) if th > 0 else 1.0
+                if abs(norm_ratio - tmp_ratio) > 0.015:
+                    log.info("[%s] 模型生成画幅(%.3f)与输入(%.3f)存在偏差，自动进行像素级居中对齐",
+                             job_id, tmp_ratio, norm_ratio)
+                    _t_cropped = _crop_aspect_ratio(_t_img, "%d:%d" % (nw, nh))
+                    cv2.imwrite(tmp, _t_cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+        except Exception as _ar_exc:
+            log.warning("[%s] 画幅几何对齐检查异常: %s", job_id, _ar_exc)
+
         stage = "finalize"
         # --- 4. 模板输出尺寸：印刷级模板在这里放大到目标长边 ---
         output_size = int(template.get("output_size") or 0)

@@ -52,6 +52,22 @@ Page({
       templateId: tid
     });
 
+    if (img) {
+      wx.getImageInfo({
+        src: img,
+        success: (info) => {
+          if (info && info.width > 0 && info.height > 0) {
+            this._imgWidth = info.width;
+            this._imgHeight = info.height;
+            if (this.data.currentRatioKey === 'original') {
+              const stageH = Math.min(1050, Math.max(390, Math.round(694 * (info.height / info.width))));
+              this.setData({ previewStyle: `height: ${stageH}rpx;` });
+            }
+          }
+        }
+      });
+    }
+
     this.loadUserData();
     this.loadTemplatesData(tid);
   },
@@ -170,12 +186,20 @@ Page({
       '4:3': 'height: 520rpx;',
       '9:16': 'height: 1230rpx;',
       '16:9': 'height: 390rpx;',
-      'original': 'height: 694rpx;'
     };
+    let style = heightMap[key];
+    if (key === 'original') {
+      if (this._imgWidth && this._imgHeight) {
+        const stageH = Math.min(1050, Math.max(390, Math.round(694 * (this._imgHeight / this._imgWidth))));
+        style = `height: ${stageH}rpx;`;
+      } else {
+        style = 'height: 694rpx;';
+      }
+    }
     this.setData({
       currentRatioKey: key,
       currentRatioLabel: label,
-      previewStyle: heightMap[key] || 'height: 694rpx;',
+      previewStyle: style || 'height: 694rpx;',
       showRatioModal: false
     });
   },
@@ -389,10 +413,9 @@ Page({
       // 注意：COS 预签名 URL 包含 HMAC 校验，绝不可外挂拼接 &t=Date.now()，否则直接报 403 SignatureDoesNotMatch
       const resUrl = api.absolute(job.result_url || created.result_url);
 
-      // 提取最新的原图直链（服务端可能已同步居中裁剪）
+      // 提取最新的原图直链（服务端已同步画幅几何对齐）
       const finalOrigUrl = api.absolute(job.orig_url || created.orig_url || origUrl);
-      const isOriginalRatio = this.data.currentRatioKey === 'original';
-      const compareOrig = (isOriginalRatio && path) ? path : finalOrigUrl;
+      const compareOrig = finalOrigUrl || path;
 
       // 更新历史记录为完成状态
       const finishedItem = {
