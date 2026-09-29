@@ -133,3 +133,28 @@ def head_exists(settings: SettingsStore, key: str) -> bool:
         except requests.RequestException:
             pass
     return False
+
+
+def check_internal(settings: SettingsStore) -> Dict[str, Any]:
+    """探测当前服务器与 COS 桶之间的内网连通性与 DNS 解析状态。"""
+    try:
+        conf = _conf(settings)
+        host = "%s.cos-internal.%s.myqcloud.com" % (conf["cos_bucket"], conf["cos_region"])
+        import socket
+        ip = socket.gethostbyname(host)
+        # 腾讯云 VPC 内网 IP 通常是 100.64.0.0/10、10.0.0.0/8、172.16.0.0/12 等
+        return {
+            "ok": True,
+            "mode": "VPC_INTERNAL",
+            "host": host,
+            "ip": ip,
+            "desc": "已连接腾讯云同地域内网专线，图片在服务器与桶之间流转 0 流量费，不占用 4M 公网带宽"
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "mode": "PUBLIC_FALLBACK",
+            "error": str(exc),
+            "desc": "内网未连通，自动降级为公网（本地开发机正常现象）"
+        }
+

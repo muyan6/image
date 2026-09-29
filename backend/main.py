@@ -1017,7 +1017,13 @@ def health() -> Dict[str, Any]:
     fal_conf = bool(settings.provider("fal").get("api_key")) \
         or bool(os.environ.get("FAL_KEY", "").strip())
     bd = settings.provider("baidu")
-    baidu_conf = bool(bd.get("api_key") and bd.get("secret_key"))
+    cos_info = None
+    if settings.cos_ready():
+        try:
+            from cos_store import check_internal
+            cos_info = check_internal(settings)
+        except Exception as e:
+            cos_info = {"ok": False, "error": str(e)}
     return {
         "ok": True,
         "gateway": gateway_ok,
@@ -1025,6 +1031,7 @@ def health() -> Dict[str, Any]:
         "baidu": baidu_conf,
         "local": True,
         "configured": gateway_ok or fal_conf or baidu_conf,
+        "cos_network": cos_info,
         "chain": settings.chain(),
         "maintenance": settings.maintenance().get("enabled", False),
         "normalize_long_side": settings.normalize_long_side(),
