@@ -53,8 +53,10 @@
     </view>
   </view>
 
-  <!-- 4. 看视频补给任务卡 (Video Bonus Card) -->
-  <view class="task-card gallery-card">
+  <!-- 4. 看视频补给任务卡 (Video Bonus Card)
+       仅在后台配好激励视频广告位时显示（config.ads.rewarded_video_ready）。
+       未配置 = 不显示入口，也就不会出现"点一下光子直接到账"。 -->
+  <view wx:if="{{ videoAdReady }}" class="task-card gallery-card">
     <view class="task-left">
       <view class="task-play-icon">
         <text class="play-triangle">▶</text>

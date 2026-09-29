@@ -420,7 +420,27 @@
           <label class="check" style="background:#fffbeb;border:1px dashed #f5d78e;border-radius:8px;padding:8px 12px">
             <span class="switch"><input type="checkbox" id="free-mode"><span class="knob"></span></span>
             调试模式（不限次）：小程序跳过光子扣减，光子显示不限量</label>
-          <p style="margin:16px 0 0"><button class="btn-primary" onclick="saveConf()">保存通用设置</button></p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>灵感沙龙（社区）<small>内容完全由这里维护，小程序端不再内置任何展品</small></h2></div>
+          <label class="check"><span class="switch"><input type="checkbox" id="cm-enabled"><span class="knob"></span></span>在底部导航展示「社区」入口</label>
+          <p class="muted" style="margin:10px 0 6px">
+            关闭 = 小程序隐藏社区入口且接口返回空列表。清空下方数组 = 社区页显示空状态。
+            数组每项支持字段：<code>id, title, story, author_name, author_avatar, date,
+            category, category_name, template_id, template_name, quality, result_url,
+            orig_url, likes</code>
+          </p>
+          <div class="field"><label>展品数组（JSON）</label><textarea id="cm-items" rows="10" spellcheck="false" placeholder="[]"></textarea></div>
+          <p style="margin:12px 0 0"><button class="btn-primary" onclick="saveConf()">保存通用设置</button></p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>激励视频广告<small>未配置时小程序不显示入口，也不会发放光子</small></h2></div>
+          <label class="check"><span class="switch"><input type="checkbox" id="ad-enabled"><span class="knob"></span></span>启用激励视频补给</label>
+          <div class="form-grid" style="margin-top:10px">
+            <div class="field"><label>激励视频广告位 ID<small>微信公众平台 → 流量主 → 广告位管理</small></label><input type="text" id="ad-unit" placeholder="adunit-xxxxxxxxxxxxxxxx"></div>
+          </div>
+          <p class="muted" style="margin:8px 0 0">只有「启用」勾上且广告位 ID 非空，小程序才会显示「看视频得光子」。</p>
+          <p style="margin:14px 0 0"><button class="btn-primary" onclick="saveConf()">保存通用设置</button></p>
         </div>
       </section>
 
@@ -727,8 +747,24 @@ function renderConf() {
   $("mt-message").value = SETTINGS.maintenance?.message || "";
   $("mt-enabled").checked = SETTINGS.maintenance?.enabled || false;
   $("free-mode").checked = SETTINGS.free_mode || false;
+  $("cm-enabled").checked = SETTINGS.community?.enabled || false;
+  $("cm-items").value = JSON.stringify(SETTINGS.community?.items || [], null, 2);
+  $("ad-enabled").checked = SETTINGS.ads?.rewarded_video_enabled || false;
+  $("ad-unit").value = SETTINGS.ads?.rewarded_video_unit_id || "";
 }
 window.saveConf = async () => {
+  let items;
+  const raw = ($("cm-items").value || "").trim();
+  try {
+    items = raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    toast("社区展品不是合法 JSON：" + e.message, "bad");
+    return;
+  }
+  if (!Array.isArray(items)) {
+    toast("社区展品必须是 JSON 数组（[]）", "bad");
+    return;
+  }
   try {
     SETTINGS = await api("/settings", { method: "PUT", body: {
       prices: { light: parseInt($("price-light").value, 10) || 0,
@@ -736,7 +772,10 @@ window.saveConf = async () => {
       normalize_long_side: parseInt($("normalize").value, 10) || 0,
       maintenance: { enabled: $("mt-enabled").checked,
                      message: $("mt-message").value },
-      free_mode: $("free-mode").checked } });
+      free_mode: $("free-mode").checked,
+      community: { enabled: $("cm-enabled").checked, items: items },
+      ads: { rewarded_video_enabled: $("ad-enabled").checked,
+             rewarded_video_unit_id: $("ad-unit").value.trim() } } });
     renderConf();
     toast("已保存并即时生效");
   } catch (e) { toast(e.message, "bad"); }

@@ -14,7 +14,9 @@ Page({
     saving: false,
     label: '2K 深度超分',
     isDragging: false,
-    isPressingOriginal: false
+    isPressingOriginal: false,
+    // 舞台实测宽度(px)：clip-mat 内层原画按整块舞台锁定，避免裁剪后重新缩放
+    stageW: 0
   },
 
   onLoad(options) {
@@ -27,13 +29,27 @@ Page({
 
     this._jobId = options.job ? decodeURIComponent(options.job) : '';
 
+    // 首帧兜底：onReady 的实测尺寸回来之前，先用窗口尺寸撑住，
+    // 否则内层原图 width:0 会整张不显示，出现半屏空白
+    let winW = 375;
+    try {
+      const info = wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync();
+      winW = info.windowWidth || winW;
+    } catch (e) { /* 取不到就用默认值，onReady 会立刻纠正 */ }
+
     this.setData({
       originalUrl: demo ? DEMO_ORIG : orig,
       resultUrl: demo ? DEMO_RESULT : res,
       quality: quality,
       demo: demo,
-      label: quality === 'fine' ? '2K 深度超分' : '1.5K 标准修复'
+      label: quality === 'fine' ? '2K 深度超分' : '1.5K 标准修复',
+      stageW: winW
     });
+
+    // COS 直链有效期只有 2 小时（后端 cos_presign ttl_seconds=7200）。
+    // 从作品集点进来时，链接往往是几小时前存的，直接渲染会 403/空白。
+    // 这里主动换一次新鲜签名（依赖 JobStore 已落盘，重启后仍能查到任务）。
+    if (!demo) this.refreshUrls();
   },
 
   /**
@@ -57,13 +73,25 @@ Page({
     this.measure();
   },
 
-  /** 量取对比舞台的精确宽度 */
+  /**
+   * 量取对比舞台的精确尺寸。
+   *
+   * stageW 会写进 data，作为 clip-mat 内层原画的固定像素宽度（高度交给 CSS 100%，
+   * 与底层结果图同源，不会出现兜底值与真实值不一致的中间帧）：
+   * 原图与结果图必须共享同一个 aspectFit 缩放基准（整块舞台），
+   * 否则被裁到一半的原图会按「可见宽度」重新缩放，左右两半高度对不上。
+   */
   measure() {
     return new Promise((resolve) => {
       wx.createSelectorQuery()
         .select('#stage')
         .boundingClientRect((rect) => {
-          if (rect && rect.width > 0) this._rect = rect;
+          if (rect && rect.width > 0) {
+            this._rect = rect;
+            if (rect.width !== this.data.stageW) {
+              this.setData({ stageW: rect.width });
+            }
+          }
           resolve(this._rect || null);
         })
         .exec();

@@ -6,8 +6,14 @@
     <text class="salon-desc">来自真实用户的修护印记 · 点亮每一张被遗忘的旧相</text>
   </view>
 
-  <!-- 展区筛选胶囊 -->
-  <scroll-view class="salon-filter-bar" scroll-x enable-flex show-scrollbar="{{ false }}">
+  <!-- 展区筛选胶囊：没有展品时不显示筛选条 -->
+  <scroll-view
+    wx:if="{{ filteredItems.length > 0 }}"
+    class="salon-filter-bar"
+    scroll-x
+    enable-flex
+    show-scrollbar="{{ false }}"
+  >
     <view
       wx:for="{{ filters }}"
       wx:key="id"
@@ -18,6 +24,18 @@
       <text class="filter-chip-text">{{ item.name }}</text>
     </view>
   </scroll-view>
+
+  <!-- 沙龙暂停开放：后端 community.enabled = false -->
+  <view wx:if="{{ !loading && !enabled }}" class="salon-empty gallery-card">
+    <text class="empty-title">沙龙正在布展中</text>
+    <text class="empty-desc">灵感沙龙暂未开放，稍后再来看看。</text>
+  </view>
+
+  <!-- 已开放但暂无展品 -->
+  <view wx:elif="{{ !loading && items.length === 0 }}" class="salon-empty gallery-card">
+    <text class="empty-title">展厅暂无展品</text>
+    <text class="empty-desc">完成一次创作后，作品就有机会被收录进沙龙。</text>
+  </view>
 
   <!-- 社区展品卡片流 -->
   <view class="showcase-list">

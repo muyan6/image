@@ -27,6 +27,7 @@ import mimetypes
 import os
 import re
 import shutil
+import sqlite3
 import threading
 import time
 import uuid
@@ -582,19 +583,111 @@ def copy_template(template: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]
 # 任务存储（进程内，带锁 + TTL 清理）
 # --------------------------------------------------------------------------- #
 class JobStore:
-    """进程内任务表。
+    """任务表（内存索引 + SQLite 落盘）。
 
+    内存 dict 只作读缓存；每次 create/update 同步写 SQLite，
+    所以服务重启后任务记录、作品列表、/api/my/jobs 都还在
+    （旧实现是纯内存 dict，重启即清空 —— 这正是"任务记录为空"的原因）。
     单机轻量调度够用；要横向扩容请换成 Redis。
     驱逐（过期/超量）时通过 on_evict 回调通知上层清理磁盘文件。
     """
 
+    _COLUMNS = ("id", "openid", "status", "stage", "quality", "aspect_ratio",
+                "template_id", "template_name", "price", "provider",
+                "cost_cny", "cost_usd", "scale", "error",
+                "orig_file", "result_file", "orig_url", "result_url",
+                "orig_cos", "result_cos", "norm_cos",
+                "created_at", "updated_at")
+
     def __init__(self, ttl: int, max_entries: int,
-                 on_evict: Optional[Any] = None) -> None:
+                 on_evict: Optional[Any] = None,
+                 db_path: Optional[str] = None) -> None:
         self._data: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._ttl = ttl
         self._max = max_entries
         self._on_evict = on_evict
+        self._db_path = db_path or os.path.join(BASE_DIR, "data", "jobs.db")
+        self._init_db()
+
+    # ---------------------------------------------------------------- #
+    # SQLite 落盘
+    # ---------------------------------------------------------------- #
+    def _init_db(self) -> None:
+        os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS jobs ("
+            "  id TEXT PRIMARY KEY,"
+            "  openid TEXT, status TEXT, stage TEXT, quality TEXT,"
+            "  aspect_ratio TEXT, template_id TEXT, template_name TEXT,"
+            "  price INTEGER, provider TEXT, cost_cny REAL, cost_usd REAL,"
+            "  scale REAL, error TEXT,"
+            "  orig_file TEXT, result_file TEXT, orig_url TEXT,"
+            "  result_url TEXT, orig_cos TEXT, result_cos TEXT,"
+            "  norm_cos TEXT, created_at REAL, updated_at REAL)")
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_openid "
+                           "ON jobs(openid, created_at DESC)")
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created "
+                           "ON jobs(created_at DESC)")
+        self._conn.commit()
+        self._reload()
+
+    def _reload(self) -> None:
+        """启动时把未过期的任务读回内存，重启不影响前端轮询。"""
+        now = time.time()
+        rows = self._conn.execute(
+            "SELECT id, %s FROM jobs WHERE created_at > ?"
+            % ", ".join(self._COLUMNS[1:]),
+            (now - self._ttl,)).fetchall()
+        interrupted = []
+        for row in rows:
+            job = dict(zip(self._COLUMNS, row))
+            # 重启时仍在 processing 的任务，其工作线程已随旧进程消失：
+            # 标记失败并退还预扣光子，避免前端永远转圈
+            if job.get("status") == "processing":
+                job["status"] = "failed"
+                job["error"] = job.get("error") or "服务重启，任务中断"
+                interrupted.append(job)
+            self._data[job["id"]] = job
+        for job in interrupted:
+            self._persist(job)
+            price = int(job.get("price") or 0)
+            openid = job.get("openid") or ""
+            if openid and price > 0:
+                try:
+                    users.add_balance(openid, price)
+                    users.audit(openid, "refund", "job=%s +=%d (restart)"
+                                % (job["id"], price))
+                except Exception:  # noqa: BLE001
+                    log.exception("[%s] 重启退款失败", job["id"])
+        if rows:
+            log.info("任务表恢复：%d 条未过期记录（在途中断 %d 条，已退款）",
+                     len(rows), len(interrupted))
+
+    def _persist(self, job: Dict[str, Any]) -> None:
+        """整行 upsert。调用方必须持锁。"""
+        values = [job.get(col) for col in self._COLUMNS]
+        placeholders = ", ".join("?" * len(self._COLUMNS))
+        try:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO jobs(%s) VALUES(%s)"
+                % (", ".join(self._COLUMNS), placeholders), values)
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception("任务落盘失败 job=%s", job.get("id"))
+
+    def _delete_rows(self, job_ids: List[str]) -> None:
+        """驱逐任务时同步删除落盘行。调用方必须持锁。"""
+        if not job_ids:
+            return
+        try:
+            self._conn.executemany("DELETE FROM jobs WHERE id = ?",
+                                   [(jid,) for jid in job_ids])
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception("任务落盘行删除失败: %s", job_ids)
 
     def create(self, job_id: str, **fields: Any) -> Dict[str, Any]:
         now = time.time()
@@ -608,6 +701,7 @@ class JobStore:
         }
         with self._lock:
             self._data[job_id] = job
+            self._persist(job)
             evicted: List[Dict[str, Any]] = []
             if len(self._data) > self._max:
                 evicted = self._evict_locked(keep=job_id)
@@ -626,6 +720,7 @@ class JobStore:
                 return
             job.update(fields)
             job["updated_at"] = time.time()
+            self._persist(job)
 
     def _evict_locked(self, keep: Optional[str] = None) -> List[Dict[str, Any]]:
         """先删过期，再按创建时间删最旧。调用方必须持锁。返回被驱逐的任务。"""
@@ -643,6 +738,7 @@ class JobStore:
             if oldest is None:
                 break
             evicted.append(self._data.pop(oldest))
+        self._delete_rows([j.get("id") for j in evicted if j.get("id")])
         return evicted
 
     def _notify_evicted(self, evicted: List[Dict[str, Any]]) -> None:
@@ -1137,14 +1233,56 @@ def get_available_styles() -> Dict[str, Any]:
 
 @app.get("/api/config")
 def public_config() -> Dict[str, Any]:
-    """小程序启动时拉取：价格、维护状态、风格表、调试免扣费开关。"""
+    """小程序启动时拉取：价格、维护状态、风格表、调试免扣费开关、社区与广告开关。"""
+    ads = settings.ads()
+    community = settings.community()
     return {
         "prices": settings.prices(),
         "free_mode": settings.free_mode(),
         "cos_ready": settings.cos_ready(),
         "maintenance": settings.maintenance(),
         "styles": settings.styles(),
+        # 社区（灵感沙龙）：enabled=False 时小程序端隐藏 tab 与入口
+        "community": {"enabled": community["enabled"]},
+        # 激励视频广告：ready=False 时小程序端不显示"看视频补给"入口
+        "ads": {
+            "rewarded_video_enabled": ads["rewarded_video_enabled"],
+            "rewarded_video_unit_id": ads["rewarded_video_unit_id"],
+            "rewarded_video_ready": ads["rewarded_video_ready"],
+        },
     }
+
+
+@app.get("/api/community")
+def public_community() -> Dict[str, Any]:
+    """灵感沙龙展品。内容全部来自后台配置，未开启或没有内容时返回空列表。
+
+    小程序端不再内置任何硬编码展品 —— 后台没配就是空页面，
+    不会再出现"社区里全是测试文字"的情况。
+    """
+    conf = settings.community()
+    if not conf["enabled"]:
+        return {"enabled": False, "items": []}
+    items = []
+    for idx, raw in enumerate(conf["items"]):
+        items.append({
+            "id": str(raw.get("id") or "c%d" % (idx + 1)),
+            "title": str(raw.get("title") or ""),
+            "story": str(raw.get("story") or ""),
+            "authorName": str(raw.get("author_name") or ""),
+            "authorAvatar": str(raw.get("author_avatar") or ""),
+            "date": str(raw.get("date") or ""),
+            "category": str(raw.get("category") or "all"),
+            "categoryName": str(raw.get("category_name") or ""),
+            "templateId": str(raw.get("template_id") or ""),
+            "templateName": str(raw.get("template_name") or ""),
+            "quality": "fine" if str(raw.get("quality")) == "fine" else "light",
+            "resultUrl": str(raw.get("result_url") or ""),
+            "origUrl": str(raw.get("orig_url") or ""),
+            "likes": int(raw.get("likes") or 0),
+            "liked": False,
+        })
+    return {"enabled": True, "items": items}
 
 
 @app.get("/api/announcements")
@@ -1440,6 +1578,11 @@ def earn_points(body: _EarnBody, request: Request):
     conf = EARN_DEFS.get(kind)
     if conf is None:
         raise HTTPException(status_code=400, detail="未知的奖励类型")
+    # 看视频奖励必须建立在真实广告之上：广告位没配好就不发奖，
+    # 否则前端一点就凭空到账（此前正是这个漏洞）。
+    if kind == "video" and not settings.ads()["rewarded_video_ready"]:
+        raise HTTPException(status_code=403,
+                            detail="激励视频广告未配置，暂不可领取")
     ok, balance, count = users.earn(user["openid"], kind,
                                     conf["reward"], conf["limit"])
     if not ok:

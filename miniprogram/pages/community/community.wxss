@@ -70,6 +70,32 @@
   font-weight: 500;
 }
 
+/* 空状态 / 暂停开放：后端 community.enabled = false 或暂无展品时展示。
+   内容全部来自后端，前端不再有任何内置示例展品。 */
+.salon-empty {
+  margin: 48rpx 0;
+  padding: 64rpx 40rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16rpx;
+  text-align: center;
+}
+
+.salon-empty .empty-title {
+  font-family: var(--font-serif);
+  font-size: 30rpx;
+  font-weight: 700;
+  letter-spacing: 1rpx;
+  color: var(--ink-title);
+}
+
+.salon-empty .empty-desc {
+  font-size: 22rpx;
+  line-height: 1.6;
+  color: var(--ink-muted);
+}
+
 /* 展品卡片流 */
 .showcase-list {
   display: flex;

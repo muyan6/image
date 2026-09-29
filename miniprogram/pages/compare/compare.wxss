@@ -75,16 +75,29 @@ page {
   pointer-events: none;
 }
 
+/* 原画遮罩层：靠 overflow:hidden + 自身宽度做裁切。
+   不能用 clip-path —— 裁剪后可见区域变窄，内核会以可见宽度为基准
+   重新计算内层 image 的 aspectFit 缩放，导致原图比结果图小一圈、
+   左右两半构图对不上。宽度由内联 style 的 splitPercent% 控制。 */
 .clip-mat {
   position: absolute;
   top: 0;
   left: 0;
-  width: 100%;
   height: 100%;
+  overflow: hidden;
   pointer-events: none;
   z-index: 10;
   background-color: #11100f;
-  transition: clip-path 0.05s linear;
+}
+
+/* 内层原画：宽度由内联 style 注入舞台实测像素值，高度撑满遮罩层。
+   于是它的 aspectFit 盒子 = 底层结果图的盒子（都是整块舞台），
+   两张图缩放比例与居中偏移完全一致，实现像素级对齐。 */
+.mat-image-locked {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
 }
 
 /* 浮动典藏标牌 */

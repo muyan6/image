@@ -1,6 +1,13 @@
 const app = getApp();
 const api = require('../../utils/api.js');
 
+/**
+ * 灵感沙龙（社区）
+ *
+ * 展品全部来自后端 GET /api/community —— 内容在 /admin「通用设置」里维护，
+ * 前端不再内置任何示例/测试文案（此前是 4 条写死的假展品）。
+ * 后端 community.enabled = false 时沙龙暂停开放，页面显示暂停态。
+ */
 Page({
   data: {
     filters: [
@@ -12,97 +19,40 @@ Page({
     ],
     activeFilter: 'all',
     items: [],
-    filteredItems: []
+    filteredItems: [],
+    enabled: false,
+    loading: true
   },
 
   onLoad() {
-    this.initCommunityData();
+    this.loadCommunity();
   },
 
   onPullDownRefresh() {
-    this.initCommunityData();
-    wx.stopPullDownRefresh();
+    this.loadCommunity().then(() => wx.stopPullDownRefresh());
   },
 
-  initCommunityData() {
-    // 艺术沙龙精选展品
-    const baseCovers = api.apiBase() + '/api/covers/';
-    const exhibits = [
-      {
-        id: 'c1',
-        title: '暗光昏黄废片，重现冷白通透质感',
-        story: '晚上咖啡馆随手抓拍的原图噪点极重、肤色偏黄暗沉。用冷白通透模式拯救后，高光变得清爽干净，毛孔和发丝边缘宛如自然光重塑。',
-        authorName: '苏木',
-        authorAvatar: '/images/logo.jpg',
-        date: '2小时前',
-        category: 'portrait',
-        categoryName: '冷白人像',
-        templateId: 't_clarity',
-        templateName: '冷白通透',
-        quality: 'fine',
-        resultUrl: baseCovers + 't_clarity_v1.jpg?v=1',
-        origUrl: '/images/logo.jpg',
-        likes: 128,
-        liked: false
-      },
-      {
-        id: 'c2',
-        title: '褪色老街抓拍 · 唤醒富士日系绿调',
-        story: '阴雨天在老街拍的照片灰蒙蒙一片，选用富士胶片配方处理后，暗部被赋予了细腻温润的墨绿色调，情绪感瞬间拉满。',
-        authorName: '白驹',
-        authorAvatar: '/images/logo.jpg',
-        date: '昨天',
-        category: 'film',
-        categoryName: '复古胶片',
-        templateId: 't_fuji',
-        templateName: '富士经典',
-        quality: 'fine',
-        resultUrl: baseCovers + 't_fuji_v1.jpg?v=1',
-        origUrl: '/images/logo.jpg',
-        likes: 246,
-        liked: false
-      },
-      {
-        id: 'c3',
-        title: '午后随拍小猫 · 一键走进吉卜力世界',
-        story: '原本过曝失焦的家猫随手拍，通过动漫重绘风格转化成水彩手绘风，像直接从宫崎骏电影手稿里走出来一样梦幻。',
-        authorName: '青禾',
-        authorAvatar: '/images/logo.jpg',
-        date: '3天前',
-        category: 'anime',
-        categoryName: '动漫重绘',
-        templateId: 't_ghibli',
-        templateName: '吉卜力童话',
-        quality: 'light',
-        resultUrl: baseCovers + 't_ghibli_v1.jpg?v=1',
-        origUrl: '/images/logo.jpg',
-        likes: 319,
-        liked: false
-      },
-      {
-        id: 'c4',
-        title: '上世纪八十年代老底片 · 2K发丝级复活',
-        story: '泛黄卷边的旧家庭合照，经由超分重构算法去除折痕与划伤，人物眼眸和发丝根根分明，记忆再次清晰浮现。',
-        authorName: '林深',
-        authorAvatar: '/images/logo.jpg',
-        date: '5天前',
-        category: 'old_photo',
-        categoryName: '老照片复苏',
-        templateId: 't_master',
-        templateName: '深度超分',
-        quality: 'fine',
-        resultUrl: baseCovers + 't_master_v1.jpg?v=1',
-        origUrl: '/images/logo.jpg',
-        likes: 482,
-        liked: false
-      }
-    ];
-
-    this.setData({
-      items: exhibits,
-      filteredItems: exhibits
-    });
-    this.filterItems(this.data.activeFilter);
+  /** 拉取沙龙展品：后端未开启或无内容时返回空列表，不做任何本地兜底 */
+  loadCommunity() {
+    return api.request('/api/community', { timeout: 8000 })
+      .then((d) => {
+        const items = (d && d.items) || [];
+        this.setData({
+          enabled: !!(d && d.enabled),
+          items: items,
+          loading: false
+        });
+        this.filterItems(this.data.activeFilter);
+      })
+      .catch(() => {
+        // 网络异常按「暂无内容」处理，不展示假数据
+        this.setData({
+          enabled: false,
+          items: [],
+          filteredItems: [],
+          loading: false
+        });
+      });
   },
 
   onSelectFilter(e) {
@@ -125,17 +75,18 @@ Page({
 
   onLikeItem(e) {
     const id = e.currentTarget.dataset.id;
-    const list = this.data.filteredItems.map((item) => {
-      if (item.id === id) {
-        const nextLiked = !item.liked;
-        return Object.assign({}, item, {
-          liked: nextLiked,
-          likes: nextLiked ? item.likes + 1 : item.likes - 1
-        });
-      }
-      return item;
+    const bump = (item) => {
+      if (item.id !== id) return item;
+      const nextLiked = !item.liked;
+      return Object.assign({}, item, {
+        liked: nextLiked,
+        likes: nextLiked ? item.likes + 1 : item.likes - 1
+      });
+    };
+    this.setData({
+      items: this.data.items.map(bump),
+      filteredItems: this.data.filteredItems.map(bump)
     });
-    this.setData({ filteredItems: list });
     wx.showToast({
       title: '感谢赞叹',
       icon: 'none'
@@ -145,10 +96,14 @@ Page({
   onPreviewExhibit(e) {
     const item = e.currentTarget.dataset.item;
     const type = e.currentTarget.dataset.type;
-    const current = type === 'original' ? item.origUrl : item.resultUrl;
+    const urls = [item.resultUrl, item.origUrl].filter(Boolean);
+    if (!urls.length) return;
+    const current = type === 'original' && item.origUrl
+      ? item.origUrl
+      : (item.resultUrl || urls[0]);
     wx.previewImage({
       current: current,
-      urls: [item.resultUrl, item.origUrl].filter(Boolean)
+      urls: urls
     });
   },
 
@@ -163,6 +118,10 @@ Page({
   onMakeSame(e) {
     const tid = e.currentTarget.dataset.templateId;
     const tname = e.currentTarget.dataset.name;
+    if (!tid) {
+      wx.showToast({ title: '该展品未绑定配方', icon: 'none' });
+      return;
+    }
 
     // 只带 id/名字；档位与价格由调整页从服务端模板数据现读，不在这里猜
     app.globalData.selectedTemplate = {

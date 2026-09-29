@@ -31,13 +31,16 @@
       binderror="onResultError"
     ></image>
 
-    <!-- 顶层：原画裁剪遮罩层 -->
+    <!-- 顶层：原画裁剪遮罩层
+         用 overflow:hidden 限宽裁切，内层原画锁定为整个舞台的实测像素尺寸，
+         与底层结果图共用同一个 aspectFit 缩放基准，杜绝对比滑块左右错位。 -->
     <view
       class="clip-mat"
-      style="clip-path: inset(0 {{ isPressingOriginal ? 0 : (100 - splitPercent) }}% 0 0);"
+      style="width: {{ isPressingOriginal ? 100 : splitPercent }}%;"
     >
       <image
-        class="mat-image"
+        class="mat-image mat-image-locked"
+        style="width: {{ stageW }}px;"
         src="{{ originalUrl }}"
         mode="aspectFit"
         binderror="onOrigError"

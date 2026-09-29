@@ -2,12 +2,20 @@ const app = getApp();
 const api = require('../../utils/api.js');
 
 /**
- * 微信官方激励式视频广告位 ID。
- * 开通条件：mp.weixin.qq.com → 流量主（累计独立访客 UV ≥ 1000）
- * → 广告位管理 → 新建「激励式视频广告」，把 ad-unit-id 填在这里。
- * 填好后"看视频补给"就走真实广告（微信官方结算分成）；留空则用模拟动画。
+ * 激励视频广告配置全部来自后端 GET /api/config 的 ads 字段，
+ * 在 /admin「通用设置 → 激励视频广告」里维护：
+ *   ads.rewarded_video_enabled = true 且 ads.rewarded_video_unit_id 非空
+ *   => 后端返回 ads.rewarded_video_ready = true
+ *
+ * ready = false（未开启 / 广告位 ID 为空）时：
+ *   - 本页不渲染「看视频得光子」任务卡（见 my.wxml 的 wx:if）；
+ *   - 后端 POST /api/me/earn (kind=video) 也会直接 403。
+ *
+ * 旧的「模拟动画兜底」（REWARDED_AD_UNIT_ID 为空时，点一下等 1.5 秒
+ * 就直接 +10 光子）已删除 —— 那正是"没配广告却直接到账"的原因。
  */
-const REWARDED_AD_UNIT_ID = '';
+const DEFAULT_VIDEO_REWARD = 10;
+const DEFAULT_MAX_VIDEO_TASKS = 3;
 
 Page({
   data: {
@@ -19,8 +27,10 @@ Page({
     historyList: [],
     previewWorks: [],
     videoTasksToday: 0,
-    maxVideoTasks: 3,
-    videoReward: 10
+    maxVideoTasks: DEFAULT_MAX_VIDEO_TASKS,
+    videoReward: DEFAULT_VIDEO_REWARD,
+    // 广告是否真的可用（由后端判定），未配置时整块任务卡隐藏
+    videoAdReady: false
   },
 
   onLoad() {
@@ -45,6 +55,13 @@ Page({
       historyList: list,
       previewWorks: list.slice(0, 3)
     });
+
+    // 广告位配置（后台热改即时生效）：决定「看视频得光子」入口是否显示
+    api.config().then((c) => {
+      if (!c || !c.ads) return;
+      this._videoAdUnitId = c.ads.rewarded_video_unit_id || '';
+      this.setData({ videoAdReady: !!c.ads.rewarded_video_ready });
+    }).catch(() => {});
 
     // 光子余额 / 视频补给进度以服务端为准
     api.me().then((d) => {
@@ -113,9 +130,12 @@ Page({
     });
   },
 
-  /** 看视频补给：服务端记账（3 次/天，每次 +10 光子）。
-   *  配了 REWARDED_AD_UNIT_ID 走微信官方激励视频；否则用模拟动画。 */
+  /** 看视频补给：必须走真实激励视频；广告位没配好则本入口不显示。 */
   onWatchVideo() {
+    if (!this.data.videoAdReady || !this._videoAdUnitId) {
+      wx.showToast({ title: '激励视频广告暂未开放', icon: 'none' });
+      return;
+    }
     if (this.data.videoTasksToday >= this.data.maxVideoTasks) {
       wx.showToast({
         title: '今日补给次数已达上限',
@@ -123,23 +143,15 @@ Page({
       });
       return;
     }
-
-    if (REWARDED_AD_UNIT_ID && wx.createRewardedVideoAd) {
-      this._playRewardedAd();
-      return;
-    }
-
-    // 模拟流程（未开通流量主时）
-    wx.showLoading({ title: '正在调取补给影像…' });
-    setTimeout(() => {
-      this._grantVideoReward();
-    }, 1500);
+    this._playRewardedAd();
   },
 
   /** 微信官方激励式视频：完整观看后 onClose 里 isEnded 才发奖 */
   _playRewardedAd() {
+    const unitId = this._videoAdUnitId;
+    if (!unitId) return;
     if (!this._rewardedAd) {
-      this._rewardedAd = wx.createRewardedVideoAd({ adUnitId: REWARDED_AD_UNIT_ID });
+      this._rewardedAd = wx.createRewardedVideoAd({ adUnitId: unitId });
       this._rewardedAd.onError((err) => {
         console.warn('激励视频加载失败', err);
         wx.showToast({ title: '广告暂时拉取失败，稍后再试', icon: 'none' });
@@ -164,9 +176,8 @@ Page({
     });
   },
 
-  /** 向服务端领取视频奖励（次数与发放都在服务端校验） */
+  /** 向服务端领取视频奖励（次数、发放与广告开关都在服务端校验） */
   _grantVideoReward() {
-    wx.hideLoading();
     api.earn('video')
       .then((d) => {
         if (d && typeof d.balance === 'number') app.setBalance(d.balance);

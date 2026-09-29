@@ -85,6 +85,12 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
          "desc": "强化肌肉轮廓与边缘线条，低饱和冷黑金", "tag": "运动"},
     ],
     "normalize_long_side": 1536,
+    # 灵感沙龙（社区）：默认空 + 关闭。
+    # 内容全部由后台维护，小程序端不再内置任何测试展品。
+    "community": {"enabled": False, "items": []},
+    # 激励视频广告位：ad_unit_id 留空 = 未开通，小程序端隐藏入口且不发光子。
+    # 广告位 ID 在微信公众平台创建后填到这里（后台 /admin 通用设置）。
+    "ads": {"rewarded_video_enabled": False, "rewarded_video_unit_id": ""},
 }
 
 
@@ -103,7 +109,8 @@ def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
 
 # 误删后服务会残废的关键结构：合并后一律用默认值兜底补齐
 _DICT_SECTIONS = ("providers", "wechat", "tencent", "moderation", "quota",
-                  "prompts", "prices", "maintenance", "quality_to_style")
+                  "prompts", "prices", "maintenance", "quality_to_style",
+                  "community", "ads")
 
 
 def _rebase_defaults(candidate: Dict[str, Any]) -> None:
@@ -216,6 +223,33 @@ def _validate(doc: Dict[str, Any]) -> None:
         raise ValueError("maintenance.enabled 必须是布尔值")
     if not isinstance(maintenance.get("message", ""), str):
         raise ValueError("maintenance.message 必须是文本")
+
+    community = doc.get("community", {})
+    if not isinstance(community.get("enabled"), bool):
+        raise ValueError("community.enabled 必须是布尔值")
+    items = community.get("items", [])
+    if not isinstance(items, list):
+        raise ValueError("community.items 必须是数组")
+    if len(items) > 200:
+        raise ValueError("community.items 最多 200 条")
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise ValueError("community.items[%d] 必须是对象" % idx)
+        for field in ("title", "story", "template_name"):
+            if not isinstance(item.get(field, ""), str):
+                raise ValueError("community.items[%d].%s 必须是文本" % (idx, field))
+        for field in ("result_url", "orig_url"):
+            value = item.get(field, "")
+            if not isinstance(value, str) or len(value) > 1000:
+                raise ValueError("community.items[%d].%s 必须是不超过 1000 字的文本"
+                                 % (idx, field))
+
+    ads = doc.get("ads", {})
+    if not isinstance(ads.get("rewarded_video_enabled"), bool):
+        raise ValueError("ads.rewarded_video_enabled 必须是布尔值")
+    unit_id = ads.get("rewarded_video_unit_id", "")
+    if not isinstance(unit_id, str) or len(unit_id) > 64:
+        raise ValueError("ads.rewarded_video_unit_id 必须是不超过 64 字的文本")
 
 
 class SettingsStore:
@@ -345,6 +379,29 @@ class SettingsStore:
 
     def quality_to_style(self) -> Dict[str, str]:
         return copy.deepcopy(self.snapshot()["quality_to_style"])
+
+    def community(self) -> Dict[str, Any]:
+        """灵感沙龙配置：{enabled: bool, items: [...]}。默认关闭且为空。"""
+        conf = self.snapshot().get("community") or {}
+        if not isinstance(conf, dict):
+            return {"enabled": False, "items": []}
+        items = conf.get("items")
+        return {
+            "enabled": bool(conf.get("enabled")),
+            "items": copy.deepcopy(items) if isinstance(items, list) else [],
+        }
+
+    def ads(self) -> Dict[str, Any]:
+        """激励视频广告配置。enabled 且 unit_id 非空才算真的开通。"""
+        conf = self.snapshot().get("ads") or {}
+        if not isinstance(conf, dict):
+            conf = {}
+        unit_id = str(conf.get("rewarded_video_unit_id") or "").strip()
+        return {
+            "rewarded_video_enabled": bool(conf.get("rewarded_video_enabled")),
+            "rewarded_video_unit_id": unit_id,
+            "rewarded_video_ready": bool(conf.get("rewarded_video_enabled")) and bool(unit_id),
+        }
 
 
 class AnnouncementStore:
