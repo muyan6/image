@@ -236,7 +236,7 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}) {
   });
 
   await test('compare_uses_real_pixels_and_expired_original_state',async()=>{
-    const {page}=loadPage('compare',{request:async()=>({status:'succeeded',orig_url:null,result_url:'result',provider:'local',width:1536,height:1024}),absolute:x=>x});
+    const {page}=loadPage('compare',{request:async()=>({status:'succeeded',orig_url:null,result_url:'result',provider:'local',width:1536,height:1024}),absolute:x=>x,downloadJobMedia:async(id,kind,url)=>url});
     page._jobId='abcdef123456';await page.refreshUrls();
     return [page.data.originalUnavailable&&page.data.originalUrl==='result'&&page.data.label.includes('1536'),{label:page.data.label,originalUnavailable:page.data.originalUnavailable}];
   });

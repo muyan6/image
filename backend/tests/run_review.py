@@ -40,6 +40,11 @@ if not args.legacy and identity_test.exists():
 community_test = Path(__file__).with_name('test_community.py')
 if not args.legacy and community_test.exists():
     commands.append(['python', '-u', community_test.as_posix()])
+workflow_test = Path(__file__).with_name('test_workflow.py')
+workflow_frontend = Path(__file__).with_name('test_workflow_frontend.cjs')
+if not args.legacy and workflow_test.exists():
+    commands.append(['python', '-u', workflow_test.as_posix()])
+    commands.append(['node', workflow_frontend.as_posix()])
 executions = []
 for command in commands:
     result = subprocess.run(command, cwd=source, env=environment, capture_output=True, text=True, encoding='utf-8')
@@ -59,6 +64,9 @@ if not args.legacy and identity_test.exists():
     rows.extend(json.loads((output / 'identity_results.json').read_text(encoding='utf-8'))['cases'])
 if not args.legacy and community_test.exists():
     rows.extend(json.loads((output / 'community_results.json').read_text(encoding='utf-8'))['cases'])
+if not args.legacy and workflow_test.exists():
+    for name in ('workflow_results.json', 'workflow_frontend_results.json'):
+        rows.extend(json.loads((output / name).read_text(encoding='utf-8'))['cases'])
 errors = [r for r in rows if 'harness_error' in r]
 failed = sum(not r['passed'] for r in rows)
 summary = {'total': len(rows), 'passed': len(rows) - failed, 'failed': failed, 'harness_errors': len(errors)}

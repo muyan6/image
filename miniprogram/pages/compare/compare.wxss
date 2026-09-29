@@ -241,3 +241,19 @@ page {
   letter-spacing: 2rpx;
   color: #1a1917;
 }
+.media-notice {
+  position: absolute;
+  top: 45%;
+  width: 44%;
+  padding: 20rpx;
+  box-sizing: border-box;
+  background: rgba(20, 19, 16, 0.9);
+  color: #dfcfb0;
+  font-size: 24rpx;
+  text-align: center;
+  z-index: 15;
+}
+.media-notice text { display: block; margin: 10rpx 0; }
+.media-notice-result { right: 2%; }
+.media-notice-original { left: 2%; }
+.media-loading { position: absolute; top: 42%; width: 100%; text-align: center; color: #dfcfb0; z-index: 14; }

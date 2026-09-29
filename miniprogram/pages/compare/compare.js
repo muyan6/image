@@ -14,6 +14,9 @@ Page({
     saving: false,
     label: '精细修复',
     originalUnavailable: false,
+    resultError: '',
+    originalError: '',
+    loadingMedia: false,
     isDragging: false,
     isPressingOriginal: false,
     // 舞台实测宽度(px)：clip-mat 内层原画按整块舞台锁定，避免裁剪后重新缩放
@@ -26,9 +29,12 @@ Page({
     const orig = api.cleanUrl ? api.cleanUrl(rawOrig) : rawOrig;
     const res = api.cleanUrl ? api.cleanUrl(rawRes) : rawRes;
     const quality = options.quality === 'light' ? 'light' : 'fine';
-    const demo = !!options.demo || (!orig && !res);
+    const demo = !!options.demo || (!options.job && !orig && !res);
 
     this._jobId = options.job ? decodeURIComponent(options.job) : '';
+    this._mediaCache = {};
+    this._reloadAttempts = {};
+    this._unloaded = false;
 
     // 首帧兜底：onReady 的实测尺寸回来之前，先用窗口尺寸撑住，
     // 否则内层原图 width:0 会整张不显示，出现半屏空白
@@ -39,38 +45,84 @@ Page({
     } catch (e) { /* 取不到就用默认值，onReady 会立刻纠正 */ }
 
     this.setData({
-      originalUrl: demo ? DEMO_ORIG : orig,
-      resultUrl: demo ? DEMO_RESULT : res,
+      originalUrl: demo ? DEMO_ORIG : (this._jobId ? '' : orig),
+      resultUrl: demo ? DEMO_RESULT : (this._jobId ? '' : res),
       quality: quality,
       demo: demo,
-      label: quality === 'fine' ? '精细修复' : '标准修复',
+      label: quality === 'fine' ? '精细修复' : '轻量修复',
       stageW: winW
     });
 
-    // COS 直链有效期只有 2 小时（后端 cos_presign ttl_seconds=7200）。
-    // 从作品集点进来时，链接往往是几小时前存的，直接渲染会 403/空白。
-    // 这里主动换一次新鲜签名（依赖 JobStore 已落盘，重启后仍能查到任务）。
+    // 历史里存的是短期签名，不能直接当作永久图片；先刷新再下载为本地临时文件。
     if (!demo) this.refreshUrls();
   },
 
-  /**
-   * 向服务端换一张新的结果图直链（COS 签名 2 小时过期，老图会 403）。
-   * 有 jobId 才能刷新；成功后把新地址写回，失败保持原样。
-   */
+  onShow() {
+    if (!this.data.demo) this.refreshUrls();
+  },
+
+  onUnload() {
+    this._unloaded = true;
+    this._mediaCache = {};
+  },
+
+  /** 本地文件在当前页面复用；再次进入页面会重新获取签名，不存过期链接。 */
   refreshUrls() {
     if (!this._jobId || this.data.demo) return Promise.resolve(false);
-    return api.request('/api/jobs/' + this._jobId)
-      .then((job) => {
-        if (!job || job.status !== 'succeeded' || !job.result_url) return false;
-        const res = api.absolute(job.result_url);
-        const orig = job.orig_url ? api.absolute(job.orig_url) : res;
+    if (this._refreshPromise) return this._refreshPromise;
+    this._mediaCache = this._mediaCache || {};
+    this.setData({loadingMedia: true});
+    this._refreshPromise = api.request('/api/jobs/' + encodeURIComponent(this._jobId))
+      .then(async (job) => {
+        if (this._unloaded) return false;
+        if (!job || job.status !== 'succeeded') throw new Error('作品尚未完成');
+        if (!job.result_url) throw new Error('作品已到保存期限');
+        const load = (kind, url) => {
+          if (this._mediaCache[kind]) return Promise.resolve(this._mediaCache[kind]);
+          return api.downloadJobMedia(this._jobId, kind, url).then((path) => {
+            if (!this._unloaded) this._mediaCache[kind] = path;
+            return path;
+          });
+        };
         const dimensions = job.width && job.height ? `${job.width} × ${job.height}` : '';
-        this.setData({ originalUrl: orig, resultUrl: res,
+        this.setData({originalUnavailable: !job.orig_url,
+          label: (job.provider === 'local' ? '本地增强' : 'AI 修复') + (dimensions ? ' · ' + dimensions : '')});
+        // 两侧独立更新：原图下载缓慢/故障也不能阻断成品展示。
+        const outcomes = await Promise.all([
+          load('result', job.result_url).then(path => {
+            if (!this._unloaded) this.setData(Object.assign({resultUrl:path, resultError:''},
+              job.orig_url ? {} : {originalUrl:path}));
+            return {path};
+          }, error => {
+            if (!this._unloaded) this.setData({resultError:error.message || '结果图加载失败'});
+            return {error};
+          }),
+          job.orig_url ? load('orig', job.orig_url).then(path => {
+            if (!this._unloaded) this.setData({originalUrl:path, originalError:''});
+            return {path};
+          }, error => {
+            if (!this._unloaded) this.setData({originalError:error.message || '原图加载失败'});
+            return {error};
+          }) : Promise.resolve({expired:true})
+        ]);
+        if (this._unloaded) return false;
+        const result = outcomes[0], original = outcomes[1];
+        this.setData({ originalUrl: original.expired ? (result.path || '') : (original.path || ''),
+          resultUrl: result.path || '',
+          resultError: result.error ? result.error.message || '结果图加载失败' : '',
+          originalError: original.error ? original.error.message || '原图加载失败' : '',
           originalUnavailable: !job.orig_url,
           label: (job.provider === 'local' ? '本地增强' : 'AI 修复') + (dimensions ? ' · ' + dimensions : '') });
-        return true;
+        return !!result.path;
       })
-      .catch(() => false);
+      .catch((err) => {
+        if (!this._unloaded) this.setData({resultError: err.message || '图片加载失败，请重试'});
+        return false;
+      }).finally(() => {
+        this._refreshPromise = null;
+        if (!this._unloaded) this.setData({loadingMedia: false});
+      });
+    return this._refreshPromise;
   },
 
   onReady() {
@@ -151,27 +203,35 @@ Page({
   },
 
   onResultError() {
-    const url = this.data.resultUrl;
-    if (!url || this.data.demo || this._refreshingResult) return;
-    this._refreshingResult = true;
-    this.refreshUrls().finally(() => {
-      this._refreshingResult = false;
-    });
+    this.reloadMedia('result');
   },
 
   onOrigError() {
-    const url = this.data.originalUrl;
-    if (!url || this.data.demo || this._refreshingOrig) return;
-    this._refreshingOrig = true;
-    this.refreshUrls().finally(() => {
-      this._refreshingOrig = false;
-    });
+    this.reloadMedia(this.data.originalUnavailable ? 'result' : 'orig');
+  },
+
+  reloadMedia(kind) {
+    if (this.data.demo || this._unloaded || this._refreshPromise) return;
+    this._reloadAttempts = this._reloadAttempts || {};
+    this._mediaCache = this._mediaCache || {};
+    delete this._mediaCache[kind];
+    const field = kind === 'result' ? 'resultError' : 'originalError';
+    if (this._reloadAttempts[kind]) {
+      this.setData({[field]: '图片加载失败，点击重试'}); return;
+    }
+    this._reloadAttempts[kind] = 1;
+    this.refreshUrls();
+  },
+
+  onRetryMedia() {
+    this._reloadAttempts = {};
+    this._mediaCache = {};
+    this.refreshUrls();
   },
 
   /** 保存高清修复照片到系统相册 */
   async onDownload() {
-    const url = this.data.resultUrl;
-    if (!url || this.data.saving) return;
+    if (this.data.saving) return;
     if (this.data.demo) {
       wx.showToast({ title: '演示模式下无本地原画可保存', icon: 'none' });
       return;
@@ -189,32 +249,23 @@ Page({
       wx.hideLoading();
     };
 
-    // 直链可能已过签名时效：下载前先向服务端换一次新鲜地址
-    await this.refreshUrls();
-    // 注意：COS 预签名地址的查询串就是鉴权本身，绝不能剥掉
-    const target = this.data.resultUrl;
-    if (/^https?:\/\//i.test(target)) {
-      wx.downloadFile({
-        url: target,
-        success: (res) => {
-          if (res.statusCode === 200 && res.tempFilePath) {
-            this.saveToAlbum(res.tempFilePath, done);
-          } else {
-            done();
-            wx.showToast({ title: '下载失败 (' + res.statusCode + ')', icon: 'none' });
-          }
-        },
-        fail: () => {
-          done();
-          wx.showToast({ title: '网络连接超时', icon: 'none' });
-        }
-      });
-    } else {
+    try {
+      // 已展示的本地成品直接保存，不重复下载，也不等待原图加载。
+      let target = this._mediaCache && this._mediaCache.result;
+      if (!target) {
+        target = await api.downloadJobMedia(this._jobId, 'result', this._jobId ? '' : this.data.resultUrl);
+        this._mediaCache = this._mediaCache || {};
+        this._mediaCache.result = target;
+        this.setData({resultUrl: target, resultError: ''});
+      }
       this.saveToAlbum(target, done);
+    } catch (err) {
+      done();
+      wx.showModal({title: '图片下载失败', content: err.message || 'COS 下载失败，请重试', showCancel: false});
     }
   },
 
-  saveToAlbum(filePath, done) {
+  saveToAlbum(filePath, done, retried) {
     wx.saveImageToPhotosAlbum({
       filePath: filePath,
       success: () => {
@@ -223,17 +274,32 @@ Page({
       },
       fail: (err) => {
         const msg = (err && err.errMsg) || '';
-        if (/suffix|extension|后缀|format/i.test(msg) && !/\.jpg$/i.test(filePath)) {
+        if (!retried && /suffix|extension|后缀|format/i.test(msg) && !/\.jpg$/i.test(filePath)) {
           const fsm = wx.getFileSystemManager();
           const fixed = wx.env.USER_DATA_PATH + '/rescue_' + Date.now() + '.jpg';
           try {
             fsm.copyFileSync(filePath, fixed);
-            this.saveToAlbum(fixed, done);
+            this.saveToAlbum(fixed, () => {
+              try { fsm.unlinkSync(fixed); } catch (e) {}
+              done();
+            }, true);
             return;
           } catch (e) {}
         }
+        if (!retried && this._jobId && /not exist|no such file|file.*missing|文件不存在/i.test(msg)) {
+          // 微信可能清理后台页面的临时文件；重新从 COS 下载一次，不走图片代理。
+          api.downloadJobMedia(this._jobId, 'result', '').then((path) => {
+            this._mediaCache = this._mediaCache || {};
+            this._mediaCache.result = path;
+            this.setData({resultUrl: path, resultError: ''});
+            this.saveToAlbum(path, done, true);
+          }).catch((e) => {
+            done();wx.showModal({title: '图片下载失败', content: e.message || 'COS 下载失败', showCancel: false});
+          });
+          return;
+        }
         done();
-        if (msg.indexOf('auth deny') >= 0 || msg.indexOf('auth denied') >= 0) {
+        if (/auth deny|auth denied|authorize|permission|scope.writePhotosAlbum|权限/i.test(msg)) {
           wx.showModal({
             title: '需要相册权限',
             content: '请允许访问您的相册以便保存高清修复照片。',
@@ -241,7 +307,7 @@ Page({
             success: (r) => { if (r.confirm) wx.openSetting(); }
           });
         } else if (msg.indexOf('cancel') < 0) {
-          wx.showToast({ title: '保存失败，请重试', icon: 'none' });
+          wx.showModal({title: '相册保存失败', content: msg || '本地图片保存失败，请重试', showCancel: false});
         }
       }
     });

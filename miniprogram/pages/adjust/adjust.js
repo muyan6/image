@@ -23,10 +23,10 @@ Page({
     ],
 
     // 档位与价格：与后端口径一致（价格就是光子数，不再另行折算）
-    quality: 'fine',
+    quality: 'light',
     costLight: 1,
     costFine: 3,
-    currentQualityCost: 3,
+    currentQualityCost: 1,
     priceRangeText: '1~3 光子',
 
     // 模板文字排版字段（模板非空时展示，值随任务提交给后端排版引擎）
@@ -143,6 +143,7 @@ Page({
         templateId: current ? current.id : ''
       });
       if (current) this.applyTemplateTextDefaults(current);
+      if (current) this.resetTemplateRatio();
       this.refreshCurrentCost();
     }).catch(() => {});
   },
@@ -183,6 +184,7 @@ Page({
 
   /** 切换画幅比例 */
   onOpenRatioModal() {
+    if (this.data.selectedTemplate) return;
     this.setData({ showRatioModal: true });
   },
 
@@ -191,6 +193,7 @@ Page({
   },
 
   onSelectRatioOption(e) {
+    if (this.data.selectedTemplate) return;
     const key = e.currentTarget.dataset.key;
     const label = e.currentTarget.dataset.label;
     const heightMap = {
@@ -217,6 +220,13 @@ Page({
     });
   },
 
+  resetTemplateRatio() {
+    const stageH = this._imgWidth && this._imgHeight
+      ? Math.min(1050, Math.max(390, Math.round(694 * this._imgHeight / this._imgWidth))) : 694;
+    this.setData({ currentRatioKey: 'original', currentRatioLabel: '保持原图',
+      previewStyle: `height: ${stageH}rpx;`, showRatioModal: false });
+  },
+
   /** 切换风格（选了模板时档位跟模板走，选【原片修复】进入纯修复自由档位） */
   onSelectTemplate(e) {
     const tpl = e.currentTarget.dataset.template;
@@ -240,6 +250,7 @@ Page({
       selectedTemplate: tpl,
       templateId: tpl.id
     });
+    this.resetTemplateRatio();
     this.applyTemplateTextDefaults(tpl);
     this.refreshCurrentCost();
     try {
@@ -354,15 +365,13 @@ Page({
 
   async executeUpload(path) {
     const tpl = this.data.selectedTemplate;
-    const ratio = this.data.currentRatioKey;
     const generation = (this._generation || 0) + 1;
     this._generation = generation;
     const inactive = () => this._foreground === false || this._unloaded || this._generation !== generation || !this.data.processing;
 
     try {
       const formData = {
-        quality: this.data.quality,
-        aspect_ratio: ratio
+        quality: this.data.quality
       };
       if (tpl && tpl.id) {
         formData.template_id = tpl.id;
@@ -370,6 +379,8 @@ Page({
         if ((tpl.text_fields || []).length) {
           formData.text_fields = JSON.stringify(this.data.textValues);
         }
+      } else {
+        formData.aspect_ratio = this.data.currentRatioKey;
       }
 
       this.setData({

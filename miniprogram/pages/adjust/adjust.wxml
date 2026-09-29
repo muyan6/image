@@ -9,24 +9,24 @@
         <image
           class="preview-img"
           src="{{ imagePath }}"
-          mode="aspectFill"
+          mode="{{ selectedTemplate ? 'aspectFit' : 'aspectFill' }}"
         ></image>
         
         <!-- 比例角标 (右上角) -->
         <view class="badge-ratio">
-          <text>{{ currentRatioLabel }}</text>
+          <text>{{ selectedTemplate ? '模板自由构图' : currentRatioLabel }}</text>
         </view>
 
         <!-- 底部水印标识 -->
         <view class="preview-bottom-bar">
-          <text class="tag-left">输出预览</text>
+          <text class="tag-left">{{ selectedTemplate ? '原始素材 · 成品按模板构图' : '取景预览' }}</text>
           <text class="tag-right">{{ selectedTemplate ? selectedTemplate.name : '原片修复' }}</text>
         </view>
       </view>
     </view>
 
     <!-- 卡片 1：画幅 (截图2) -->
-    <view class="card-section">
+    <view class="card-section" wx:if="{{ !selectedTemplate }}">
       <view class="section-header">
         <text class="section-title">画幅</text>
         <text class="section-headline">保持原图，或重新取景</text>
@@ -41,7 +41,7 @@
         </view>
       </view>
 
-      <text class="section-hint">选择非原图比例后，可以拖动照片调整裁切。</text>
+      <text class="section-hint">选择非原图比例后，会按所选画幅居中裁切；模板生成不限制素材比例。</text>
     </view>
 
     <!-- 卡片 2：风格 / 选择表达方式 (截图3) -->
@@ -192,7 +192,7 @@
   </view>
 
   <!-- 画幅比例选择弹窗抽屉 -->
-  <view class="modal-mask" wx:if="{{ showRatioModal }}" bindtap="onCloseRatioModal">
+  <view class="modal-mask" wx:if="{{ showRatioModal && !selectedTemplate }}" bindtap="onCloseRatioModal">
     <view class="ratio-sheet" catchtap="true">
       <view class="sheet-head">
         <text class="sheet-title">选择画幅比例</text>

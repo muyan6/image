@@ -157,6 +157,72 @@ function rawRequest(path, options) {
   });
 }
 
+function downloadImage(url, header) {
+  return new Promise((resolve, reject) => {
+    wx.downloadFile({
+      url, header: header || {}, timeout: UPLOAD_TIMEOUT,
+      success(res) {
+        if (res.statusCode !== 200 || !res.tempFilePath) {
+          const err = new Error(res.statusCode === 404 ? 'COS 图片文件不存在或已到期' :
+            res.statusCode === 403 ? 'COS 拒绝访问（403）：签名或访问权限异常' : 'COS 图片下载失败 (' + res.statusCode + ')');
+          err.status = res.statusCode;
+          reject(err); return;
+        }
+        // 某些 CDN/代理返回 HTTP 200 错误页，必须确认实际文件能够解码。
+        wx.getImageInfo({src: res.tempFilePath,
+          success: () => resolve(res.tempFilePath),
+          fail: () => reject(new Error('图片数据异常，请重试'))});
+      },
+      fail: (err) => {
+        const raw = (err && err.errMsg) || '';
+        const e = networkError(err);
+        if (/domain list|domainlist|合法域名/i.test(raw)) {
+          e.code = 'DOWNLOAD_DOMAIN';
+          e.message = 'COS 下载域名未配置：' + url.split('/')[2];
+        } else if (/ssl|tls|certificate|cert\b/i.test(raw)) {
+          e.code = 'DOWNLOAD_TLS';
+          e.message = 'COS 域名 HTTPS 证书或连接异常';
+        }
+        reject(e);
+      }
+    });
+  });
+}
+
+/** 图片始终直连 COS；403 时仅向 API 换新签名重试一次，不代理图片字节。 */
+async function downloadJobMedia(jobId, kind, signedUrl) {
+  if (!['orig', 'result'].includes(kind)) throw new Error('图片参数错误');
+  const directUrl = (url) => {
+    // 拒绝历史本地存储地址以及所有 API 同域地址，避免占用业务服务器图片带宽。
+    if (!/^https:\/\//i.test(url || '')) throw new Error('此图片尚未同步到 COS，请重新打开作品重试');
+    const host = url.split('/')[2].toLowerCase();
+    const server = apiBase().split('/')[2].toLowerCase();
+    if (host === server) throw new Error('此图片尚未同步到 COS，请重新打开作品重试');
+    return cleanUrl(url);
+  };
+  let url = signedUrl;
+  if (!url && jobId) {
+    const job = await request('/api/jobs/' + encodeURIComponent(jobId));
+    url = job[kind + '_url'];
+  }
+  const repair = async () => {
+    const data = await request('/api/jobs/' + encodeURIComponent(jobId) + '/refresh-media?kind=' + kind,
+      {method: 'POST', timeout: UPLOAD_TIMEOUT});
+    return downloadImage(directUrl(data.url));
+  };
+  if (jobId && url && (!/^https:\/\//i.test(url) || url.split('/')[2].toLowerCase() === apiBase().split('/')[2].toLowerCase()))
+    return repair();
+  try { return await downloadImage(directUrl(url)); }
+  catch (err) {
+    if (jobId && err.status === 404) return repair();
+    if (!jobId || (err.status !== 403 && err.status !== 401)) throw err;
+    const job = await request('/api/jobs/' + encodeURIComponent(jobId));
+    const fresh = job[kind + '_url'];
+    if (!fresh) throw new Error(kind === 'orig' ? '原图已到保存期限' : '作品已到保存期限');
+    return downloadImage(directUrl(fresh));
+  }
+}
+
 function upload(filePath, formData, options) {
   return authedCall(() => rawUpload(filePath, formData, options));
 }
@@ -414,6 +480,7 @@ module.exports = {
   absolute,
   cleanUrl,
   request,
+  downloadJobMedia,
   upload,
   submitJob,
   waitForJob,

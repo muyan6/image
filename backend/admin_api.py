@@ -406,6 +406,14 @@ def make_admin_router(*, settings: SettingsStore,
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"items": items, "account_type": account_type, "stats": users.stats()}
 
+    @router.delete("/users/{openid}")
+    def cleanup_user(openid: str, request: Request) -> Dict[str, Any]:
+        """仅清理后台列表；保留账户，用户再次登录/使用自动恢复显示。"""
+        _guard(request)
+        if not users.hide_from_admin(openid):
+            raise HTTPException(status_code=404, detail="用户不存在")
+        return {"ok": True, "removed_from_list": True}
+
     @router.put("/users/{openid}/balance")
     async def set_user_balance(openid: str, request: Request) -> Dict[str, Any]:
         """管理员调整用户光子：body 传 {balance: 绝对值} 或 {delta: 增减量}。"""

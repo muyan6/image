@@ -48,7 +48,8 @@ def _conf(settings: SettingsStore) -> Dict[str, str]:
 def _host(conf: Dict[str, str], internal: bool = False) -> str:
     """内网请求优先走 cos-internal 保证 0 公网流量与千兆速度；外部请求走自定义域名或公网域名。"""
     if internal:
-        return "%s.cos-internal.%s.myqcloud.com" % (conf["cos_bucket"], conf["cos_region"])
+        # 独立内网域名只存在于 tencentcos.cn，myqcloud.com 没有这个形式。
+        return "%s.cos-internal.%s.tencentcos.cn" % (conf["cos_bucket"], conf["cos_region"])
     custom = str(conf.get("cos_custom_domain") or "").strip()
     if custom:
         custom = custom.replace("https://", "").replace("http://", "").rstrip("/")
@@ -87,10 +88,10 @@ def presign(settings: SettingsStore, method: str, key: str,
 
 
 def put_object(settings: SettingsStore, key: str, data: bytes,
-               content_type: str = "image/jpeg") -> None:
+               content_type: str = "image/jpeg", *, internal_only: bool = False) -> None:
     """服务端直接写入一个对象。优先走腾讯云同地域内网专线（0 流量费，不占公网带宽）。"""
     # 优先尝试走内网，若非云端环境（如本地调试）自动回退公网
-    for internal in (True, False):
+    for internal in ((True,) if internal_only else (True, False)):
         try:
             url = presign(settings, "put", key, internal=internal)
             resp = requests.put(url, data=data,
@@ -98,11 +99,11 @@ def put_object(settings: SettingsStore, key: str, data: bytes,
                                 timeout=(8, 45))
             if resp.status_code == 200:
                 return
-            if not internal:
+            if not internal or internal_only:
                 raise CosError("COS 上传失败 HTTP %s: %s" % (resp.status_code, resp.text[:120]),
                                status=resp.status_code)
         except requests.RequestException as exc:
-            if not internal:
+            if not internal or internal_only:
                 raise CosError("COS 上传网络异常", code="NETWORK") from exc
 
 
@@ -163,10 +164,14 @@ def check_internal(settings: SettingsStore) -> Dict[str, Any]:
     """探测当前服务器与 COS 桶之间的内网连通性与 DNS 解析状态。"""
     try:
         conf = _conf(settings)
-        host = "%s.cos-internal.%s.myqcloud.com" % (conf["cos_bucket"], conf["cos_region"])
+        host = _host(conf, internal=True)
         import socket
+        import ipaddress
         ip = socket.gethostbyname(host)
-        # 腾讯云 VPC 内网 IP 通常是 100.64.0.0/10、10.0.0.0/8、172.16.0.0/12 等
+        address = ipaddress.ip_address(ip)
+        ranges = ("10.0.0.0/8", "100.64.0.0/10", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16")
+        if not any(address in ipaddress.ip_network(network) for network in ranges):
+            raise RuntimeError("内网域名未解析至腾讯云内网地址")
         return {
             "ok": True,
             "mode": "VPC_INTERNAL",

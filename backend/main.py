@@ -306,7 +306,7 @@ def _current_user(request) -> Dict[str, Any]:
     if user.get("account_type") == "wechat" and user.get("app_id") and active_app_id \
             and user["app_id"] != active_app_id:
         raise HTTPException(status_code=401, detail="小程序配置已变更，请重新登录")
-    if user["last_seen"] < time.time() - 300:
+    if user.get("admin_hidden") or user["last_seen"] < time.time() - 300:
         users.touch_user(openid)
     return user
 
@@ -314,6 +314,7 @@ def _current_user(request) -> Dict[str, Any]:
 # 直传登记：upload_id -> 登记，1 小时未完成自动作废
 _uploads: Dict[str, Dict[str, Any]] = {}
 _uploads_lock = threading.Lock()
+_media_repair_lock = threading.Lock()
 
 
 def _sweep_uploads_locked() -> None:
@@ -477,6 +478,9 @@ def _register_job(openid: str, quality: str, style: str,
     价格用模板价（未定价回退到档位默认价）。
     光子在提交时预扣（服务端记账，余额不足直接 402），任务失败自动退款。
     """
+    # 模板构图由模板/模型决定，旧客户端传来的比例也不能裁掉原始素材。
+    if template:
+        aspect_ratio = ""
     price = _effective_price(quality, template)
     job_id = uuid.uuid4().hex[:12]
     free = settings.free_mode()
@@ -515,15 +519,16 @@ def _register_job(openid: str, quality: str, style: str,
 
         orig_cos = result_cos = None
         if settings.cos_ready():
+            # 原图存储失败也不应跳过独立的结果上传。
+            result_cos = "results/%s/%s.jpg" % (openid[:8], job_id)
             try:
                 orig_cos = "origins/%s/%s%s" % (openid[:8], job_id, ext)
                 cleanup.schedule("cos", orig_cos, time.time() + ORIGINAL_TTL_SECONDS)
                 with open(orig_path, "rb") as fh:
                     cos_put(settings, orig_cos, fh.read())
-                result_cos = "results/%s/%s.jpg" % (openid[:8], job_id)
             except CosError as exc:
                 log.warning("[%s] COS 登记失败，回退本地存储: %s", job_id, exc)
-                orig_cos = result_cos = None
+                orig_cos = None
 
         jobs.create(
             job_id,
@@ -1046,6 +1051,8 @@ def _run_pipeline(job_id: str, quality: str, style: str,
     stage = "normalize"
     provider_used = None
     template = template or {}
+    if template:
+        aspect_ratio = ""
     try:
         # --- 1. 归一化（包含画幅裁剪）---
         _normalize_long_side(src, norm, target=settings.normalize_long_side(),
@@ -1140,7 +1147,7 @@ def _run_pipeline(job_id: str, quality: str, style: str,
             import cv2
             _n_img = cv2.imread(norm)
             _t_img = cv2.imread(tmp)
-            if _n_img is not None and _t_img is not None:
+            if not template and _n_img is not None and _t_img is not None:
                 nh, nw = _n_img.shape[:2]
                 th, tw = _t_img.shape[:2]
                 norm_ratio = nw / float(nh) if nh > 0 else 1.0
@@ -1189,16 +1196,30 @@ def _run_pipeline(job_id: str, quality: str, style: str,
         current = jobs.get(job_id)
         if not current or current.get("deleted_at"):
             raise RuntimeError("作品已删除，停止交付")
-        if job.get("result_cos"):
-            try:
-                # Crash-safe provisional expiry, tightened after completion.
-                cleanup.schedule("cos", job["result_cos"], time.time() + 2 * JOB_TTL_SECONDS)
-                with open(out, "rb") as fh:
-                    cos_put(settings, job["result_cos"], fh.read())
-            except CosError as exc:
-                log.warning("[%s] 结果传 COS 失败，退本地直链: %s", job_id, exc)
-                cleanup.schedule("cos", job["result_cos"], time.time())
-                jobs.update(job_id, result_cos=None)
+        result_key = job.get("result_cos")
+        if settings.cos_ready() and not result_key:
+            result_key = "results/%s/%s.jpg" % (job["openid"][:8], job_id)
+            jobs.update(job_id, result_cos=result_key)
+            job["result_cos"] = result_key
+        if result_key:
+            stage = "store_cos"
+            jobs.update(job_id, stage=stage)
+            cleanup.schedule("cos", result_key, time.time() + 2 * JOB_TTL_SECONDS)
+            with open(out, "rb") as fh:
+                payload = fh.read()
+            for attempt in range(2):
+                try:
+                    cos_put(settings, result_key, payload)
+                    if not cos_head(settings, result_key):
+                        raise CosError("结果上传后未能确认 COS 对象存在")
+                    break
+                except CosError as exc:
+                    # PUT 响应丢失但对象已保存时，不误判交付失败。
+                    if cos_head(settings, result_key):
+                        break
+                    if attempt:
+                        raise CosError("结果保存到 COS 失败，请重试；本次光子将退回", code="RESULT_STORAGE_FAILED") from exc
+                    log.warning("[%s] 结果存储失败，重试一次: %s", job_id, exc)
         jobs.update(job_id, status="succeeded", stage="done",
                     provider=provider_used, completed_at=time.time(), width=width, height=height)
         current = jobs.get(job_id)
@@ -1844,19 +1865,19 @@ def complete_upload(upload_id: str, request: Request):
 
 def _chosen_quality(req_q: str, tpl_quality: str) -> str:
     """引擎档位：模板模式跟模板走（与 _resolve_template 的文档口径一致），
-    纯修复模式用用户选择的档位，缺省 fine。"""
+    纯修复模式用用户选择的档位，缺省 light。"""
     if tpl_quality:
         return tpl_quality
     if req_q in ("light", "fine"):
         return req_q
-    return "fine"
+    return "light"
 
 
 @app.post("/api/rescue")
 def create_rescue_job(
     request: Request,
     image: UploadFile = File(...),
-    quality: str = Form("fine"),
+    quality: str = Form("light"),
     style: str = Form(""),
     template_id: str = Form(""),
     text_fields: str = Form(""),
@@ -2013,6 +2034,52 @@ def query_job_status(job_id: str, request: Request):
         "result_url": _job_media_url(job, "result"),
         "created_at": job.get("created_at"),
     }
+
+
+@app.post("/api/jobs/{job_id}/refresh-media")
+def refresh_job_media(job_id: str, request: Request, kind: str = "result"):
+    """404 修复只返回新 COS 地址，图片补存仅走 COS 内网，不走客户端图片代理。"""
+    user = _current_user(request)
+    job_id = _safe_job_id(job_id)
+    if kind not in ("orig", "result"):
+        raise HTTPException(status_code=400, detail="图片类型错误")
+    with _media_repair_lock:
+        job = jobs.get(job_id)
+        if not job or job.get("deleted_at") or job.get("openid") != user["openid"]:
+            raise HTTPException(status_code=404, detail="作品不存在")
+        if job.get("status") != "succeeded":
+            raise HTTPException(status_code=409, detail="作品尚未完成")
+        if time.time() >= _media_expires_at(job, kind):
+            raise HTTPException(status_code=410, detail="原图已到保存期限" if kind == "orig" else "作品已到保存期限")
+        if not settings.cos_ready():
+            raise HTTPException(status_code=503, detail="COS 尚未配置完整")
+        key = job.get(kind + "_cos")
+        if key and cos_head(settings, key):
+            return {"url": _job_media_url(job, kind), "recovered": False}
+        filename = job.get(kind + "_file")
+        path = _resolve_upload(filename) if filename else ""
+        if not path or not os.path.isfile(path):
+            raise HTTPException(status_code=404, detail="COS 结果缺失，服务器本地副本也不存在" if kind == "result" else "原图文件已缺失")
+        # 新对象键避开旧键可能遗留的立即删除队列；不延长原有保存期限。
+        ext = os.path.splitext(filename)[1]
+        prefix = "results" if kind == "result" else "origins"
+        recovered_key = "%s/%s/%s_recovered_%s%s" % (prefix, user["openid"][:8], job_id, uuid.uuid4().hex[:8], ext)
+        expires = _media_expires_at(job, kind)
+        cleanup.schedule("cos", recovered_key, expires)
+        try:
+            with open(path, "rb") as fh:
+                cos_put(settings, recovered_key, fh.read(), content_type=_media_type(path), internal_only=True)
+            if not cos_head(settings, recovered_key):
+                raise CosError("补存后未能确认 COS 对象存在")
+        except CosError as exc:
+            cleanup.schedule("cos", recovered_key, time.time())
+            raise HTTPException(status_code=503, detail="COS 内网补存失败，未使用公网图片中转；请检查同地域内网配置") from exc
+        current = jobs.get(job_id)
+        if not current or current.get("deleted_at") or time.time() >= expires:
+            cleanup.schedule("cos", recovered_key, time.time())
+            raise HTTPException(status_code=410, detail="作品已删除或到期")
+        jobs.update(job_id, **{kind + "_cos": recovered_key})
+        return {"url": _job_media_url(jobs.get(job_id), kind), "recovered": True}
 
 
 @app.get("/api/my/jobs")

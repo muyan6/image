@@ -111,6 +111,8 @@ class UserStore:
                 self._conn.execute("ALTER TABLE users ADD COLUMN account_type TEXT NOT NULL DEFAULT ''")
             if "app_id" not in cols:
                 self._conn.execute("ALTER TABLE users ADD COLUMN app_id TEXT NOT NULL DEFAULT ''")
+            if "admin_hidden" not in cols:
+                self._conn.execute("ALTER TABLE users ADD COLUMN admin_hidden INTEGER NOT NULL DEFAULT 0")
             # Historical auth had exactly two namespaces. Keep every balance/job;
             # split IP-derived web visitors from mini-program accounts, don't merge.
             self._conn.execute("UPDATE users SET account_type='web' WHERE account_type='' AND openid LIKE 'web-%'")
@@ -251,7 +253,7 @@ class UserStore:
             return True, int(balance) + reward, count + 1
 
     _USER_COLS = ("openid, created_at, last_seen, total_jobs, blocked, "
-                  "balance, invite_code, banned, account_type, app_id")
+                  "balance, invite_code, banned, account_type, app_id, admin_hidden")
 
     @staticmethod
     def _user_row(row) -> Dict[str, Any]:
@@ -259,6 +261,7 @@ class UserStore:
                 "total_jobs": row[3], "blocked": row[4],
                 "balance": int(row[5] or 0), "invite_code": row[6] or "",
                 "banned": bool(row[7]), "account_type": row[8], "app_id": row[9],
+                "admin_hidden": bool(row[10]),
                 "user_id": public_user_id(row[0], row[8])}
 
     def ensure_user(self, openid: str, account_type: Optional[str] = None,
@@ -276,7 +279,7 @@ class UserStore:
             self._conn.execute(
                 "INSERT INTO users(openid, created_at, last_seen, balance, invite_code,account_type,app_id) "
                 "VALUES(?,?,?,?,?,?,?) "
-                "ON CONFLICT(openid) DO UPDATE SET last_seen=excluded.last_seen,"
+                "ON CONFLICT(openid) DO UPDATE SET last_seen=excluded.last_seen,admin_hidden=0,"
                 "app_id=CASE WHEN users.app_id='' THEN excluded.app_id ELSE users.app_id END",
                 (openid, now, now, WELCOME_BALANCE, code, kind, app_id))
             # 老用户补发邀请码（一次迁移）
@@ -293,7 +296,17 @@ class UserStore:
         """Activity is not registration; cap writes to one per five minutes."""
         now = time.time()
         with self._lock, self._conn:
-            self._conn.execute("UPDATE users SET last_seen=? WHERE openid=? AND last_seen<?", (now, openid, now - 300))
+            self._conn.execute("UPDATE users SET last_seen=?,admin_hidden=0 "
+                               "WHERE openid=? AND (last_seen<? OR admin_hidden=1)", (now, openid, now - 300))
+
+    def hide_from_admin(self, openid: str) -> bool:
+        """Remove from management lists, not authentication, balances, works or bans."""
+        with self._lock, self._conn:
+            found = self._conn.execute("UPDATE users SET admin_hidden=1 WHERE openid=?", (openid,)).rowcount
+            if found:
+                self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
+                                   (time.time(), openid, "admin_cleanup_user", "仅移除管理列表，再次活跃自动恢复"))
+            return bool(found)
 
     def get_user(self, openid: str) -> Optional[Dict[str, Any]]:
         with self._lock:
@@ -456,7 +469,7 @@ class UserStore:
         if account_type not in (*ACCOUNT_TYPES, "all"):
             raise ValueError("账号来源只能是 wechat、web 或 all")
         with self._lock:
-            where = "" if account_type == "all" else " WHERE account_type=?"
+            where = " WHERE admin_hidden=0" + ("" if account_type == "all" else " AND account_type=?")
             params = (limit,) if account_type == "all" else (account_type, limit)
             rows = self._conn.execute(
                 "SELECT %s FROM users%s ORDER BY last_seen DESC LIMIT ?" % (self._USER_COLS, where), params).fetchall()
@@ -467,7 +480,7 @@ class UserStore:
         with self._lock:
             counts = {kind: (count, today) for kind, count, today in self._conn.execute(
                 "SELECT account_type,COUNT(*),SUM(CASE WHEN created_at>=? THEN 1 ELSE 0 END) "
-                "FROM users GROUP BY account_type", (midnight,)).fetchall()}
+                "FROM users WHERE admin_hidden=0 GROUP BY account_type", (midnight,)).fetchall()}
             wechat_total, wechat_today = counts.get("wechat", (0, 0))
             web_total, web_today = counts.get("web", (0, 0))
             blocked_today = self._conn.execute(

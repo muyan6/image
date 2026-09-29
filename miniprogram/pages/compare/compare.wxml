@@ -31,6 +31,11 @@
       binderror="onResultError"
     ></image>
 
+    <view class="media-notice media-notice-result" wx:if="{{ resultError }}" catchtap="onRetryMedia">
+      <text>{{ resultError }}</text><text>点击重新加载</text>
+    </view>
+    <view class="media-loading" wx:if="{{ loadingMedia && !resultUrl }}"><text>正在加载图片…</text></view>
+
     <!-- 顶层：原画裁剪遮罩层
          用 overflow:hidden 限宽裁切，内层原画锁定为整个舞台的实测像素尺寸，
          与底层结果图共用同一个 aspectFit 缩放基准，杜绝对比滑块左右错位。 -->
@@ -45,6 +50,10 @@
         mode="aspectFit"
         binderror="onOrigError"
       ></image>
+    </view>
+
+    <view class="media-notice media-notice-original" wx:if="{{ originalError }}" catchtap="onRetryMedia">
+      <text>{{ originalError }}</text><text>点击重新加载</text>
     </view>
 
     <!-- 浮动典藏标签 -->

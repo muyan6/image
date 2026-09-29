@@ -530,6 +530,7 @@
             </select>
             <button class="btn-ghost btn-small" onclick="loadUsers()">刷新</button>
           </div>
+          <p class="muted">删除仅从管理列表与人数统计中移除，不封禁、不清空余额或作品；用户再次使用时自动显示。</p>
           <div class="table-wrap"><table id="users-table"></table></div>
         </div>
       </section>
@@ -1397,7 +1398,7 @@ async function loadUsers() {
     const data = await api("/users?limit=30&account_type=" + encodeURIComponent(source));
     const counts = data.stats || {};
     $("users-summary").textContent = "微信账号 " + (counts.wechat_users_total ?? 0) +
-      " · 网页访客 " + (counts.web_users_total ?? 0) + "（旧记录保留，按来源区分）";
+      " · 网页访客 " + (counts.web_users_total ?? 0) + "（当前管理列表，按来源区分）";
     const t = $("users-table");
     t.innerHTML = "<thead><tr><th>固定账号编号</th><th>来源 / AppID</th><th>首次使用</th><th>最近活跃</th><th>已修图</th><th>被拦截</th><th>光子余额</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody>";
     const tbody = t.tBodies[0];
@@ -1412,14 +1413,15 @@ async function loadUsers() {
         `<td>${u.total_jobs}</td><td>${u.blocked}</td><td>✦ ${u.balance ?? 0}</td>` +
         `<td>${u.banned ? '<span class="badge red">已封禁</span>' : '<span class="badge">正常</span>'}</td>` +
         `<td><button class="btn-ghost" data-act="bal" style="padding:3px 10px;font-size:12px" data-oid="${esc(u.openid)}" data-bal="${u.balance ?? 0}">改光子</button> ` +
-        `<button class="btn-danger" data-act="ban" style="padding:3px 10px;font-size:12px" data-oid="${esc(u.openid)}" data-banned="${u.banned ? 1 : 0}">${u.banned ? "解封" : "封禁"}</button></td>`;
+        `<button class="btn-danger" data-act="ban" style="padding:3px 10px;font-size:12px" data-oid="${esc(u.openid)}" data-banned="${u.banned ? 1 : 0}">${u.banned ? "解封" : "封禁"}</button> ` +
+        `<button class="btn-ghost" data-act="cleanup" style="padding:3px 10px;font-size:12px" data-oid="${esc(u.openid)}" title="只清理管理列表，再次使用自动显示">删除</button></td>`;
       tbody.appendChild(tr);
     });
     if (!data.items.length) tbody.innerHTML = '<tr><td colspan="9" class="empty">该来源下还没有账号</td></tr>';
   } catch (e) { console.error(e); }
 }
 
-/* ---------- 用户操作：改光子 / 封禁 ---------- */
+/* ---------- 用户操作：改光子 / 封禁 / 清理管理列表 ---------- */
 $("users-table").addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-act]");
   if (!btn) return;
@@ -1437,6 +1439,13 @@ $("users-table").addEventListener("click", async (e) => {
     try {
       const r = await api("/users/" + encodeURIComponent(oid) + "/balance", { method: "PUT", body });
       alert("已更新，当前余额 ✦" + r.balance);
+      loadUsers();
+    } catch (err) { alert("失败: " + err.message); }
+  } else if (btn.dataset.act === "cleanup") {
+    if (!confirm("从管理列表删除此用户？\n不封禁，不删除余额与作品；用户再次使用会自动显示。")) return;
+    try {
+      await api("/users/" + encodeURIComponent(oid), { method: "DELETE" });
+      toast("已从管理列表移除");
       loadUsers();
     } catch (err) { alert("失败: " + err.message); }
   } else if (btn.dataset.act === "ban") {
