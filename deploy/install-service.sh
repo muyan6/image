@@ -25,6 +25,8 @@ SUDO=""
 RUN_USER="${SUDO_USER:-$(id -un)}"
 
 step() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
+ok()   { printf '\033[1;32m[OK]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[警告]\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m[失败]\033[0m %s\n' "$*"; exit 1; }
 
 command -v systemctl >/dev/null 2>&1 || die "本机没有 systemd，请直接用 start.sh/stop.sh 方式运行"
