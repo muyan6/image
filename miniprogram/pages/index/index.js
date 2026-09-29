@@ -170,7 +170,7 @@ Page({
       count: 1,
       mediaType: ['image'],
       sourceType: ['album', 'camera'],
-      sizeType: ['compressed', 'original'],
+      sizeType: ['original', 'compressed'],
       success: (res) => {
         const file = res.tempFiles[0];
         if (!file || !file.tempFilePath) return;

@@ -306,10 +306,21 @@ Page({
     });
 
     const filePath = this.data.imagePath;
-    wx.compressImage({
-      src: filePath,
-      quality: 90,
-      success: (res) => this.executeUpload(res.tempFilePath || filePath),
+    // 小于 6MB 的照片直接无损上传，保留全部高频细节；超大原图才做轻微压缩
+    wx.getFileInfo({
+      filePath: filePath,
+      success: (finfo) => {
+        if (finfo && finfo.size && finfo.size > 6 * 1024 * 1024) {
+          wx.compressImage({
+            src: filePath,
+            quality: 92,
+            success: (res) => this.executeUpload(res.tempFilePath || filePath),
+            fail: () => this.executeUpload(filePath)
+          });
+        } else {
+          this.executeUpload(filePath);
+        }
+      },
       fail: () => this.executeUpload(filePath)
     });
   },
