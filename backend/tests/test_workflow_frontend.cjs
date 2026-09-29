@@ -133,6 +133,26 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
     await p.executeUpload('photo.jpg');assert.equal(submissions[0].template_id,'poster');assert.equal(submissions[0].aspect_ratio,undefined);
     p.data.selectedTemplate=null;await p.executeUpload('photo.jpg');assert.equal(submissions[1].quality,'light');assert.equal(submissions[1].aspect_ratio,'9:16');
   });
+  await test('pending_upload_cannot_be_misreported_as_background_job',async()=>{
+    let toast='',navigated=0;
+    const p=page('adjust',{}, {showToast:o=>{toast=o.title;},navigateTo:()=>navigated++});
+    p._foreground=true;p.data.processing=true;p.data.currentJobId=null;
+    p.onCancelOrMinimizeWait();
+    assert.equal(p.data.processing,true);assert.equal(p._foreground,true);
+    assert.equal(navigated,0);assert(toast.includes('尚未提交'));
+  });
+  await test('uncertain_submission_redirects_to_works_instead_of_second_charge',async()=>{
+    let submits=0,fileInfoCalls=0,modal;
+    const api={submitJob:async()=>{submits++;const e=new Error('请求超时');e.jobSubmissionAttempted=true;throw e;}};
+    const p=page('adjust',api,{getFileInfo:()=>fileInfoCalls++,showModal:o=>{modal=o;}});
+    p._foreground=true;p.data.freeMode=true;p.data.imagePath='fixture.jpg';
+    await p.executeUpload('fixture.jpg');assert.equal(modal.title,'提交状态待确认');
+    await p.onStartGenerate();assert.equal(submits,1);assert.equal(fileInfoCalls,0);
+  });
+  await test('accepted_job_can_still_be_backgrounded',async()=>{
+    const p=page('adjust');p._foreground=true;p.data.processing=true;p.data.currentJobId='abcdef123456';
+    p.onCancelOrMinimizeWait();assert.equal(p.data.processing,false);assert.equal(p._foreground,false);
+  });
   await test('saving_uses_local_result_without_network_or_waiting_for_original',async()=>{
     let saved;
     const p=page('compare',{downloadJobMedia:()=>{throw new Error('no network');}},

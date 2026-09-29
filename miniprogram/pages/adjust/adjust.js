@@ -31,6 +31,10 @@ Page({
 
     // 模板文字排版字段（模板非空时展示，值随任务提交给后端排版引擎）
     textValues: {},
+    customPrompt: '',
+    showViolationFeedback: false,
+    violationId: '',
+    feedbackText: '',
 
     // 用户与权益
     lightPoints: 0,
@@ -297,8 +301,42 @@ Page({
   },
 
   /** 点击【开始生成】 */
+  onCustomPromptInput(e) {
+    this.setData({ customPrompt: e.detail.value || '' });
+  },
+
+  onFeedbackInput(e) {
+    this.setData({ feedbackText: e.detail.value || '' });
+  },
+
+  onCloseViolationFeedback() {
+    this.setData({ showViolationFeedback: false });
+  },
+
+  async onSubmitViolationFeedback() {
+    const message = this.data.feedbackText.trim();
+    if (!message) { wx.showToast({title: '请填写误判说明', icon: 'none'}); return; }
+    try {
+      await api.submitViolationFeedback(this.data.violationId, message);
+      this.setData({ showViolationFeedback: false, feedbackText: '' });
+      wx.showToast({title: '反馈已提交', icon: 'success'});
+    } catch (err) {
+      wx.showToast({title: err.message || '提交失败', icon: 'none'});
+    }
+  },
+
   async onStartGenerate() {
     if (this.data.processing) return;
+    if (this._submissionUncertain) {
+      wx.showModal({
+        title: '提交状态待确认',
+        content: '上次请求可能已被云端接收。请先到「作品」刷新核对，避免重复生成与扣费。',
+        confirmText: '查看作品',
+        showCancel: false,
+        success: (r) => { if (r.confirm) wx.navigateTo({ url: '/pages/works/works' }); }
+      });
+      return;
+    }
 
     if (!this.data.rightsOk) {
       wx.showToast({
@@ -350,6 +388,10 @@ Page({
   },
 
   onCancelOrMinimizeWait() {
+    if (!this.data.currentJobId) {
+      wx.showToast({ title: '照片尚未提交，请稍候', icon: 'none' });
+      return;
+    }
     this._foreground = false;
     this._generation = (this._generation || 0) + 1;
     this.setData({ processing: false });
@@ -381,6 +423,7 @@ Page({
         }
       } else {
         formData.aspect_ratio = this.data.currentRatioKey;
+        if (this.data.customPrompt.trim()) formData.custom_prompt = this.data.customPrompt.trim();
       }
 
       this.setData({
@@ -506,6 +549,18 @@ Page({
         });
         return;
       }
+      if (err && err.detail && err.detail.code === 'CONTENT_VIOLATION') {
+        const detail = err.detail;
+        this.setData({ violationId: detail.violation_id || '', lightPoints: app.globalData.lightPoints });
+        wx.showModal({
+          title: detail.banned ? '账号已被封禁' : '内容违规，未生成',
+          content: `${detail.message}。本次扣除 ✦${detail.charged}，近7天违规 ${detail.weekly_count}/3 次。${detail.banned ? '账号已永久封禁，剩余点数不予退还。' : '一周内累计3次将永久封禁。'}`,
+          confirmText: '我知道了',
+          cancelText: '误判反馈',
+          success: (r) => { if (r.cancel) this.setData({showViolationFeedback: true}); }
+        });
+        return;
+      }
       // 内容安全审核拦截提示
       if (err && err.message && (err.message.includes('安全审核') || err.message.includes('审核'))) {
         wx.showModal({
@@ -513,6 +568,18 @@ Page({
           content: err.message,
           showCancel: false,
           confirmText: '我知道了'
+        });
+        return;
+      }
+
+      if (err && err.jobSubmissionAttempted) {
+        this._submissionUncertain = true;
+        wx.showModal({
+          title: '提交状态待确认',
+          content: '网络中断前任务可能已经提交。请先到「作品」刷新核对，不要立即重复上传。',
+          confirmText: '查看作品',
+          showCancel: false,
+          success: (r) => { if (r.confirm) wx.navigateTo({ url: '/pages/works/works' }); }
         });
         return;
       }
