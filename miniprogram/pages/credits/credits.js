@@ -6,10 +6,7 @@ Page({
     lightPoints: 0,
     freeMode: false,
     checkedIn: false,
-    records: [
-      { id: 'r1', title: '每日签到奖励', time: '今日', amount: 10 },
-      { id: 'r2', title: '新人光子礼包', time: '注册时', amount: 90 }
-    ]
+    records: []
   },
 
   onLoad() {

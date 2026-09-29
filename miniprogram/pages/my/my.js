@@ -24,8 +24,12 @@ Page({
     avatarUrl: '/images/logo.jpg',
     lightPoints: 0,
     freeMode: false,
+    priceLight: 1,
+    priceFine: 3,
     historyList: [],
     previewWorks: [],
+    processingCount: 0,
+    creditRecordCount: '—',
     videoTasksToday: 0,
     maxVideoTasks: DEFAULT_MAX_VIDEO_TASKS,
     videoReward: DEFAULT_VIDEO_REWARD,
@@ -34,7 +38,7 @@ Page({
   },
 
   onLoad() {
-    this.refreshUserData();
+    // tabBar 页由 onShow 首次加载并在之后每次返回时同步。
   },
 
   onShow() {
@@ -48,19 +52,47 @@ Page({
 
   refreshUserData() {
     const list = app.globalData.historyList || [];
+    const version = (this._profileLoadVersion || 0) + 1;
+    this._profileLoadVersion = version;
     this.setData({
       userId: app.globalData.userId || '登录后显示',
       lightPoints: app.globalData.lightPoints || 0,
       freeMode: !!app.globalData.freeMode,
       historyList: list,
-      previewWorks: list.slice(0, 3)
+      previewWorks: list.slice(0, 3),
+      processingCount: list.filter(w => w.status === 'processing').length
     });
 
     // 广告位配置（后台热改即时生效）：决定「看视频得光子」入口是否显示
     api.config().then((c) => {
-      if (!c || !c.ads) return;
-      this._videoAdUnitId = c.ads.rewarded_video_unit_id || '';
-      this.setData({ videoAdReady: !!c.ads.rewarded_video_ready });
+      if (!c) return;
+      const ads = c.ads || {};
+      this._videoAdUnitId = ads.rewarded_video_unit_id || '';
+      const prices = c.prices || {};
+      app.globalData.freeMode = !!c.free_mode;
+      this.setData({ videoAdReady: !!ads.rewarded_video_ready,
+        freeMode: !!c.free_mode,
+        priceLight: prices.light != null ? prices.light : this.data.priceLight,
+        priceFine: prices.fine != null ? prices.fine : this.data.priceFine });
+    }).catch(() => {});
+
+    // 新设备或清缓存后，以云端任务作为作品数量与状态的事实来源。
+    api.myJobs(100).then((result) => {
+      if (version !== this._profileLoadVersion || !result || !Array.isArray(result.jobs)) return;
+      const prior = app.globalData.historyList || [];
+      const byId = new Map(prior.filter(w => w.jobId).map(w => [w.jobId, w]));
+      const localOnly = prior.filter(w => !w.jobId);
+      const cloud = result.jobs.map(j => Object.assign({}, byId.get(j.id) || {}, {
+        jobId: j.id, original: api.absolute(j.orig_url || ''),
+        result: j.status === 'succeeded' ? api.absolute(j.result_url || '') : '',
+        status: j.status, quality: j.quality, provider: j.provider,
+        templateName: j.template_name || '', createdAt: j.created_at || 0
+      }));
+      const merged = localOnly.concat(cloud).sort((a,b) => (b.createdAt || 0) - (a.createdAt || 0));
+      app.globalData.historyList = merged;
+      app.persist();
+      this.setData({ historyList: merged, previewWorks: merged.slice(0,3),
+        processingCount: merged.filter(w => w.status === 'processing').length });
     }).catch(() => {});
 
     // 光子余额 / 视频补给进度以服务端为准
@@ -73,6 +105,10 @@ Page({
         videoTasksToday: (d.earn && d.earn.video_today) || 0
       });
     }).catch(() => {});
+  },
+
+  onHide() {
+    this._profileLoadVersion = (this._profileLoadVersion || 0) + 1;
   },
 
   onCopyUserId() {

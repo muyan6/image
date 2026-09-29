@@ -10,48 +10,22 @@
     <text class="reward-sub">好友填写你的邀请码即生效：你获得 30 光子，对方也获赠 30 光子（每人限参与一次）。</text>
 
     <view class="code-pill" bindtap="onCopyCode">
-      <text class="code-text">{{ inviteCode }}</text>
-      <text class="code-copy-btn">复制</text>
+      <text class="code-text">{{ inviteCode || (inviteError ? '邀请码获取失败' : '正在获取邀请码') }}</text>
+      <text class="code-copy-btn">{{ inviteCode ? '复制' : '重试' }}</text>
     </view>
   </view>
 
-  <!-- 2. 统计指标条 -->
-  <view class="stats-row gallery-card">
-    <view class="stat-col">
-      <text class="stat-val">0</text>
-      <text class="stat-lbl">已奖励</text>
-    </view>
-    <view class="stat-sep"></view>
-    <view class="stat-col">
-      <text class="stat-val">1</text>
-      <text class="stat-lbl">待完成</text>
-    </view>
-    <view class="stat-sep"></view>
-    <view class="stat-col">
-      <text class="stat-val">0</text>
-      <text class="stat-lbl">累计光子</text>
-    </view>
-  </view>
-
-  <!-- 3. 邀请明细 -->
+  <!-- 邀请统计与明细尚无服务端接口，不展示虚构数量或记录。 -->
   <view class="section-box">
     <text class="section-title">邀请明细</text>
     <view class="invite-list gallery-card">
       <view class="invite-item">
-        <view class="inv-user-box">
-          <image class="inv-avatar" src="/images/logo.jpg" mode="aspectFill"></image>
-          <view class="inv-meta">
-            <text class="inv-name">微信好友</text>
-            <text class="inv-date">2026 年 9 月 28 日</text>
-          </view>
-        </view>
-        <text class="inv-status-tag">待首次成功生成</text>
+        <text>当前暂不展示邀请明细；绑定成功的奖励以光子余额为准。</text>
       </view>
     </view>
   </view>
 
-  <!-- 4. 说明文案 -->
-  <text class="rule-hint">奖励每天最多计入 10 位、每月最多计入 100 位有效好友。同一设备或异常刷量邀请不会发放奖励。</text>
+  <text class="rule-hint">每位新用户仅可绑定一次邀请码；绑定成功后双方各获 30 光子。</text>
 
   <!-- 5. 底部固定主行动按钮 -->
   <view class="bottom-action-bar">

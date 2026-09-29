@@ -85,6 +85,9 @@
       <text class="section-title">光子明细</text>
     </view>
     <view class="history-list gallery-card">
+      <view class="history-item" wx:if="{{ records.length === 0 }}">
+        <text class="hist-title">暂无光子明细；余额以服务端为准。</text>
+      </view>
       <view class="history-item" wx:for="{{ records }}" wx:key="id">
         <view class="hist-info">
           <text class="hist-title">{{ item.title }}</text>

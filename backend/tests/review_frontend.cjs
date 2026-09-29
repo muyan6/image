@@ -232,6 +232,40 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}) {
       {requested,shared}];
   });
 
+  await test('invite_failure_never_exposes_fake_redeemable_code',async()=>{
+    let copied,toast;
+    const {page}=loadPage('invite',{me:async()=>{throw new Error('offline');}},appFixture(),{
+      setClipboardData:o=>{copied=o.data;},showToast:o=>{toast=o.title;}
+    });
+    page.onLoad();await tick();page.onCopyCode();
+    const share=page.onShareAppMessage();
+    return [!copied&&!share.path.includes('invite=')&&page.data.inviteCode==='',
+      {code:page.data.inviteCode,share_path:share.path,copied,toast}];
+  });
+
+  await test('credits_and_invite_pages_do_not_fabricate_account_history',()=>{
+    const credits=loadPage('credits').page;
+    const inviteXml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/invite/invite.wxml'),'utf8');
+    const creditsXml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/credits/credits.wxml'),'utf8');
+    const passed=credits.data.records.length===0&&!inviteXml.includes('2026 年 9 月 28 日')&&
+      !inviteXml.includes('待首次成功生成')&&creditsXml.includes('暂无光子明细');
+    return [passed,{default_records:credits.data.records.length,has_fake_invite:inviteXml.includes('2026 年 9 月 28 日')}];
+  });
+
+  await test('profile_syncs_cloud_works_and_current_prices',async()=>{
+    const app=appFixture([]);
+    const {page}=loadPage('my',{config:async()=>({free_mode:false,prices:{light:2,fine:5},ads:{}}),
+      me:async()=>({user_id:'WX-0123456789ABCDEF',balance:90,earn:{}}),absolute:x=>x,
+      myJobs:async()=>({jobs:[{id:'first',status:'succeeded',result_url:'cos-a',quality:'light'},
+        {id:'second',status:'processing',quality:'fine'}]})},app);
+    page.onLoad();page.onShow();await tick();await tick();
+    const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/my/my.wxml'),'utf8');
+    return [page.data.historyList.length===2&&page.data.processingCount===1&&
+      page.data.priceLight===2&&page.data.priceFine===5&&xml.includes('priceLight'),
+      {cloud_works:page.data.historyList.length,processing:page.data.processingCount,
+        light_price:page.data.priceLight,fine_price:page.data.priceFine}];
+  });
+
   await test('concurrent_login_single_flight',async()=>{
     let token='',logins=0,finish;
     const wx={getStorageSync:()=>token,setStorageSync(_,value){token=value;},

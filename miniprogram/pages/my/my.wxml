@@ -31,7 +31,7 @@
       <text class="balance-unit">光子</text>
     </view>
     <view class="black-card-foot">
-      <text class="black-card-status">{{ freeMode ? '全站免费体验中 · 无限制' : '轻量消耗 ✦1 · 精细消耗 ✦3' }}</text>
+      <text class="black-card-status">{{ freeMode ? '全站免费体验中 · 无限制' : ('轻量消耗 ✦' + priceLight + ' · 精细消耗 ✦' + priceFine) }}</text>
     </view>
   </view>
 
