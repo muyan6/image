@@ -219,6 +219,19 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}) {
       {stopped,shown:page.data.filteredTemplates.map(t=>t.id)}];
   });
 
+  await test('community_share_uses_post_image_not_project_logo',async()=>{
+    const result='https://photos.invalid/post.jpg';let requested,shared;
+    const {page}=loadPage('community',{},appFixture(),{
+      getImageInfo:o=>{requested=o.src;o.success({path:'wxfile://post.jpg'});},
+      showShareImageMenu:o=>{shared=o.path;}
+    });
+    page.onShareExhibit({currentTarget:{dataset:{resultUrl:result,title:'展品'}}});
+    await tick();
+    const wxml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/community/community.wxml'),'utf8');
+    return [requested===result&&shared==='wxfile://post.jpg'&&wxml.includes('data-result-url="{{ item.resultUrl }}"'),
+      {requested,shared}];
+  });
+
   await test('concurrent_login_single_flight',async()=>{
     let token='',logins=0,finish;
     const wx={getStorageSync:()=>token,setStorageSync(_,value){token=value;},

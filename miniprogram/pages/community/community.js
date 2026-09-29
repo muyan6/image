@@ -116,10 +116,26 @@ Page({
   },
 
   onShareExhibit(e) {
-    const title = e.currentTarget.dataset.title;
-    wx.showShareImageMenu ? wx.showShareImageMenu({ path: '/images/logo.jpg' }) : wx.showToast({
-      title: '请点击右上角【···】分享',
-      icon: 'none'
+    const url = e.currentTarget.dataset.resultUrl;
+    if (!url) {
+      wx.showToast({ title: '这件作品暂无可分享的图片', icon: 'none' });
+      return;
+    }
+    if (!wx.showShareImageMenu) {
+      wx.showToast({ title: '请点击右上角【···】分享', icon: 'none' });
+      return;
+    }
+    wx.getImageInfo({
+      src: url,
+      success: (info) => {
+        if (!info.path) {
+          wx.showToast({ title: '作品图片未加载，请重试', icon: 'none' });
+          return;
+        }
+        wx.showShareImageMenu({ path: info.path,
+          fail: () => wx.showToast({ title: '分享未完成，请重试', icon: 'none' }) });
+      },
+      fail: () => wx.showToast({ title: '作品图片未加载，请重试', icon: 'none' })
     });
   },
 

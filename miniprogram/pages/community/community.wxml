@@ -86,7 +86,7 @@
             <text class="like-icon">{{ item.liked ? '♥' : '♡' }}</text>
             <text class="like-count">{{ item.likes }}</text>
           </view>
-          <view class="share-pill" bindtap="onShareExhibit" data-title="{{ item.title }}">
+          <view class="share-pill" bindtap="onShareExhibit" data-title="{{ item.title }}" data-result-url="{{ item.resultUrl }}">
             <text class="share-icon">↗</text>
             <text class="share-text">分享</text>
           </view>
