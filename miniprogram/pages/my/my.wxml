@@ -1,0 +1,192 @@
+<view class="page-container">
+  <!-- 1. 用户身份档案卡 (Artist Dossier Card) -->
+  <view class="user-card gallery-card">
+    <view class="user-main">
+      <view class="avatar-wrap">
+        <image class="user-avatar" src="{{ avatarUrl || '/images/logo.jpg' }}" mode="aspectFill"></image>
+      </view>
+      <view class="user-info">
+        <text class="user-name">{{ nickName || '微信用户' }}</text>
+        <view class="user-id-row" bindtap="onCopyUserId">
+          <text class="user-id-text">ID {{ userId }}</text>
+          <text class="user-copy-tag">复制</text>
+        </view>
+      </view>
+    </view>
+    <view class="user-arrow" bindtap="onEditProfile">›</view>
+  </view>
+
+  <!-- 2. 可用算力黑卡 (Studio Pass Black Card) -->
+  <view class="credit-black-card" bindtap="onOpenCreditModal">
+    <view class="black-card-bg-mark">新生</view>
+    <view class="black-card-top">
+      <text class="black-card-label">可用算力 / 积分</text>
+      <view class="black-card-link">
+        <text>算力中心</text>
+        <text class="black-card-arrow">›</text>
+      </view>
+    </view>
+    <view class="black-card-balance">
+      <text class="balance-num">{{ fishTokens }}</text>
+      <text class="balance-unit">算力</text>
+    </view>
+    <view class="black-card-foot">
+      <text class="black-card-status">{{ freeMode ? '全站免费体验中 · 无限制' : '轻量消耗 1 · 精细消耗 3' }}</text>
+    </view>
+  </view>
+
+  <!-- 3. 数据指标条 (3 列数据) -->
+  <view class="stats-card gallery-card">
+    <view class="stat-col" bindtap="onScrollToWorks">
+      <text class="stat-number">{{ historyList.length }}</text>
+      <text class="stat-label">作品</text>
+    </view>
+    <view class="stat-divider"></view>
+    <view class="stat-col">
+      <text class="stat-number">{{ processingCount }}</text>
+      <text class="stat-label">生成中</text>
+    </view>
+    <view class="stat-divider"></view>
+    <view class="stat-col" bindtap="onOpenCreditModal">
+      <text class="stat-number">{{ creditRecordCount }}</text>
+      <text class="stat-label">积分记录</text>
+    </view>
+  </view>
+
+  <!-- 4. 看视频补给任务卡 (Video Bonus Card) -->
+  <view class="task-card gallery-card">
+    <view class="task-left">
+      <view class="task-play-icon">
+        <text class="play-triangle">▶</text>
+      </view>
+      <view class="task-info">
+        <text class="task-title">看视频得算力</text>
+        <text class="task-desc">完整观看一次 +10 算力</text>
+        <text class="task-progress">今日 {{ videoTasksToday }}/{{ maxVideoTasks }}</text>
+      </view>
+    </view>
+    <button
+      class="btn-ink task-btn {{ videoTasksToday >= maxVideoTasks ? 'task-btn-disabled' : '' }}"
+      bindtap="onWatchVideo"
+    >
+      {{ videoTasksToday >= maxVideoTasks ? '已领完' : '观看补给' }}
+    </button>
+  </view>
+
+  <!-- 5. 我的作品展区 (My Works Section) -->
+  <view class="works-section" id="works-area">
+    <view class="section-header">
+      <view class="section-title-wrap">
+        <text class="section-title">我的作品</text>
+        <text class="section-subtitle">历史装裱与修复</text>
+      </view>
+      <text
+        wx:if="{{ historyList.length > 0 }}"
+        class="section-clear-btn"
+        bindtap="onClearWorks"
+      >清空记录</text>
+    </view>
+
+    <!-- 作品网格 -->
+    <view wx:if="{{ historyList.length > 0 }}" class="works-grid">
+      <view
+        wx:for="{{ historyList }}"
+        wx:key="jobId"
+        class="work-card gallery-card"
+        bindtap="onPreviewWork"
+        data-index="{{ index }}"
+      >
+        <image class="work-thumb" src="{{ item.result }}" mode="aspectFill"></image>
+        <view class="work-tag">
+          <text>{{ item.quality === 'fine' ? '2K精细' : '1.5K' }}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 作品空状态 -->
+    <view wx:else class="works-empty gallery-card">
+      <text class="empty-text">还没有作品。完成一次创作后，它会出现在这里。</text>
+      <button class="btn-line empty-action-btn" bindtap="onGoCreate">
+        去创作第一张照片 →
+      </button>
+    </view>
+  </view>
+
+  <!-- 6. 服务与设置菜单列表 (Service Menu List) -->
+  <view class="menu-card gallery-card">
+    <view class="menu-item" bindtap="onOpenOrders">
+      <text class="menu-label">积分与订单</text>
+      <text class="menu-arrow">›</text>
+    </view>
+    <view class="menu-divider"></view>
+
+    <view class="menu-item" bindtap="onOpenInvite">
+      <text class="menu-label">邀请记录</text>
+      <text class="menu-arrow">›</text>
+    </view>
+    <view class="menu-divider"></view>
+
+    <view class="menu-item" bindtap="onOpenPrivacy">
+      <text class="menu-label">隐私说明</text>
+      <text class="menu-arrow">›</text>
+    </view>
+    <view class="menu-divider"></view>
+
+    <view class="menu-item" bindtap="onOpenRetention">
+      <text class="menu-label">照片保存期限</text>
+      <text class="menu-arrow">›</text>
+    </view>
+    <view class="menu-divider"></view>
+
+    <view class="menu-item" bindtap="onContactSupport">
+      <text class="menu-label">联系客服与反馈</text>
+      <text class="menu-arrow">›</text>
+    </view>
+    <view class="menu-divider"></view>
+
+    <view class="menu-item menu-item-danger" bindtap="onClearStorage">
+      <text class="menu-label menu-danger-text">清理缓存数据</text>
+      <text class="menu-arrow">›</text>
+    </view>
+  </view>
+
+  <!-- 底部微标 -->
+  <view class="dossier-footer">
+    <text class="dossier-brand">废片新生所 · 典藏个人档案</text>
+    <text class="dossier-ver">VERSION 2.4 · 艺术策展引擎</text>
+  </view>
+
+  <!-- 算力补给模态框 -->
+  <view wx:if="{{ showCreditModal }}" class="modal-backdrop" bindtap="onCloseCreditModal">
+    <view class="modal-card gallery-card credit-modal-box" catchtap="true">
+      <view class="washi-tape"></view>
+      <view class="modal-head">
+        <text class="modal-head-title">算力中心</text>
+        <text class="modal-close" bindtap="onCloseCreditModal">✕</text>
+      </view>
+      <view class="modal-body">
+        <view class="credit-stat">
+          <text class="stat-caption">当前剩余可用算力</text>
+          <text class="stat-number-large">{{ freeMode ? '无限制 (全站免费)' : (fishTokens + ' 算力') }}</text>
+        </view>
+        <view class="credit-info-list">
+          <view class="info-row">
+            <text class="info-dot">●</text>
+            <text class="info-text">轻量修复：1 算力 / 张（约 3 秒）</text>
+          </view>
+          <view class="info-row">
+            <text class="info-dot">●</text>
+            <text class="info-text">精细 2K 超分：3 算力 / 张（发丝级重构）</text>
+          </view>
+          <view class="info-row">
+            <text class="info-dot">●</text>
+            <text class="info-text">观看短视频奖励：每次 +10 算力</text>
+          </view>
+        </view>
+        <button class="btn-ink modal-claim-btn" bindtap="onFreeClaim">
+          立即领取日常补给 +5 算力
+        </button>
+      </view>
+    </view>
+  </view>
+</view>

@@ -3,7 +3,7 @@
   <view class="nav-bar">
     <view class="nav-brand">
       <image class="brand-logo" src="/images/logo.jpg" mode="aspectFit"></image>
-      <text class="brand-name">光影画质修复</text>
+      <text class="brand-name">废片新生所</text>
     </view>
     <view class="credit-pill" bindtap="onOpenCreditModal">
       <text class="credit-icon">⚡</text>
@@ -40,6 +40,49 @@
         <text class="portal-desc">点击从手机相册选择，或现场拍照</text>
         <text class="portal-specs">支持 JPG / PNG / WebP · 自动适配超清</text>
       </view>
+    </view>
+
+    <!-- 最近上新 · 艺术画廊精选卡卷 -->
+    <view class="showcase-section">
+      <view class="showcase-header">
+        <view class="showcase-title-wrap">
+          <text class="showcase-title">最近上新 · 新风格展</text>
+          <text class="showcase-subtitle">精选画廊配方</text>
+        </view>
+        <view class="showcase-link" bindtap="onGoToTemplates">
+          <text>查看全部风格</text>
+          <text class="link-arrow">›</text>
+        </view>
+      </view>
+
+      <scroll-view class="showcase-scroll" scroll-x enable-flex show-scrollbar="{{ false }}">
+        <view
+          wx:for="{{ featuredTemplates }}"
+          wx:key="id"
+          class="showcase-card gallery-card"
+          bindtap="onSelectFeaturedTemplate"
+          data-template="{{ item }}"
+        >
+          <view class="showcase-cover-wrap">
+            <image
+              class="showcase-cover"
+              src="{{ item.coverUrl || '/images/logo.jpg' }}"
+              mode="aspectFill"
+            ></image>
+            <view class="showcase-tag">
+              <text>{{ item.engine === 'fine' ? '精细重构' : '质感增强' }}</text>
+            </view>
+          </view>
+          <view class="showcase-info">
+            <text class="showcase-name">{{ item.name }}</text>
+            <text class="showcase-desc">{{ item.subtitle }}</text>
+            <view class="showcase-foot">
+              <text class="showcase-cost">{{ freeMode ? '免扣费' : (item.price > 0 ? (item.price + ' 算力') : '免费体验') }}</text>
+              <text class="showcase-action">使用风格 ›</text>
+            </view>
+          </view>
+        </view>
+      </scroll-view>
     </view>
 
     <!-- 底部历史记录轻量入口 (不堆砌) -->
@@ -123,6 +166,16 @@
     <view class="panel-controls">
       <!-- 状态 2 (READY)：画质档位选择 + 【拯救这张照片】 -->
       <view wx:if="{{ state === 'ready' }}" class="ready-controls">
+        <!-- 当前应用模板提示条 (若有) -->
+        <view wx:if="{{ activeTemplate }}" class="active-template-pill gallery-card">
+          <view class="tpl-pill-left">
+            <text class="tpl-pill-tag">艺术风格</text>
+            <text class="tpl-pill-name">{{ activeTemplate.name }}</text>
+            <text class="tpl-pill-sub">{{ activeTemplate.engine === 'fine' ? '2K精细' : '1.5K轻量' }}</text>
+          </view>
+          <text class="tpl-pill-cancel" bindtap="onClearTemplate">✕ 恢复纯修复</text>
+        </view>
+
         <view class="quality-selector">
           <view
             class="quality-tab {{ currentQuality === 'light' ? 'tab-active' : '' }}"

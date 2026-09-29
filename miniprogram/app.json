@@ -1,14 +1,49 @@
 {
   "pages": [
     "pages/index/index",
+    "pages/templates/templates",
+    "pages/community/community",
+    "pages/my/my",
     "pages/compare/compare"
   ],
   "window": {
     "backgroundTextStyle": "dark",
     "navigationBarBackgroundColor": "#f5f2eb",
-    "navigationBarTitleText": "光影画质修复",
+    "navigationBarTitleText": "废片新生所",
     "navigationBarTextStyle": "black",
     "backgroundColor": "#f5f2eb"
+  },
+  "tabBar": {
+    "color": "#8e887f",
+    "selectedColor": "#1a1917",
+    "backgroundColor": "#faf8f4",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "创作",
+        "iconPath": "images/tabbar/create.png",
+        "selectedIconPath": "images/tabbar/create_active.png"
+      },
+      {
+        "pagePath": "pages/templates/templates",
+        "text": "模板",
+        "iconPath": "images/tabbar/template.png",
+        "selectedIconPath": "images/tabbar/template_active.png"
+      },
+      {
+        "pagePath": "pages/community/community",
+        "text": "社区",
+        "iconPath": "images/tabbar/community.png",
+        "selectedIconPath": "images/tabbar/community_active.png"
+      },
+      {
+        "pagePath": "pages/my/my",
+        "text": "我的",
+        "iconPath": "images/tabbar/my.png",
+        "selectedIconPath": "images/tabbar/my_active.png"
+      }
+    ]
   },
   "style": "v2",
   "sitemapLocation": "sitemap.json"

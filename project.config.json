@@ -23,11 +23,12 @@
     "lazyCodeLoading": "requiredComponents"
   },
   "libVersion": "3.3.4",
-  "appid": "touristappid",
+  "appid": "wxd949d2fa89679215",
   "projectname": "image",
   "condition": {},
   "editorSetting": {
     "tabIndent": "insertSpaces",
     "tabSize": 2
-  }
+  },
+  "isGameTourist": false
 }

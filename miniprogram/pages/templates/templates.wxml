@@ -1,0 +1,122 @@
+<view class="page-container">
+  <!-- 顶部策展导语 -->
+  <view class="catalog-header">
+    <text class="catalog-eyebrow">废片新生所 · 风格图鉴</text>
+    <text class="catalog-headline">探索照片的第二种可能</text>
+    <text class="catalog-desc">从微米级画质超分，到跨越时空的画风重构</text>
+  </view>
+
+  <!-- 分类筛选项 (艺术纸本印泥胶囊) -->
+  <scroll-view class="category-bar" scroll-x enable-flex show-scrollbar="{{ false }}">
+    <view
+      wx:for="{{ categories }}"
+      wx:key="id"
+      class="cat-chip {{ activeCategory === item.id ? 'cat-chip-active' : '' }}"
+      bindtap="onSelectCategory"
+      data-id="{{ item.id }}"
+    >
+      <text class="cat-chip-text">{{ item.name }}</text>
+      <text class="cat-chip-count" wx:if="{{ item.count > 0 }}">({{ item.count }})</text>
+    </view>
+  </scroll-view>
+
+  <!-- 模板展柜卡片流 (双列艺术画框网格) -->
+  <view class="templates-grid">
+    <view
+      wx:for="{{ filteredTemplates }}"
+      wx:key="id"
+      class="template-card gallery-card"
+      bindtap="onOpenDetail"
+      data-template="{{ item }}"
+    >
+      <view class="card-cover-box">
+        <image
+          class="card-cover-img"
+          src="{{ item.coverUrl || '/images/logo.jpg' }}"
+          mode="aspectFill"
+          lazy-load
+        ></image>
+        <view class="card-badge card-engine-badge">
+          <text>{{ item.engine === 'fine' ? '2K精细' : '1.5K轻量' }}</text>
+        </view>
+        <view class="card-group-tag" wx:if="{{ item.group_name }}">
+          <text>{{ item.group_name }}</text>
+        </view>
+      </view>
+
+      <view class="card-content">
+        <view class="card-name-row">
+          <text class="card-name">{{ item.name }}</text>
+          <text class="card-cost">{{ item.price > 0 ? (item.price + ' 算力') : '免费体验' }}</text>
+        </view>
+        <text class="card-subtitle">{{ item.subtitle }}</text>
+        
+        <view class="card-action-bar">
+          <text class="card-action-label">装裱创作</text>
+          <text class="card-action-arrow">→</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 空状态 (当分类下无模板时) -->
+  <view wx:if="{{ filteredTemplates.length === 0 && !loading }}" class="empty-state">
+    <text class="empty-icon">◌</text>
+    <text class="empty-title">该展区暂无风格</text>
+    <text class="empty-sub">策展人正在调制全新的光影配方…</text>
+  </view>
+
+  <!-- 底部风格说明注记 -->
+  <view class="catalog-footer">
+    <view class="footer-divider"></view>
+    <text class="footer-note">废片新生所 · 每一张模板均基于真实影调深度微调</text>
+    <text class="footer-sub">保留面部特征与原图光影骨架 · 杜绝假人与塑料感</text>
+  </view>
+
+  <!-- 模板装裱详情模态框 (点击卡片展开) -->
+  <view wx:if="{{ selectedItem }}" class="modal-backdrop" bindtap="onCloseDetail">
+    <view class="modal-card gallery-card detail-modal" catchtap="true">
+      <view class="washi-tape"></view>
+      
+      <view class="detail-header">
+        <view class="detail-tags">
+          <text class="detail-group-pill">{{ selectedItem.group_name || '风格工坊' }}</text>
+          <text class="detail-engine-pill">{{ selectedItem.engine === 'fine' ? '2K精细超分' : '1.5K轻量增强' }}</text>
+        </view>
+        <text class="modal-close" bindtap="onCloseDetail">✕</text>
+      </view>
+
+      <view class="detail-cover-stage">
+        <image
+          class="detail-stage-img"
+          src="{{ selectedItem.coverUrl || '/images/logo.jpg' }}"
+          mode="aspectFill"
+        ></image>
+      </view>
+
+      <view class="detail-body">
+        <text class="detail-title">{{ selectedItem.name }}</text>
+        <text class="detail-subtitle">{{ selectedItem.subtitle }}</text>
+
+        <view class="detail-info-card">
+          <view class="info-metric">
+            <text class="metric-label">重构模式</text>
+            <text class="metric-value">{{ selectedItem.engine === 'fine' ? '深度纹理超分' : '光影结构重绘' }}</text>
+          </view>
+          <view class="info-metric">
+            <text class="metric-label">消耗算力</text>
+            <text class="metric-value metric-gold">{{ selectedItem.price > 0 ? (selectedItem.price + ' 点算力') : '免费体验' }}</text>
+          </view>
+          <view class="info-metric">
+            <text class="metric-label">排版特性</text>
+            <text class="metric-value">{{ selectedItem.layout ? '支持日签排版' : '原画全幅装裱' }}</text>
+          </view>
+        </view>
+
+        <button class="btn-ink apply-btn" bindtap="onApplyTemplate">
+          选用此风格，开始创作 →
+        </button>
+      </view>
+    </view>
+  </view>
+</view>

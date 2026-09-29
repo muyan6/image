@@ -21,12 +21,15 @@ Page({
     notice: null,
     showCreditModal: false,
     showHistoryModal: false,
-    saving: false
+    saving: false,
+    featuredTemplates: [],
+    activeTemplate: null
   },
 
   onLoad() {
     this.loadNotice();
     this.loadConfig();
+    this.loadTemplates();
   },
 
   onShow() {
@@ -34,6 +37,58 @@ Page({
       fishTokens: app.globalData.fishTokens,
       historyList: (app.globalData.historyList || [])
     });
+
+    // 检查是否有跨页面携带过来的模板 (例如在模板库或社区点了"做同款")
+    if (app.globalData.selectedTemplate) {
+      const tpl = app.globalData.selectedTemplate;
+      app.globalData.selectedTemplate = null;
+      this.setData({
+        activeTemplate: tpl,
+        currentQuality: tpl.engine === 'fine' ? 'fine' : 'light'
+      });
+      if (this.data.state === 'empty') {
+        this.onPickImage();
+      }
+    }
+  },
+
+  loadTemplates() {
+    api.templates()
+      .then((d) => {
+        const items = (d && d.items) || [];
+        const featured = items.slice(0, 5).map((t) => {
+          return Object.assign({}, t, {
+            coverUrl: t.cover ? api.absolute(t.cover) : '/images/logo.jpg'
+          });
+        });
+        if (featured.length > 0) {
+          this.setData({ featuredTemplates: featured });
+        }
+      })
+      .catch(() => {});
+  },
+
+  onGoToTemplates() {
+    wx.switchTab({
+      url: '/pages/templates/templates'
+    });
+  },
+
+  onSelectFeaturedTemplate(e) {
+    const tpl = e.currentTarget.dataset.template;
+    this.setData({
+      activeTemplate: tpl,
+      currentQuality: tpl.engine === 'fine' ? 'fine' : 'light'
+    });
+    if (this.data.state === 'empty') {
+      this.onPickImage();
+    } else {
+      wx.showToast({ title: '已选用：' + tpl.name, icon: 'none' });
+    }
+  },
+
+  onClearTemplate() {
+    this.setData({ activeTemplate: null });
   },
 
   loadNotice() {
@@ -149,10 +204,15 @@ Page({
 
   async doUpload(filePath) {
     const quality = this.data.currentQuality;
-    const qualityLabel = quality === 'fine' ? '精细 2K 超分重构' : '轻量 1.5K 快速修复';
+    const tpl = this.data.activeTemplate;
+    const qualityLabel = tpl ? `${tpl.name}风格重构` : (quality === 'fine' ? '精细 2K 超分重构' : '轻量 1.5K 快速修复');
 
     try {
-      const created = await api.upload(filePath, { quality });
+      const formData = { quality };
+      if (tpl && tpl.id) {
+        formData.template_id = tpl.id;
+      }
+      const created = await api.upload(filePath, formData);
       if (!created || created.code !== 0 || !created.job_id) {
         throw new Error((created && created.detail) || '服务响应异常');
       }
@@ -170,8 +230,11 @@ Page({
       });
 
       // 扣费
-      const cost = quality === 'fine' ? this.data.priceFine : this.data.priceLight;
-      if (!this.data.freeMode) {
+      let cost = quality === 'fine' ? this.data.priceFine : this.data.priceLight;
+      if (tpl && typeof tpl.price === 'number') {
+        cost = tpl.price;
+      }
+      if (!this.data.freeMode && cost > 0) {
         app.consumeToken(cost);
       }
 

@@ -1,0 +1,282 @@
+.page-container {
+  background-color: var(--paper-bg);
+  min-height: 100vh;
+  padding: 30rpx 32rpx 80rpx;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 顶部策展导语 */
+.salon-header {
+  margin-bottom: 28rpx;
+}
+
+.salon-eyebrow {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 20rpx;
+  letter-spacing: 2rpx;
+  text-transform: uppercase;
+  color: var(--accent-gold);
+  margin-bottom: 8rpx;
+}
+
+.salon-headline {
+  display: block;
+  font-family: var(--font-serif);
+  font-size: 40rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+  letter-spacing: 1rpx;
+}
+
+.salon-desc {
+  display: block;
+  font-size: 22rpx;
+  color: var(--ink-muted);
+  margin-top: 8rpx;
+}
+
+/* 分类筛选条 */
+.salon-filter-bar {
+  display: flex;
+  flex-direction: row;
+  white-space: nowrap;
+  width: 100%;
+  margin-bottom: 32rpx;
+  padding-bottom: 8rpx;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 12rpx 28rpx;
+  margin-right: 16rpx;
+  background: #ffffff;
+  border: 1rpx solid var(--paper-border);
+  color: var(--ink-muted);
+  font-size: 24rpx;
+  transition: all 0.2s ease;
+}
+
+.filter-chip-active {
+  background: var(--ink-title);
+  border-color: var(--ink-title);
+  color: #f7f4ed;
+  box-shadow: 0 4rpx 12rpx rgba(26, 25, 23, 0.12);
+}
+
+.filter-chip-text {
+  font-weight: 500;
+}
+
+/* 展品卡片流 */
+.showcase-list {
+  display: flex;
+  flex-direction: column;
+  gap: 36rpx;
+}
+
+.exhibit-card {
+  background: #ffffff;
+  border: 1rpx solid var(--paper-border);
+  padding: 28rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.exhibit-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.author-wrap {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.author-avatar {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  border: 1rpx solid var(--paper-border);
+  background: #f0ece3;
+}
+
+.author-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+}
+
+.author-name {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: var(--ink-title);
+}
+
+.author-time {
+  font-size: 18rpx;
+  color: var(--ink-faint);
+}
+
+.recipe-badge {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  background: var(--paper-card-subtle);
+  border: 1rpx solid var(--paper-border);
+  padding: 4rpx 14rpx;
+}
+
+.recipe-tag {
+  font-size: 18rpx;
+  color: var(--accent-gold);
+  font-weight: 600;
+}
+
+.recipe-name {
+  font-size: 20rpx;
+  color: var(--ink-title);
+  font-weight: 500;
+}
+
+/* 前后对比画框 */
+.compare-frame {
+  display: flex;
+  gap: 14rpx;
+  height: 380rpx;
+}
+
+.frame-photo-box {
+  flex: 3;
+  position: relative;
+  border: 1rpx solid var(--paper-border);
+  overflow: hidden;
+  background: #ebe7de;
+}
+
+.frame-photo-before {
+  flex: 2;
+  filter: brightness(0.92);
+}
+
+.frame-photo {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.frame-tag {
+  position: absolute;
+  bottom: 12rpx;
+  left: 12rpx;
+  font-size: 18rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 2rpx;
+  backdrop-filter: blur(4px);
+}
+
+.frame-tag-after {
+  background: rgba(26, 25, 23, 0.75);
+  color: #f7f4ed;
+}
+
+.frame-tag-before {
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--ink-muted);
+}
+
+/* 作品说明 */
+.exhibit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.exhibit-title {
+  font-family: var(--font-serif);
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+}
+
+.exhibit-story {
+  font-size: 22rpx;
+  color: var(--ink-body);
+  line-height: 1.5;
+}
+
+/* 底部互动与行动栏 */
+.exhibit-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 18rpx;
+  border-top: 1rpx dashed var(--paper-border);
+}
+
+.interaction-group {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+}
+
+.like-btn {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  font-size: 24rpx;
+  color: var(--ink-muted);
+  transition: color 0.15s ease;
+}
+
+.like-btn-active {
+  color: var(--accent-rust);
+}
+
+.like-icon {
+  font-size: 28rpx;
+}
+
+.like-count {
+  font-size: 22rpx;
+}
+
+.share-pill {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  font-size: 22rpx;
+  color: var(--ink-muted);
+}
+
+.make-same-btn {
+  font-size: 24rpx;
+  padding: 14rpx 28rpx;
+}
+
+/* 底部注记 */
+.salon-footer {
+  margin-top: 48rpx;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.footer-divider {
+  width: 80rpx;
+  height: 2rpx;
+  background: var(--paper-border-dark);
+}
+
+.footer-note {
+  font-size: 20rpx;
+  color: var(--ink-muted);
+  letter-spacing: 1rpx;
+}

@@ -1,0 +1,513 @@
+.page-container {
+  background-color: var(--paper-bg);
+  min-height: 100vh;
+  padding: 24rpx 32rpx 80rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+/* 1. 用户身份档案卡 */
+.user-card {
+  padding: 24rpx 28rpx;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #ffffff;
+  border: 1rpx solid var(--paper-border);
+}
+
+.user-main {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+}
+
+.avatar-wrap {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 8rpx;
+  overflow: hidden;
+  border: 1rpx solid var(--paper-border);
+  background: #f0ece3;
+}
+
+.user-avatar {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.user-name {
+  font-family: var(--font-serif);
+  font-size: 32rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+  letter-spacing: 1rpx;
+}
+
+.user-id-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.user-id-text {
+  font-family: var(--font-mono);
+  font-size: 22rpx;
+  color: var(--ink-muted);
+  letter-spacing: 1rpx;
+}
+
+.user-copy-tag {
+  font-size: 18rpx;
+  color: var(--accent-rust);
+  font-weight: 600;
+  border-bottom: 1rpx dashed var(--accent-rust);
+  padding: 0 4rpx;
+}
+
+.user-arrow {
+  font-size: 32rpx;
+  color: var(--ink-muted);
+}
+
+/* 2. 算力黑卡 (Studio Pass) */
+.credit-black-card {
+  background: #1a1917;
+  color: #f7f4ed;
+  border: 1rpx solid #33302b;
+  padding: 32rpx 36rpx;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 8rpx 24rpx rgba(26, 25, 23, 0.2);
+}
+
+.black-card-bg-mark {
+  position: absolute;
+  right: -10rpx;
+  bottom: -20rpx;
+  font-family: var(--font-serif);
+  font-size: 130rpx;
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.04);
+  pointer-events: none;
+  line-height: 1;
+}
+
+.black-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.black-card-label {
+  font-size: 22rpx;
+  color: #aba496;
+  letter-spacing: 1rpx;
+}
+
+.black-card-link {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  font-size: 22rpx;
+  color: #deb87b;
+}
+
+.black-card-arrow {
+  font-size: 24rpx;
+}
+
+.black-card-balance {
+  display: flex;
+  align-items: baseline;
+  gap: 12rpx;
+  margin: 18rpx 0 10rpx;
+}
+
+.balance-num {
+  font-family: var(--font-serif);
+  font-size: 64rpx;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1;
+}
+
+.balance-unit {
+  font-size: 22rpx;
+  color: #aba496;
+}
+
+.black-card-foot {
+  margin-top: 10rpx;
+}
+
+.black-card-status {
+  font-size: 20rpx;
+  color: #8c867a;
+}
+
+/* 3. 数据指标条 */
+.stats-card {
+  background: #ffffff;
+  border: 1rpx solid var(--paper-border);
+  padding: 24rpx 0;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+}
+
+.stat-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6rpx;
+}
+
+.stat-number {
+  font-family: var(--font-serif);
+  font-size: 38rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+  line-height: 1;
+}
+
+.stat-label {
+  font-size: 22rpx;
+  color: var(--ink-muted);
+}
+
+.stat-divider {
+  width: 1rpx;
+  height: 48rpx;
+  background: var(--paper-border);
+}
+
+/* 4. 看视频补给任务卡 */
+.task-card {
+  background: #ffffff;
+  border: 1rpx solid var(--paper-border);
+  padding: 24rpx 28rpx;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.task-left {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+}
+
+.task-play-icon {
+  width: 68rpx;
+  height: 68rpx;
+  border-radius: 50%;
+  background: var(--ink-title);
+  color: #f7f4ed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24rpx;
+}
+
+.play-triangle {
+  margin-left: 4rpx;
+}
+
+.task-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.task-title {
+  font-family: var(--font-serif);
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+}
+
+.task-desc {
+  font-size: 20rpx;
+  color: var(--ink-muted);
+}
+
+.task-progress {
+  font-size: 20rpx;
+  color: var(--accent-rust);
+  font-weight: 600;
+}
+
+.task-btn {
+  padding: 16rpx 32rpx;
+  font-size: 24rpx;
+}
+
+.task-btn-disabled {
+  background: #e2ded5;
+  border-color: #e2ded5;
+  color: #999388;
+  pointer-events: none;
+  box-shadow: none;
+}
+
+/* 5. 我的作品展区 */
+.works-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0 4rpx;
+}
+
+.section-title-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 12rpx;
+}
+
+.section-title {
+  font-family: var(--font-serif);
+  font-size: 32rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+}
+
+.section-subtitle {
+  font-size: 20rpx;
+  color: var(--ink-muted);
+}
+
+.section-clear-btn {
+  font-size: 20rpx;
+  color: var(--accent-rust);
+}
+
+.works-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16rpx;
+}
+
+.work-card {
+  position: relative;
+  height: 220rpx;
+  border: 1rpx solid var(--paper-border);
+  overflow: hidden;
+  background: #ece8df;
+}
+
+.work-thumb {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.work-tag {
+  position: absolute;
+  bottom: 8rpx;
+  left: 8rpx;
+  background: rgba(26, 25, 23, 0.75);
+  color: #ffffff;
+  font-size: 18rpx;
+  padding: 2rpx 8rpx;
+}
+
+.works-empty {
+  background: #ffffff;
+  border: 1rpx solid var(--paper-border);
+  padding: 48rpx 32rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 20rpx;
+}
+
+.empty-text {
+  font-size: 22rpx;
+  color: var(--ink-muted);
+  line-height: 1.5;
+}
+
+.empty-action-btn {
+  font-size: 22rpx;
+  padding: 14rpx 28rpx;
+}
+
+/* 6. 服务与设置菜单列表 */
+.menu-card {
+  background: #ffffff;
+  border: 1rpx solid var(--paper-border);
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-item {
+  padding: 26rpx 28rpx;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: background 0.15s ease;
+}
+
+.menu-item:active {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.menu-label {
+  font-size: 26rpx;
+  color: var(--ink-body);
+}
+
+.menu-arrow {
+  font-size: 26rpx;
+  color: var(--ink-faint);
+}
+
+.menu-divider {
+  height: 1rpx;
+  background: var(--paper-border);
+  margin: 0 28rpx;
+}
+
+.menu-danger-text {
+  color: var(--accent-rust);
+}
+
+/* 底部微标 */
+.dossier-footer {
+  margin-top: 20rpx;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.dossier-brand {
+  font-size: 20rpx;
+  color: var(--ink-muted);
+  letter-spacing: 1rpx;
+}
+
+.dossier-ver {
+  font-family: var(--font-mono);
+  font-size: 18rpx;
+  color: var(--ink-faint);
+  letter-spacing: 1rpx;
+}
+
+/* 算力补给模态框 */
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(26, 25, 23, 0.6);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx 36rpx;
+  backdrop-filter: blur(4px);
+}
+
+.credit-modal-box {
+  width: 100%;
+  max-width: 600rpx;
+  padding: 40rpx 32rpx;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24rpx;
+}
+
+.modal-head-title {
+  font-family: var(--font-serif);
+  font-size: 32rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+}
+
+.modal-close {
+  font-size: 32rpx;
+  color: var(--ink-muted);
+  padding: 4rpx 12rpx;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.credit-stat {
+  padding: 24rpx;
+  background: var(--paper-card-subtle);
+  border: 1rpx solid var(--paper-border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.stat-caption {
+  font-size: 20rpx;
+  color: var(--ink-muted);
+}
+
+.stat-number-large {
+  font-family: var(--font-serif);
+  font-size: 44rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+}
+
+.credit-info-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.info-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12rpx;
+}
+
+.info-dot {
+  font-size: 16rpx;
+  color: var(--accent-gold);
+}
+
+.info-text {
+  font-size: 22rpx;
+  color: var(--ink-body);
+  line-height: 1.5;
+}
+
+.modal-claim-btn {
+  width: 100%;
+  margin-top: 8rpx;
+}

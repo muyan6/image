@@ -1,0 +1,7 @@
+{
+  "navigationBarTitleText": "档案中心",
+  "navigationBarBackgroundColor": "#f5f2eb",
+  "navigationBarTextStyle": "black",
+  "backgroundColor": "#f5f2eb",
+  "enablePullDownRefresh": true
+}

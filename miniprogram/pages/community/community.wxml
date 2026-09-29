@@ -1,0 +1,89 @@
+<view class="page-container">
+  <!-- 顶部策展栏 -->
+  <view class="salon-header">
+    <text class="salon-eyebrow">废片新生所 · 灵感沙龙</text>
+    <text class="salon-headline">见证照片的第二生</text>
+    <text class="salon-desc">来自真实用户的修护印记 · 点亮每一张被遗忘的旧相</text>
+  </view>
+
+  <!-- 展区筛选胶囊 -->
+  <scroll-view class="salon-filter-bar" scroll-x enable-flex show-scrollbar="{{ false }}">
+    <view
+      wx:for="{{ filters }}"
+      wx:key="id"
+      class="filter-chip {{ activeFilter === item.id ? 'filter-chip-active' : '' }}"
+      bindtap="onSelectFilter"
+      data-id="{{ item.id }}"
+    >
+      <text class="filter-chip-text">{{ item.name }}</text>
+    </view>
+  </scroll-view>
+
+  <!-- 社区展品卡片流 -->
+  <view class="showcase-list">
+    <view
+      wx:for="{{ filteredItems }}"
+      wx:key="id"
+      class="exhibit-card gallery-card"
+    >
+      <view class="washi-tape" wx:if="{{ index === 0 }}"></view>
+
+      <!-- 策展人与作者信息 -->
+      <view class="exhibit-head">
+        <view class="author-wrap">
+          <image class="author-avatar" src="{{ item.authorAvatar || '/images/logo.jpg' }}" mode="aspectFill"></image>
+          <view class="author-meta">
+            <text class="author-name">{{ item.authorName }}</text>
+            <text class="author-time">{{ item.date }} · {{ item.categoryName }}</text>
+          </view>
+        </view>
+        <view class="recipe-badge">
+          <text class="recipe-tag">配方</text>
+          <text class="recipe-name">{{ item.templateName }}</text>
+        </view>
+      </view>
+
+      <!-- 双图对比展框 (原图 vs 新生图) -->
+      <view class="compare-frame">
+        <view class="frame-photo-box" bindtap="onPreviewExhibit" data-item="{{ item }}" data-type="result">
+          <image class="frame-photo" src="{{ item.resultUrl }}" mode="aspectFill" lazy-load></image>
+          <view class="frame-tag frame-tag-after">新生 · {{ item.quality === 'fine' ? '2K精细' : '1.5K' }}</view>
+        </view>
+        <view class="frame-photo-box frame-photo-before" bindtap="onPreviewExhibit" data-item="{{ item }}" data-type="original">
+          <image class="frame-photo" src="{{ item.origUrl }}" mode="aspectFill" lazy-load></image>
+          <view class="frame-tag frame-tag-before">修护前原片</view>
+        </view>
+      </view>
+
+      <!-- 作品故事与题跋 -->
+      <view class="exhibit-body">
+        <text class="exhibit-title">{{ item.title }}</text>
+        <text class="exhibit-story">{{ item.story }}</text>
+      </view>
+
+      <!-- 底部互动与一键【做同款】 -->
+      <view class="exhibit-foot">
+        <view class="interaction-group">
+          <view class="like-btn {{ item.liked ? 'like-btn-active' : '' }}" bindtap="onLikeItem" data-id="{{ item.id }}">
+            <text class="like-icon">{{ item.liked ? '♥' : '♡' }}</text>
+            <text class="like-count">{{ item.likes }}</text>
+          </view>
+          <view class="share-pill" bindtap="onShareExhibit" data-title="{{ item.title }}">
+            <text class="share-icon">↗</text>
+            <text class="share-text">分享</text>
+          </view>
+        </view>
+
+        <button class="btn-ink make-same-btn" bindtap="onMakeSame" data-template-id="{{ item.templateId }}" data-name="{{ item.templateName }}">
+          做同款风格 →
+        </button>
+      </view>
+    </view>
+  </view>
+
+  <!-- 底部装裱签条 -->
+  <view class="salon-footer">
+    <view class="footer-divider"></view>
+    <text class="footer-note">欢迎将您的重生之作投稿至沙龙 · 每期精选赠送 50 算力</text>
+  </view>
+</view>
