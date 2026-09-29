@@ -8,6 +8,8 @@ Page({
     suitableList: [],
     unsuitableList: [],
     bannerIndex: 0,
+    bannerHeight: 420,
+    priceLabel: '按档位计费',
     loading: true
   },
 
@@ -38,6 +40,7 @@ Page({
             covers: coverUrls,
             coverUrl: coverUrls[0]
           });
+          this._coverHeights = {};
 
           const guide = tpl.guide || {};
           let suitable = (guide.suitable && guide.suitable.length > 0)
@@ -56,8 +59,19 @@ Page({
             template: fullTpl,
             suitableList: suitable,
             unsuitableList: unsuitable,
+            bannerIndex: 0,
+            bannerHeight: 420,
+            priceLabel: this.priceLabelFor(tpl),
             loading: false
           });
+
+          // 模板价与默认档位价可能由后台热更新；用服务端当前配置刷新角标。
+          if (typeof api.config === 'function') {
+            api.config().then((config) => {
+              if (this.data.templateId !== tid || !config) return;
+              this.setData({ priceLabel: this.priceLabelFor(tpl, config) });
+            }).catch(() => {});
+          }
 
           if (tpl.name) {
             wx.setNavigationBarTitle({
@@ -97,7 +111,34 @@ Page({
   },
 
   onBannerSwiperChange(e) {
-    this.setData({ bannerIndex: e.detail.current });
+    const index = Number(e.detail.current) || 0;
+    const height = this._coverHeights && this._coverHeights[index];
+    this.setData(height ? { bannerIndex: index, bannerHeight: height } : { bannerIndex: index });
+  },
+
+  onCoverLoad(e) {
+    const info = e.detail || {};
+    const width = Number(info.width);
+    const height = Number(info.height);
+    if (!(width > 0 && height > 0)) return;
+    const index = Number(e.currentTarget.dataset.index) || 0;
+    // 卡片横向内距各 28rpx：实际可用宽度为 750-56=694rpx。
+    const scaled = Math.max(320, Math.min(1300, Math.round(694 * height / width)));
+    if (!this._coverHeights) this._coverHeights = {};
+    this._coverHeights[index] = scaled;
+    if (index === this.data.bannerIndex && this.data.bannerHeight !== scaled) {
+      this.setData({ bannerHeight: scaled });
+    }
+  },
+
+  priceLabelFor(tpl, config) {
+    const conf = config || {};
+    const freeMode = typeof conf.free_mode === 'boolean' ? conf.free_mode : !!app.globalData.freeMode;
+    if (freeMode) return '免扣费';
+    const prices = conf.prices || {};
+    const fallback = tpl.engine === 'fine' ? (prices.fine != null ? prices.fine : 3)
+      : (prices.light != null ? prices.light : 1);
+    return `✦ ${tpl.price > 0 ? tpl.price : fallback} 光子`;
   },
 
   onPreviewCover(e) {

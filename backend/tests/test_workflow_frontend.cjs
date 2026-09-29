@@ -117,6 +117,29 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
     const p=page('adjust');assert.equal(p.data.quality,'light');assert.equal(p.data.currentQualityCost,1);
     p.data.costLight=2;p.refreshCurrentCost();assert.equal(p.data.currentQualityCost,2);
   });
+  await test('style_detail_hero_uses_each_cover_natural_ratio',async()=>{
+    const p=page('style-detail');
+    p.onCoverLoad({detail:{width:1600,height:900},currentTarget:{dataset:{index:0}}});
+    assert.equal(p.data.bannerHeight,390);
+    p.onCoverLoad({detail:{width:900,height:900},currentTarget:{dataset:{index:1}}});
+    assert.equal(p.data.bannerHeight,390);
+    p.onBannerSwiperChange({detail:{current:1}});
+    assert.equal(p.data.bannerHeight,694);
+    p.onCoverLoad({detail:{width:720,height:900},currentTarget:{dataset:{index:1}}});
+    assert.equal(p.data.bannerHeight,868);
+    const xml=fs.readFileSync(path.join(root,'miniprogram/pages/style-detail/style-detail.wxml'),'utf8');
+    assert.equal((xml.match(/mode="aspectFit"/g)||[]).length,2);
+    assert(!xml.includes('mode="aspectFill"'));
+    assert(xml.includes('height: {{ bannerHeight }}rpx'));
+  });
+  await test('style_detail_price_badge_uses_current_server_price',async()=>{
+    const tpl={id:'poster',name:'复古电影海报',engine:'fine',price:0,cover:'cover.jpg'};
+    const p=page('style-detail',{templates:async()=>({items:[tpl]}),config:async()=>({free_mode:false,prices:{fine:5}}),absolute:x=>x},
+      {setNavigationBarTitle(){}});
+    p.onLoad({id:'poster'});await tick();await tick();
+    assert.equal(p.data.priceLabel,'✦ 5 光子');
+    assert.equal(p.data.template.coverUrl,'cover.jpg');
+  });
   await test('plain_restore_sends_custom_requirement',async()=>{
     let sent;
     const p=page('adjust',{submitJob:async(_,form)=>{sent=form;throw new Error('fixture');}});
@@ -196,7 +219,7 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
     p._mediaCache={result:'wxfile://image.tmp'};await p.onDownload();assert(copied.endsWith('.jpg'));assert.equal(removed,copied);assert.equal(saves,2);
   });
   await test('changed_javascript_and_wxml_handlers_are_valid',()=>{
-    for(const name of ['compare','adjust']) {
+    for(const name of ['compare','adjust','style-detail']) {
       const p=page(name),xml=fs.readFileSync(path.join(root,`miniprogram/pages/${name}/${name}.wxml`),'utf8');
       for(const m of xml.matchAll(/\b(?:bind(?::)?\w+|catch(?::)?\w+)=["']([a-zA-Z_$][\w$]*)["']/g))
         if(!['true','false'].includes(m[1]))assert.equal(typeof p[m[1]],'function',m[1]);
