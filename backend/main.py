@@ -1085,14 +1085,64 @@ def get_cover(filename: str) -> FileResponse:
     )
 
 
+# 微信消息推送（明文模式 + JSON）的请求体，字段不固定，收下整个对象
+_WxPushBody = Dict[str, Any]
+
+
+def _wxpush_signature_ok(request: Request) -> bool:
+    token = str(settings.moderation().get("wechat_push_token") or "").strip()
+    if not token:
+        return False  # 未配置推送 Token：无法校验，视为不通过
+    q = request.query_params
+    sig = q.get("signature") or q.get("msg_signature") or ""
+    return wechat_sec.verify_push_signature(
+        token, sig, q.get("timestamp", ""), q.get("nonce", ""))
+
+
+@app.get("/api/wxpush")
+@app.get("/wxpush")
+def wxpush_verify(request: Request):
+    """微信公众平台「消息推送」的 URL 校验：原样返回 echostr。"""
+    if not _wxpush_signature_ok(request):
+        raise HTTPException(status_code=403, detail="签名校验失败")
+    return PlainTextResponse(request.query_params.get("echostr") or "")
+
+
+@app.post("/api/wxpush")
+@app.post("/wxpush")
+def wxpush_message(body: _WxPushBody, request: Request):
+    """微信内容安全 mediaCheckAsync 的异步结果推送端点。"""
+    if not _wxpush_signature_ok(request):
+        raise HTTPException(status_code=403, detail="签名校验失败")
+    parsed = wechat_sec.parse_push_body(body or {})
+    if parsed is None:
+        log.info("收到非审核类微信推送或安全模式包体，忽略: %s",
+                 str(body)[:150])
+    else:
+        trace_id, suggest, label, score = parsed
+        hit = wechat_sec.resolve_pending(trace_id, suggest, label, score)
+        log.info("微信审核推送: trace=%s suggest=%s label=%s 命中=%s",
+                 trace_id, suggest, label, hit)
+    return PlainTextResponse("success")
+
+
 @app.get("/")
-def home_page() -> FileResponse:
-    """网页端画质修复控制台页面。"""
+def home_page(request: Request):
+    """网页端画质修复控制台页面；若微信发送消息推送校验（带 echostr），直接兼容响应。"""
+    q = request.query_params
+    if q.get("echostr") and (q.get("signature") or q.get("msg_signature")):
+        return wxpush_verify(request)
     return FileResponse(
         os.path.join(BASE_DIR, "index.html"),
         media_type="text/html; charset=utf-8",
         headers={"Cache-Control": "no-store"},
     )
+
+
+@app.post("/")
+def home_post(body: _WxPushBody, request: Request):
+    """兼容微信推送 URL 填成根路径的情况。"""
+    return wxpush_message(body, request)
 
 
 @app.get("/logo.jpg")
@@ -1325,51 +1375,7 @@ def bind_invite(body: _InviteBody, request: Request):
             "inviter_balance": inviter_balance}
 
 
-# 微信消息推送（明文模式 + JSON）的请求体，字段不固定，收下整个对象
-_WxPushBody = Dict[str, Any]
 
-
-def _wxpush_signature_ok(request: Request) -> bool:
-    token = str(settings.moderation().get("wechat_push_token") or "").strip()
-    if not token:
-        return False  # 未配置推送 Token：无法校验，视为不通过
-    q = request.query_params
-    return wechat_sec.verify_push_signature(
-        token, q.get("msg_signature", ""), q.get("timestamp", ""),
-        q.get("nonce", ""))
-
-
-@app.get("/api/wxpush")
-def wxpush_verify(request: Request):
-    """微信公众平台「消息推送」的 URL 校验：原样返回 echostr。
-
-    后台配置见 README：URL 填 https://你的备案域名/api/wxpush，
-    加密方式选「明文模式」、数据格式选「JSON」，Token 与后台一致。
-    """
-    if not _wxpush_signature_ok(request):
-        raise HTTPException(status_code=403, detail="签名校验失败")
-    return PlainTextResponse(request.query_params.get("echostr") or "")
-
-
-@app.post("/api/wxpush")
-def wxpush_message(body: _WxPushBody, request: Request):
-    """微信内容安全 mediaCheckAsync 的异步结果推送端点。
-
-    解出 trace_id -> result.suggest，唤醒正在等待该结果的提交请求。
-    未命中等待任务的结果（超时后才到的推送）记录后丢弃。
-    """
-    if not _wxpush_signature_ok(request):
-        raise HTTPException(status_code=403, detail="签名校验失败")
-    parsed = wechat_sec.parse_push_body(body or {})
-    if parsed is None:
-        log.info("收到非审核类微信推送或安全模式包体，忽略: %s",
-                 str(body)[:150])
-    else:
-        trace_id, suggest, label, score = parsed
-        hit = wechat_sec.resolve_pending(trace_id, suggest, label, score)
-        log.info("微信审核推送: trace=%s suggest=%s label=%s 命中=%s",
-                 trace_id, suggest, label, hit)
-    return PlainTextResponse("success")
 
 
 @app.post("/api/uploads")
