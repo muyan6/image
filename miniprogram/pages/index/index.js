@@ -88,9 +88,14 @@ Page({
   },
 
   _renderFeatured(items) {
+    const free = !!this.data.freeMode;
+    const pFine = this.data.priceFine || 3;
+    const pLight = this.data.priceLight || 1;
     const featured = items.slice(0, 6).map((t) => {
+      let cost = free ? '免扣费' : (t.price > 0 ? ('✦ ' + t.price + ' 光子') : (t.engine === 'fine' ? ('✦ ' + pFine + ' 光子') : ('✦ ' + pLight + ' 光子')));
       return Object.assign({}, t, {
-        coverUrl: t.cover ? api.absolute(t.cover) : '/images/logo.jpg'
+        coverUrl: t.cover ? api.absolute(t.cover) : '/images/logo.jpg',
+        costText: cost
       });
     });
     if (featured.length > 0) {

@@ -55,8 +55,10 @@ Page({
 
   _renderData(groups, rawItems) {
     const items = rawItems.map((item) => {
+      const cost = item.price > 0 ? ('✦ ' + item.price + ' 光子') : (item.engine === 'fine' ? '✦ 3 光子' : '✦ 1 光子');
       return Object.assign({}, item, {
-        coverUrl: item.cover ? api.absolute(item.cover) : '/images/logo.jpg'
+        coverUrl: item.cover ? api.absolute(item.cover) : '/images/logo.jpg',
+        costText: cost
       });
     });
 

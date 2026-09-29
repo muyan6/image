@@ -7,7 +7,8 @@
     </view>
     <view class="credit-pill" bindtap="onOpenCreditModal">
       <text class="credit-icon">✦</text>
-      <text class="credit-text">{{ freeMode ? '光子不限量' : (lightPoints + ' 光子') }}</text>
+      <text class="credit-text" wx:if="{{ freeMode }}">光子不限量</text>
+      <text class="credit-text" wx:else>{{ lightPoints }} 光子</text>
       <text class="credit-add" wx:if="{{ !freeMode }}">+</text>
     </view>
   </view>
@@ -92,7 +93,7 @@
             <text class="showcase-name">{{ item.name }}</text>
             <text class="showcase-desc">{{ item.subtitle }}</text>
             <view class="showcase-foot">
-              <text class="showcase-cost">{{ freeMode ? '免扣费' : ('✦ ' + (item.price > 0 ? item.price : (item.engine === 'fine' ? priceFine : priceLight)) + ' 光子') }}</text>
+              <text class="showcase-cost">{{ item.costText || (item.price > 0 ? '✦ ' + item.price + ' 光子' : '✦ 1 光子') }}</text>
               <text class="showcase-action">使用风格 ›</text>
             </view>
           </view>
