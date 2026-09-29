@@ -36,9 +36,9 @@ if [ ! -x backend/.venv/bin/python ]; then
     python3 -m venv backend/.venv || die "创建 venv 失败：Debian/Ubuntu 需要 apt install python3-venv python3-pip"
 fi
 PY="backend/.venv/bin/python"
-"$PY" -m pip install -q --disable-pip-version-check -r requirements.txt \
+"$PY" -m pip install -q --disable-pip-version-check -r backend/requirements.txt \
     -i "${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}" \
-    || "$PY" -m pip install -q --disable-pip-version-check -r requirements.txt
+    || "$PY" -m pip install -q --disable-pip-version-check -r backend/requirements.txt
 
 if ! "$PY" -c "import cv2" >/dev/null 2>&1; then
     echo "补装 OpenCV 系统依赖（libGL）..."

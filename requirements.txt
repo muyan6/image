@@ -1,0 +1,18 @@
+# 废片拯救后端依赖
+# 安装：pip install -r requirements.txt
+
+# --- Web 框架 ---
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.27,<1.0
+python-multipart>=0.0.9        # FastAPI 解析 multipart 上传必需
+
+# --- 图像处理 ---
+opencv-python>=4.9,<5.0
+numpy>=1.26,<3.0
+Pillow>=10.0                   # pillow-lut / 部分编码兼容
+
+# --- 外部 API ---
+requests>=2.31,<3.0            # fal_ai.py 与 baidu_ai.py 用
+
+# --- 可选 ---
+python-dotenv>=1.0             # 读取 backend/.env（不装也能跑，fal_ai.py 有内置解析）
