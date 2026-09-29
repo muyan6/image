@@ -4,6 +4,9 @@
  * 后端是异步的：POST /api/rescue 立刻返回 job_id，处理在后台跑，
  * 需要轮询 GET /api/jobs/{id} 直到 succeeded / failed。
  * 这样模型推理的 15~30 秒不会撑爆 wx.request 的超时。
+ *
+ * 光子余额以服务端为准：登录/提交任务的响应都会带 balance，
+ * 这里负责同步到 app.globalData，页面只读展示。
  */
 
 const REQUEST_TIMEOUT = 30000;
@@ -38,6 +41,14 @@ function networkError(err) {
   return e;
 }
 
+/** 把提交/登录响应里的余额与免扣费标记同步进全局 */
+function syncAccount(data) {
+  const app = getApp();
+  if (!app || !data) return;
+  if (typeof data.balance === 'number') app.setBalance(data.balance);
+  if (typeof data.free_mode === 'boolean') app.globalData.freeMode = data.free_mode;
+}
+
 const STORAGE_TOKEN = 'sessionToken';
 
 function getToken() {
@@ -66,6 +77,7 @@ function ensureLogin(force) {
           success(res) {
             if (res.statusCode === 200 && res.data && res.data.token) {
               setToken(res.data.token);
+              syncAccount(res.data);
               resolve(res.data.token);
             } else {
               reject(makeError(res));
@@ -136,6 +148,7 @@ function upload(filePath, formData, options) {
           return;
         }
         if (res.statusCode >= 200 && res.statusCode < 300) {
+          syncAccount(data);
           resolve(data);
         } else {
           const err = new Error(data.detail || ('上传失败 (' + res.statusCode + ')'));
@@ -206,7 +219,27 @@ function templates() {
   return request('/api/templates', { timeout: 8000 });
 }
 
-/** COS 直传三件套 */
+/** 当前用户资料：光子余额、邀请码、今日奖励进度 */
+function me() {
+  return authedCall(() => request('/api/me'));
+}
+
+/** 每日奖励：kind = 'checkin'（1次/天）| 'video'（3次/天），服务端记账 */
+function earn(kind) {
+  return authedCall(() => request('/api/me/earn', {
+    method: 'POST', data: { kind: kind }
+  }));
+}
+
+/** 绑定邀请码（每人一次，双方 +30 光子） */
+function bindInvite(code) {
+  return authedCall(() => request('/api/me/invite', {
+    method: 'POST', data: { code: code }
+  }));
+}
+
+/* ------------------------- COS 直传三件套 ------------------------- */
+
 function createUpload(filename, byteSize) {
   return authedCall(() => request('/api/uploads', {
     method: 'POST',
@@ -243,11 +276,70 @@ function rescueByUpload(payload) {
   }));
 }
 
+/** multipart 里的表单值必须是字符串 */
+function _stringifyFormData(formData) {
+  const out = {};
+  Object.keys(formData || {}).forEach((k) => {
+    const v = formData[k];
+    out[k] = typeof v === 'string' ? v : JSON.stringify(v);
+  });
+  return out;
+}
+
+/** COS 直传提交一条任务；任何一步失败向上抛，由 submitJob 统一回退 multipart */
+async function _submitViaCos(filePath, formData) {
+  const fs = wx.getFileSystemManager();
+  const stat = fs.statSync(filePath);
+  const extMatch = /\.(\w+)$/.exec(filePath || '');
+  const ext = extMatch ? '.' + extMatch[1].toLowerCase() : '.jpg';
+
+  const up = await createUpload('photo' + ext, stat.size || 0);
+  const buf = await new Promise((resolve, reject) => {
+    fs.readFile({
+      filePath: filePath,
+      success: (r) => resolve(r.data),
+      fail: (e) => reject(networkError(e))
+    });
+  });
+  await putToCos(up.url, buf);
+  await completeUpload(up.upload_id);
+
+  const body = {};
+  ['quality', 'style', 'template_id', 'text_fields', 'aspect_ratio'].forEach((k) => {
+    if (formData && formData[k] !== undefined && formData[k] !== '') {
+      body[k] = formData[k];
+    }
+  });
+  body.upload_id = up.upload_id;
+  return rescueByUpload(body);
+}
+
+/**
+ * 统一任务提交入口：后端 cos_ready 时优先 COS 直传（图片字节不过服务器），
+ * 直传链路任何一步失败自动回退 multipart，对调用方透明。
+ * 成功时响应里的 balance 已同步进 app.globalData。
+ */
+async function submitJob(filePath, formData) {
+  const form = _stringifyFormData(formData);
+  try {
+    const cfg = await config();
+    if (cfg && cfg.cos_ready) {
+      try {
+        return await _submitViaCos(filePath, form);
+      } catch (err) {
+        console.warn('COS 直传失败，回退 multipart：', err);
+      }
+    }
+  } catch (e) { /* 连 config 都拿不到说明网络有问题，让 multipart 再试一次 */ }
+  return upload(filePath, form);
+}
+
 module.exports = {
   apiBase,
   absolute,
   request,
   upload,
+  submitJob,
   waitForJob,
   health,
   config,
@@ -255,6 +347,9 @@ module.exports = {
   templates,
   ensureLogin,
   authedCall,
+  me,
+  earn,
+  bindInvite,
   createUpload,
   putToCos,
   completeUpload,

@@ -534,7 +534,8 @@ class FalImageEnhance:
                 "guidance_scale": float(guidance_scale),
                 "num_inference_steps": max(1, int(num_inference_steps)),
                 "upscale_factor": actual,
-                "enable_safety_checker": False,
+                # 输入侧安全检查保持开启；业务侧另有腾讯云内容审核兜底
+                "enable_safety_checker": True,
             },
             output_path,
         )

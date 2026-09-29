@@ -873,3 +873,26 @@
   font-size: 22rpx;
   color: var(--ink-muted);
 }
+
+/* 待使用的风格提示条（做同款带过来） */
+.pending-template {
+  margin-top: 18rpx;
+  background: #ffffff;
+  border: 1rpx solid var(--paper-border-dark);
+  padding: 14rpx 20rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pending-template-text {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: var(--ink-title);
+}
+
+.pending-template-clear {
+  font-size: 26rpx;
+  color: var(--ink-muted);
+  padding: 0 8rpx;
+}

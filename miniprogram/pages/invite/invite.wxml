@@ -3,11 +3,11 @@
   <view class="reward-card">
     <text class="card-eyebrow">INVITE REWARDS · 典藏奖励</text>
     <view class="reward-num-row">
-      <text class="reward-plus">+</text>
-      <text class="reward-number">50</text>
-      <text class="reward-unit">积分 / 位</text>
+      <text class="reward-plus">✦</text>
+      <text class="reward-number">30</text>
+      <text class="reward-unit">光子 / 位</text>
     </view>
-    <text class="reward-sub">好友通过邀请进入并完成首次成功拯救，你获得 50 积分，对方额外获赠 30 积分。</text>
+    <text class="reward-sub">好友填写你的邀请码即生效：你获得 30 光子，对方也获赠 30 光子（每人限参与一次）。</text>
 
     <view class="code-pill" bindtap="onCopyCode">
       <text class="code-text">{{ inviteCode }}</text>
@@ -29,7 +29,7 @@
     <view class="stat-sep"></view>
     <view class="stat-col">
       <text class="stat-val">0</text>
-      <text class="stat-lbl">累计积分</text>
+      <text class="stat-lbl">累计光子</text>
     </view>
   </view>
 

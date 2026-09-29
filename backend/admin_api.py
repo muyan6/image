@@ -401,17 +401,34 @@ def make_admin_router(*, settings: SettingsStore,
         return {"ok": True}
 
     @router.post("/templates/{tpl_id}/cover")
-    async def upload_template_cover(tpl_id: str, request: Request,
-                                    file: UploadFile = File(...)) -> Dict[str, Any]:
+    def upload_template_cover(tpl_id: str, request: Request,
+                              file: UploadFile = File(...)) -> Dict[str, Any]:
         """上传模板封面：压到长边 720 的 JPEG。
 
         配了 COS 传到 cos:covers/（/api/templates 读时现场签名，流量走 COS）；
         否则落盘 data/covers/ 走后端本地服务（开发期用）。
+
+        同步处理且按块限长读取：超限直接断，不把大文件整个读进内存。
         """
         _guard(request)
-        data = await file.read()
-        if len(data) > 10 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="封面不能超过 10 MB")
+        limit = 10 * 1024 * 1024
+        chunks = []
+        received = 0
+        try:
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                received += len(chunk)
+                if received > limit:
+                    raise HTTPException(status_code=413, detail="封面不能超过 10 MB")
+                chunks.append(chunk)
+        finally:
+            try:
+                file.file.close()
+            except Exception:  # noqa: BLE001
+                pass
+        data = b"".join(chunks)
         try:
             jpg = _compress_cover(data)
         except ValueError as exc:

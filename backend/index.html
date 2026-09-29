@@ -363,6 +363,7 @@
       <img src="/logo.jpg" alt="Logo" class="brand-logo">
       <span class="brand-name">光影画质修复</span>
     </div>
+    <span id="balanceBadge" class="admin-link" title="服务端记账光子余额">✦ -- 光子</span>
     <a href="/admin" class="admin-link">管理后台 ↗</a>
   </header>
 
@@ -474,6 +475,34 @@
   const labelBefore = document.getElementById('labelBefore');
   const labelAfter = document.getElementById('labelAfter');
   const stage = document.getElementById('stage');
+  const balanceBadge = document.getElementById('balanceBadge');
+
+  // ---- 访客登录：网页端做不了 wx.login，用 /api/auth/web 按 IP 换会话 token ----
+  // 同一 IP 共享配额与光子余额（服务端记账），提交与轮询都必须带 token。
+  let webToken = '';
+  try { webToken = localStorage.getItem('pr_web_token') || ''; } catch (e) {}
+
+  async function ensureWebToken(force) {
+    if (webToken && !force) return webToken;
+    const r = await fetch('/api/auth/web', { method: 'POST' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.token) throw new Error(d.detail || '访客登录失败');
+    webToken = d.token;
+    try { localStorage.setItem('pr_web_token', webToken); } catch (e) {}
+    if (typeof d.balance === 'number') setBalance(d.balance);
+    return webToken;
+  }
+
+  function authHeaders(extra) {
+    return Object.assign({}, extra || {},
+      webToken ? { 'Authorization': 'Bearer ' + webToken } : {});
+  }
+
+  function setBalance(n) {
+    if (balanceBadge) balanceBadge.textContent = '✦ ' + n + ' 光子';
+  }
+
+  ensureWebToken().catch(err => console.warn('访客登录失败:', err.message));
   const btnDownload = document.getElementById('btnDownload');
 
   portalCard.onclick = () => fileInput.click();
@@ -542,9 +571,15 @@
     formData.append('quality', currentQuality);
 
     try {
-      const res = await fetch('/api/rescue', { method: 'POST', body: formData });
+      await ensureWebToken();
+      let res = await fetch('/api/rescue', { method: 'POST', body: formData, headers: authHeaders() });
+      if (res.status === 401) {
+        await ensureWebToken(true);
+        res = await fetch('/api/rescue', { method: 'POST', body: formData, headers: authHeaders() });
+      }
       const data = await res.json();
       if (!res.ok || data.code !== 0) throw new Error(data.detail || '提交失败');
+      if (typeof data.balance === 'number') setBalance(data.balance);
 
       const jobId = data.job_id;
       processingText.textContent = 'AI 正在深度重构光影细节…';
@@ -552,7 +587,11 @@
       const start = Date.now();
       while (Date.now() - start < 180000) {
         await new Promise(r => setTimeout(r, 1500));
-        const q = await fetch('/api/jobs/' + jobId);
+        const q = await fetch('/api/jobs/' + jobId, { headers: authHeaders() });
+        if (q.status === 401) {
+          await ensureWebToken(true);
+          continue;
+        }
         const job = await q.json();
         if (job.status === 'succeeded') {
           showResult(job.orig_url, job.result_url);

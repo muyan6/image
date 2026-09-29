@@ -19,6 +19,8 @@ backend/luts/
 
 # 本地分析产物
 _recon/
+probes/
+reverse/
 .zcode/
 _dns_probe.txt
 probes/_submit/

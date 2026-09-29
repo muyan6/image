@@ -553,16 +553,19 @@ class TemplateStore:
                 "created_at": time.time(),
                 "updated_at": time.time(),
             }
+            # 先校验（含新模板的整体快照），通过才落内存 —— 校验失败不能污染现有数据
+            _validate({"groups": self._groups,
+                       "templates": self._templates + [item]})
             self._templates.append(item)
-            self._validate_snapshot()
             self._save_locked()
             return copy.deepcopy(item)
 
     def update_template(self, tpl_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            for t in self._templates:
+            for idx, t in enumerate(self._templates):
                 if t["id"] != tpl_id:
                     continue
+                candidate = copy.deepcopy(t)
                 # id 不允许改；其余逐字段吸收
                 mapping = {
                     "group_id": str, "name": str, "subtitle": str, "cover": str,
@@ -571,20 +574,24 @@ class TemplateStore:
                 }
                 for key, caster in mapping.items():
                     if key in patch:
-                        t[key] = caster(patch[key] or "")
+                        candidate[key] = caster(patch[key] or "")
                 for key in ("price", "output_size", "sort"):
                     if key in patch:
-                        t[key] = _as_int(patch[key], t.get(key, 0))
+                        candidate[key] = _as_int(patch[key], candidate.get(key, 0))
                 if "enabled" in patch:
-                    t["enabled"] = bool(patch["enabled"])
+                    candidate["enabled"] = bool(patch["enabled"])
                 if "text_fields" in patch:
-                    t["text_fields"] = _norm_text_fields(patch["text_fields"])
+                    candidate["text_fields"] = _norm_text_fields(patch["text_fields"])
                 if "guide" in patch:
-                    t["guide"] = _norm_guide(patch["guide"])
-                t["updated_at"] = time.time()
-                self._validate_snapshot()
+                    candidate["guide"] = _norm_guide(patch["guide"])
+                candidate["updated_at"] = time.time()
+                # 先校验改完的整表快照，通过才替换内存 —— 失败时原数据原样保留
+                merged = [candidate if i == idx else copy.deepcopy(x)
+                          for i, x in enumerate(self._templates)]
+                _validate({"groups": self._groups, "templates": merged})
+                self._templates = merged
                 self._save_locked()
-                return copy.deepcopy(t)
+                return copy.deepcopy(candidate)
         raise KeyError("模板不存在")
 
     def delete_template(self, tpl_id: str) -> None:
@@ -617,9 +624,6 @@ class TemplateStore:
         raise KeyError("模板不存在")
 
     # ------------------------------------------------------------------ #
-    def _validate_snapshot(self) -> None:
-        _validate({"groups": self._groups, "templates": self._templates})
-
     # 公开接口的精简投影：提示词不下发（那是调教出来的东西）
     def public_templates(self, settings) -> List[Dict[str, Any]]:
         """给小程序的模板列表：解析封面 URL，附带分组名。"""

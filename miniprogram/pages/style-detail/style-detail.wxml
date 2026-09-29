@@ -82,7 +82,7 @@
   <view class="fixed-bar">
     <view class="bar-info">
       <text class="bar-title">{{ template.name || '风格制作' }}</text>
-      <text class="bar-hint">生成前可选模型，积分以所选档位为准</text>
+      <text class="bar-hint">生成前可选模型，光子以所选档位为准</text>
     </view>
     <button class="btn-create" bindtap="onChoosePhoto">
       选择照片制作

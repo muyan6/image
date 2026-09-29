@@ -47,7 +47,7 @@
       <view class="card-content">
         <view class="card-name-row">
           <text class="card-name">{{ item.name }}</text>
-          <text class="card-cost">{{ item.price > 0 ? (item.price + ' 算力') : '免费体验' }}</text>
+          <text class="card-cost">('✦ ' + (item.price > 0 ? item.price : '按档位') + ' 光子')</text>
         </view>
         <text class="card-subtitle">{{ item.subtitle }}</text>
         
@@ -94,7 +94,7 @@
             mode="aspectFill"
           ></image>
           <view class="stage-price-badge" wx:if="{{ selectedItem.price > 0 }}">
-            <text>{{ selectedItem.price }} 算力</text>
+            <text>✦ {{ selectedItem.price }} 光子</text>
           </view>
           <view class="stage-price-badge stage-price-free" wx:else>
             <text>按档位计费</text>
@@ -111,8 +111,8 @@
               <text class="metric-value">{{ selectedItem.engine === 'fine' ? '深度纹理超分' : '光影结构重绘' }}</text>
             </view>
             <view class="info-metric">
-              <text class="metric-label">消耗算力</text>
-              <text class="metric-value metric-gold">{{ selectedItem.price > 0 ? (selectedItem.price + ' 点算力') : '按档位默认价' }}</text>
+              <text class="metric-label">消耗光子</text>
+              <text class="metric-value metric-gold">('✦ ' + selectedItem.price + ' 光子')</text>
             </view>
             <view class="info-metric">
               <text class="metric-label">排版特性</text>

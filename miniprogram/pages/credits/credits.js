@@ -1,12 +1,14 @@
 const app = getApp();
+const api = require('../../utils/api.js');
 
 Page({
   data: {
-    fishTokens: 90,
-    checkedIn: true,
+    lightPoints: 0,
+    freeMode: false,
+    checkedIn: false,
     records: [
-      { id: 'r1', title: '每日签到奖励', time: '今日 08:52', amount: 10 },
-      { id: 'r2', title: '首次登录赠送新人算力', time: '昨天 22:29', amount: 80 }
+      { id: 'r1', title: '每日签到奖励', time: '今日', amount: 10 },
+      { id: 'r2', title: '新人光子礼包', time: '注册时', amount: 90 }
     ]
   },
 
@@ -19,41 +21,50 @@ Page({
   },
 
   refreshData() {
-    this.setData({
-      fishTokens: app.globalData.fishTokens || 0
-    });
+    this.setData({ lightPoints: app.globalData.lightPoints });
+
+    api.config().then((c) => {
+      if (c) this.setData({ freeMode: !!c.free_mode });
+    }).catch(() => {});
+
+    // 签到状态与余额都以服务端为准
+    api.me().then((d) => {
+      if (!d) return;
+      if (typeof d.balance === 'number') app.setBalance(d.balance);
+      this.setData({
+        lightPoints: app.globalData.lightPoints,
+        checkedIn: !!(d.earn && d.earn.checkin_done)
+      });
+    }).catch(() => {});
   },
 
+  /** 每日签到：服务端记账（1 次/天），成功 +10 光子 */
   onCheckIn() {
     if (this.data.checkedIn) {
-      wx.showToast({ title: '今日已完成签到', icon: 'none' });
+      wx.showToast({ title: '今日已签到', icon: 'none' });
       return;
     }
-    app.addToken(10);
-    this.setData({
-      checkedIn: true,
-      fishTokens: app.globalData.fishTokens
-    });
-    wx.showToast({ title: '签到成功 +10 积分', icon: 'success' });
+    api.earn('checkin')
+      .then((d) => {
+        if (d && typeof d.balance === 'number') app.setBalance(d.balance);
+        this.setData({
+          checkedIn: true,
+          lightPoints: app.globalData.lightPoints
+        });
+        wx.showToast({ title: '签到成功 ✦10 光子', icon: 'success' });
+      })
+      .catch((err) => {
+        wx.showToast({ title: err.message || '签到失败，稍后再试', icon: 'none' });
+      });
   },
 
-  onSelectPackage(e) {
-    const name = e.currentTarget.dataset.name;
-    const price = e.currentTarget.dataset.price;
+  /** 充值套餐：微信支付尚未接入，如实告知（不再演示式地凭空加光子） */
+  onSelectPackage() {
     wx.showModal({
-      title: '积分补给',
-      content: `确认获取【${name}】（金额 ¥${price}）吗？\n当前为演示沙盒环境，确认后将直接为您注入积分。`,
-      confirmText: '立即充值',
-      confirmColor: '#1a1917',
-      cancelText: '取消',
-      success: (res) => {
-        if (res.confirm) {
-          const add = parseInt(name, 10) || 600;
-          app.addToken(add);
-          this.refreshData();
-          wx.showToast({ title: `已成功注入 +${add} 积分`, icon: 'success' });
-        }
-      }
+      title: '光子补给',
+      content: '支付通道即将开放。当前可通过每日签到、看视频补给与邀请好友获取光子。',
+      showCancel: false,
+      confirmText: '我知道了'
     });
   },
 

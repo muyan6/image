@@ -395,8 +395,8 @@
         <div class="card">
           <div class="card-head"><h2>计费与输出</h2></div>
           <div class="form-grid">
-            <div class="field"><label>轻量档价格（小鱼干/张）</label><input type="number" id="price-light" min="0" max="9999"></div>
-            <div class="field"><label>精细档价格（小鱼干/张）</label><input type="number" id="price-fine" min="0" max="9999"></div>
+            <div class="field"><label>轻量档价格（光子/张）</label><input type="number" id="price-light" min="0" max="9999"></div>
+            <div class="field"><label>精细档价格（光子/张）</label><input type="number" id="price-fine" min="0" max="9999"></div>
             <div class="field"><label>归一化长边<small>0 = 关闭缩放；改小可省网关费用</small></label><input type="number" id="normalize" min="0" max="8192"></div>
           </div>
         </div>
@@ -407,7 +407,7 @@
           <br>
           <label class="check" style="background:#fffbeb;border:1px dashed #f5d78e;border-radius:8px;padding:8px 12px">
             <span class="switch"><input type="checkbox" id="free-mode"><span class="knob"></span></span>
-            调试模式（不限次）：小程序跳过小鱼干扣减，鱼干显示 ∞</label>
+            调试模式（不限次）：小程序跳过光子扣减，光子显示不限量</label>
           <p style="margin:16px 0 0"><button class="btn-primary" onclick="saveConf()">保存通用设置</button></p>
         </div>
       </section>
@@ -962,7 +962,7 @@ function openTplModal(id) {
         <textarea id="m-tpl-prompt" style="min-height:130px">${esc(t?.prompt || "")}</textarea>
         <span class="muted">要叠加文字的模板，务必写明"画面本身不要包含任何文字"，文字由排版引擎保证正确</span></div>
       <div class="form-grid" style="margin-top:14px">
-        <div class="field"><label>小鱼干价格<small>0 = 按档位默认价</small></label><input type="number" id="m-tpl-price" min="0" max="9999" value="${t ? t.price : 0}"></div>
+        <div class="field"><label>光子价格<small>0 = 按档位默认价</small></label><input type="number" id="m-tpl-price" min="0" max="9999" value="${t ? t.price : 0}"></div>
         <div class="field"><label>输出长边<small>0 = 不处理；印刷级填 2048</small></label><input type="number" id="m-tpl-outsize" min="0" max="8192" value="${t ? t.output_size : 0}"></div>
         <div class="field"><label>网关 size 参数<small>如 2048x2048；不支持会自动忽略</small></label><input type="text" id="m-tpl-gsize" value="${esc(t?.gateway_size || "")}" placeholder="留空不传"></div>
         <div class="field"><label>模型覆盖<small>如供应商原生 2K/4K 模型名</small></label><input type="text" id="m-tpl-model" value="${esc(t?.model_override || "")}" placeholder="留空用档位默认模型"></div>
@@ -1143,16 +1143,16 @@ async function loadUsers() {
   try {
     const data = await api("/users?limit=30");
     const t = $("users-table");
-    t.innerHTML = "<thead><tr><th>用户</th><th>首次使用</th><th>最近活跃</th><th>已修图</th><th>被拦截</th></tr></thead><tbody></tbody>";
+    t.innerHTML = "<thead><tr><th>用户</th><th>首次使用</th><th>最近活跃</th><th>已修图</th><th>被拦截</th><th>光子余额</th></tr></thead><tbody></tbody>";
     const tbody = t.tBodies[0];
     data.items.forEach((u) => {
       const tr = document.createElement("tr");
       tr.innerHTML = `<td><code>${esc(u.openid.slice(0, 8))}…</code></td>` +
         `<td>${fmtTime(u.created_at)}</td><td>${fmtTime(u.last_seen)}</td>` +
-        `<td>${u.total_jobs}</td><td>${u.blocked}</td>`;
+        `<td>${u.total_jobs}</td><td>${u.blocked}</td><td>✦ ${u.balance ?? 0}</td>`;
       tbody.appendChild(tr);
     });
-    if (!data.items.length) tbody.innerHTML = '<tr><td colspan="5" class="empty">还没有用户</td></tr>';
+    if (!data.items.length) tbody.innerHTML = '<tr><td colspan="6" class="empty">还没有用户</td></tr>';
   } catch (e) { console.error(e); }
 }
 

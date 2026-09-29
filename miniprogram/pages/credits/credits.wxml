@@ -1,37 +1,37 @@
 <view class="page-container">
-  <!-- 1. 可用积分主卡片 (Museum Mat Board) -->
+  <!-- 1. 可用光子主卡片 (Museum Mat Board) -->
   <view class="balance-card gallery-card">
     <view class="washi-tape"></view>
     <view class="balance-head">
-      <text class="balance-label">可用积分</text>
-      <text class="rate-badge">轻量生成 · 1 积分/张</text>
+      <text class="balance-label">可用光子</text>
+      <text class="rate-badge">轻量生成 · ✦1/张</text>
     </view>
     <view class="balance-main">
-      <text class="balance-number">{{ fishTokens }}</text>
-      <text class="balance-unit">积分</text>
+      <text class="balance-number">✦ {{ lightPoints }}</text>
+      <text class="balance-unit">光子</text>
     </view>
-    <text class="balance-desc">按轻量生成计算，当前约可拯救 {{ fishTokens }} 张照片</text>
+    <text class="balance-desc">按轻量生成计算，当前约可拯救 {{ lightPoints }} 张照片</text>
 
     <view class="checkin-row" bindtap="onCheckIn">
       <view class="checkin-status">
-        <text class="check-icon">✓</text>
-        <text class="check-text">{{ checkedIn ? '今日已签到' : '点击签到领积分' }}</text>
+        <text class="check-icon">{{ checkedIn ? '✓' : '✦' }}</text>
+        <text class="check-text">{{ checkedIn ? '今日已签到' : '点击签到领 ✦10' }}</text>
       </view>
       <text class="checkin-link">签到日历 ›</text>
     </view>
   </view>
 
-  <!-- 2. 充值积分 -->
+  <!-- 2. 充值光子 -->
   <view class="section-box">
     <view class="section-head">
-      <text class="section-title">充值积分</text>
-      <text class="section-tip">成功支付后即刻到账</text>
+      <text class="section-title">充值光子</text>
+      <text class="section-tip">支付通道即将开放</text>
     </view>
 
     <view class="package-list gallery-card">
-      <view class="package-item" bindtap="onSelectPackage" data-name="600 积分" data-price="6.9">
+      <view class="package-item" bindtap="onSelectPackage" data-name="600 光子" data-price="6.9">
         <view class="pkg-info">
-          <text class="pkg-name">600 积分</text>
+          <text class="pkg-name">600 光子</text>
           <text class="pkg-sub">按轻量生成约可生成 600 张</text>
         </view>
         <view class="pkg-price-box">
@@ -41,10 +41,10 @@
       </view>
       <view class="item-divider"></view>
 
-      <view class="package-item" bindtap="onSelectPackage" data-name="2000 积分" data-price="19.9">
+      <view class="package-item" bindtap="onSelectPackage" data-name="2000 光子" data-price="19.9">
         <view class="pkg-info">
           <view class="pkg-title-row">
-            <text class="pkg-name">2000 积分</text>
+            <text class="pkg-name">2000 光子</text>
             <text class="badge-rec">推荐</text>
           </view>
           <text class="pkg-sub">按轻量生成约可生成 2000 张</text>
@@ -56,9 +56,9 @@
       </view>
       <view class="item-divider"></view>
 
-      <view class="package-item" bindtap="onSelectPackage" data-name="4500 积分" data-price="39.9">
+      <view class="package-item" bindtap="onSelectPackage" data-name="4500 光子" data-price="39.9">
         <view class="pkg-info">
-          <text class="pkg-name">4500 积分</text>
+          <text class="pkg-name">4500 光子</text>
           <text class="pkg-sub">按轻量生成约可生成 4500 张</text>
         </view>
         <view class="pkg-price-box">
@@ -69,20 +69,20 @@
     </view>
   </view>
 
-  <!-- 3. 邀请好友得积分卡片 -->
+  <!-- 3. 邀请好友得光子卡片 -->
   <view class="invite-banner gallery-card" bindtap="onGoInvite">
-    <view class="banner-badge">+50</view>
+    <view class="banner-badge">✦30</view>
     <view class="banner-content">
       <text class="banner-title">邀请好友</text>
-      <text class="banner-desc">好友首次成功生成后，你得 50 积分，对方得 30 积分。</text>
+      <text class="banner-desc">好友绑定你的邀请码后，你和对方各得 30 光子。</text>
     </view>
     <button class="btn-ink banner-btn">邀请</button>
   </view>
 
-  <!-- 4. 积分明细 -->
+  <!-- 4. 光子明细 -->
   <view class="section-box">
     <view class="section-head">
-      <text class="section-title">积分明细</text>
+      <text class="section-title">光子明细</text>
     </view>
     <view class="history-list gallery-card">
       <view class="history-item" wx:for="{{ records }}" wx:key="id">
@@ -90,7 +90,7 @@
           <text class="hist-title">{{ item.title }}</text>
           <text class="hist-time">{{ item.time }}</text>
         </view>
-        <text class="hist-gain">+{{ item.amount }}</text>
+        <text class="hist-gain">✦{{ item.amount }}</text>
       </view>
     </view>
   </view>
@@ -104,8 +104,8 @@
       <view class="notice-row">
         <view class="notice-icon">✓</view>
         <view class="notice-text">
-          <text class="notice-h">失败不扣积分</text>
-          <text class="notice-p">技术失败、超时或内容审核未通过，冻结积分会自动退回。</text>
+          <text class="notice-h">失败不扣光子</text>
+          <text class="notice-p">技术失败、超时或内容审核未通过，预扣的光子会自动退回。</text>
         </view>
       </view>
       <view class="item-divider"></view>
@@ -117,6 +117,6 @@
         </view>
       </view>
     </view>
-    <text class="disclaimer-text">积分为虚拟权益，仅用于本小程序内的图片生成与风格重塑服务。</text>
+    <text class="disclaimer-text">光子为虚拟权益，仅用于本小程序内的图片生成与风格重塑服务。</text>
   </view>
 </view>

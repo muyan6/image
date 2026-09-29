@@ -19,6 +19,8 @@
 """
 from __future__ import annotations
 
+import hashlib
+import glob
 import json
 import logging
 import mimetypes
@@ -30,9 +32,10 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -112,6 +115,12 @@ ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", 30 * 24 * 3600))
 JOB_MAX_ENTRIES = int(os.environ.get("JOB_MAX_ENTRIES", 5000))
 
+# 每日奖励（服务端记账，客户端只是展示）
+EARN_DEFS: Dict[str, Dict[str, Any]] = {
+    "checkin": {"reward": 10, "limit": 1, "label": "签到"},
+    "video": {"reward": 10, "limit": 3, "label": "看视频"},
+}
+
 # 归一化长边改由后台设置热调（settings.normalize_long_side()），
 # 环境变量 NORMALIZE_LONG_SIDE 仅作为首次初始化的默认值。
 
@@ -142,6 +151,9 @@ async def lifespan(_app: FastAPI):
     )
     if not h["configured"]:
         log.warning("没有任何 AI 后端，全部走本地 engine.py")
+    _startup_file_gc()
+    threading.Thread(target=_bg_sweeper, name="job-sweeper",
+                     daemon=True).start()
     yield
     pool.shutdown(wait=False, cancel_futures=True)
     log.info("已停止")
@@ -240,17 +252,20 @@ def _build_client(name: str, conf: Dict[str, Any]):
 
 
 def _get_client(name: str):
-    """按当前设置取客户端；配置指纹变化时重建。返回 None 表示不可用。"""
+    """按当前设置取客户端；配置指纹变化时重建。返回 None 表示不可用。
+
+    构建动作很轻（只是 new 一个 HTTP 客户端对象），直接在锁内完成，
+    避免两个线程同时构建互相覆盖。
+    """
     conf = settings.provider(name)
     fp = _fingerprint(conf)
     with _clients_lock:
         cached = _clients.get(name)
         if cached is not None and cached[0] == fp:
             return cached[1]
-    client = _build_client(name, conf)
-    with _clients_lock:
+        client = _build_client(name, conf)
         _clients[name] = (fp, client)
-    return client
+        return client
 
 
 pool = ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="rescue")
@@ -260,12 +275,15 @@ pool = ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="rescue")
 # 用户鉴权 / 直传登记 / 配额 / 审核
 # --------------------------------------------------------------------------- #
 def _current_user(request) -> Dict[str, Any]:
-    """从 Authorization: Bearer 解出 openid 并返回用户行，未登录抛 401。"""
+    """从 Authorization: Bearer 解出 openid 并返回用户行，未登录抛 401。
+
+    已注册用户走纯读（轮询接口每 1.5s 打一次，不能每次都写库）。
+    """
     token = bearer_of({k.lower(): v for k, v in request.headers.items()})
     openid = verify_user_token(token) if token else None
     if not openid:
         raise HTTPException(status_code=401, detail="请先登录")
-    return users.ensure_user(openid)
+    return users.get_user(openid) or users.ensure_user(openid)
 
 
 # 直传登记：upload_id -> 登记，1 小时未完成自动作废
@@ -320,6 +338,19 @@ def _moderate_or_reject(image_bytes: bytes, job_ctx: str, openid: str) -> Option
     return None
 
 
+def _refund_charged(openid: str, job_id: str, price: int) -> None:
+    """任务失败/被拦截时全额退还预扣的光子。"""
+    if price <= 0 or settings.free_mode():
+        return
+    try:
+        balance = users.add_balance(openid, int(price))
+        users.audit(openid, "refund", "job=%s +=%d balance=%d"
+                    % (job_id, price, balance))
+        log.info("[%s] 已退还 %d 光子（余额 %d）", job_id, price, balance)
+    except Exception:  # noqa: BLE001
+        log.exception("[%s] 退还光子失败", job_id)
+
+
 def _register_job(openid: str, quality: str, style: str,
                   orig_tmp_path: str, ext: str,
                   template: Optional[Dict[str, Any]] = None,
@@ -329,49 +360,69 @@ def _register_job(openid: str, quality: str, style: str,
 
     template 非空时，引擎档位/提示词/输出尺寸/文字排版全部以模板为准，
     价格用模板价（未定价回退到档位默认价）。
+    光子在提交时预扣（服务端记账，余额不足直接 402），任务失败自动退款。
     """
-    job_id = uuid.uuid4().hex[:12]
-    orig_file = "orig_%s%s" % (job_id, ext)
-    orig_path = os.path.join(UPLOAD_DIR, orig_file)
-    shutil.move(orig_tmp_path, orig_path)
-    result_file = "result_%s.jpg" % job_id
-
     price = _effective_price(quality, template)
-    if template:
-        templates.inc_usage(template["id"])
+    charged = 0
+    balance = users.get_balance(openid)
+    if not settings.free_mode() and price > 0:
+        ok, balance = users.try_spend(openid, price)
+        if not ok:
+            raise HTTPException(
+                status_code=402,
+                detail="光子不足：本次需要 %d ✦，当前余额 %d ✦" % (price, balance))
+        charged = price
 
-    orig_cos = result_cos = None
-    if settings.cos_ready():
-        try:
-            orig_cos = "origins/%s/%s%s" % (openid[:8], job_id, ext)
-            with open(orig_path, "rb") as fh:
-                cos_put(settings, orig_cos, fh.read())
-            result_cos = "results/%s/%s.jpg" % (openid[:8], job_id)
-        except CosError as exc:
-            log.warning("[%s] COS 登记失败，回退本地存储: %s", job_id, exc)
-            orig_cos = result_cos = None
+    job_id = uuid.uuid4().hex[:12]
+    try:
+        orig_file = "orig_%s%s" % (job_id, ext)
+        orig_path = os.path.join(UPLOAD_DIR, orig_file)
+        shutil.move(orig_tmp_path, orig_path)
+        result_file = "result_%s.jpg" % job_id
 
-    jobs.create(
-        job_id,
-        openid=openid,
-        quality=quality,
-        style=style,
-        template_id=(template or {}).get("id", ""),
-        template_name=(template or {}).get("name", ""),
-        price=price,
-        aspect_ratio=aspect_ratio,
-        orig_file=orig_file,
-        result_file=result_file,
-        stage="queued",
-        orig_url="/api/images/%s" % orig_file,
-        result_url="/api/images/%s" % result_file,
-        orig_cos=orig_cos,
-        result_cos=result_cos,
-    )
+        if template:
+            templates.inc_usage(template["id"])
+
+        orig_cos = result_cos = None
+        if settings.cos_ready():
+            try:
+                orig_cos = "origins/%s/%s%s" % (openid[:8], job_id, ext)
+                with open(orig_path, "rb") as fh:
+                    cos_put(settings, orig_cos, fh.read())
+                result_cos = "results/%s/%s.jpg" % (openid[:8], job_id)
+            except CosError as exc:
+                log.warning("[%s] COS 登记失败，回退本地存储: %s", job_id, exc)
+                orig_cos = result_cos = None
+
+        jobs.create(
+            job_id,
+            openid=openid,
+            quality=quality,
+            style=style,
+            template_id=(template or {}).get("id", ""),
+            template_name=(template or {}).get("name", ""),
+            price=price,
+            aspect_ratio=aspect_ratio,
+            orig_file=orig_file,
+            result_file=result_file,
+            stage="queued",
+            orig_url="/api/images/%s" % orig_file,
+            result_url="/api/images/%s" % result_file,
+            orig_cos=orig_cos,
+            result_cos=result_cos,
+        )
+    except HTTPException:
+        _refund_charged(openid, job_id, charged)
+        raise
+    except Exception:
+        _refund_charged(openid, job_id, charged)
+        raise
+
     jobs.sweep()
     users.inc_total(openid)
-    users.audit(openid, "submitted", "job=%s quality=%s tpl=%s ar=%s"
-                % (job_id, quality, (template or {}).get("id", "-"), aspect_ratio or "-"))
+    users.audit(openid, "submitted", "job=%s quality=%s tpl=%s ar=%s price=%d"
+                % (job_id, quality, (template or {}).get("id", "-"),
+                   aspect_ratio or "-", price))
     pool.submit(_run_pipeline, job_id, quality, style,
                 copy_template(template), dict(text_values or {}), aspect_ratio)
     return {
@@ -383,6 +434,7 @@ def _register_job(openid: str, quality: str, style: str,
         "template_name": (template or {}).get("name", ""),
         "aspect_ratio": aspect_ratio,
         "price": price,
+        "balance": balance,
         "orig_url": "/api/images/%s" % orig_file,
         "result_url": "/api/images/%s" % result_file,
     }
@@ -409,13 +461,16 @@ class JobStore:
     """进程内任务表。
 
     单机轻量调度够用；要横向扩容请换成 Redis。
+    驱逐（过期/超量）时通过 on_evict 回调通知上层清理磁盘文件。
     """
 
-    def __init__(self, ttl: int, max_entries: int) -> None:
+    def __init__(self, ttl: int, max_entries: int,
+                 on_evict: Optional[Any] = None) -> None:
         self._data: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._ttl = ttl
         self._max = max_entries
+        self._on_evict = on_evict
 
     def create(self, job_id: str, **fields: Any) -> Dict[str, Any]:
         now = time.time()
@@ -429,8 +484,10 @@ class JobStore:
         }
         with self._lock:
             self._data[job_id] = job
+            evicted: List[Dict[str, Any]] = []
             if len(self._data) > self._max:
-                self._evict_locked(keep=job_id)
+                evicted = self._evict_locked(keep=job_id)
+        self._notify_evicted(evicted)
         return job
 
     def get(self, job_id: str) -> Optional[Dict[str, Any]]:
@@ -446,12 +503,13 @@ class JobStore:
             job.update(fields)
             job["updated_at"] = time.time()
 
-    def _evict_locked(self, keep: Optional[str] = None) -> None:
-        """先删过期，再按创建时间删最旧。调用方必须持锁。"""
+    def _evict_locked(self, keep: Optional[str] = None) -> List[Dict[str, Any]]:
+        """先删过期，再按创建时间删最旧。调用方必须持锁。返回被驱逐的任务。"""
+        evicted: List[Dict[str, Any]] = []
         now = time.time()
         for jid in [k for k, v in self._data.items()
                     if now - v.get("created_at", now) > self._ttl]:
-            self._data.pop(jid, None)
+            evicted.append(self._data.pop(jid))
         while len(self._data) > self._max:
             oldest = min(
                 (k for k in self._data if k != keep),
@@ -460,11 +518,21 @@ class JobStore:
             )
             if oldest is None:
                 break
-            self._data.pop(oldest, None)
+            evicted.append(self._data.pop(oldest))
+        return evicted
+
+    def _notify_evicted(self, evicted: List[Dict[str, Any]]) -> None:
+        if not evicted or self._on_evict is None:
+            return
+        try:
+            self._on_evict(evicted)
+        except Exception:  # noqa: BLE001 —— 清理失败不影响主流程
+            log.exception("清理被驱逐任务的文件失败")
 
     def sweep(self) -> None:
         with self._lock:
-            self._evict_locked()
+            evicted = self._evict_locked()
+        self._notify_evicted(evicted)
 
     def list_recent(self, offset: int = 0, limit: int = 50):
         """后台任务列表：按创建时间倒序。返回 (items, total)。"""
@@ -480,7 +548,55 @@ class JobStore:
             )
 
 
-jobs = JobStore(JOB_TTL_SECONDS, JOB_MAX_ENTRIES)
+def _cleanup_job_files(evicted_jobs: List[Dict[str, Any]]) -> None:
+    """任务被驱逐后删除其磁盘文件（只删已出结果/失败的，排队中的不动）。"""
+    for job in evicted_jobs:
+        if job.get("status") == "processing":
+            continue  # 可能还在队列里，等下一轮 TTL 再收
+        for field in ("orig_file", "result_file"):
+            name = job.get(field)
+            if name:
+                _safe_remove(os.path.join(UPLOAD_DIR, name))
+
+
+def _startup_file_gc() -> None:
+    """启动时清一次磁盘：临时文件超 1 天、任务产物超 TTL 的直接删。
+
+    任务表在内存里（重启即空），所以不能按"不在表里 = 孤儿"判断，
+    一律以文件 mtime 为准 —— TTL 之外的产物本来也不可达了。
+    """
+    cutoff_tmp = time.time() - 24 * 3600
+    cutoff_job = time.time() - JOB_TTL_SECONDS
+    removed = 0
+    for path in glob.glob(os.path.join(UPLOAD_DIR, "*")):
+        base = os.path.basename(path)
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        if base.startswith(("incoming_", "tmp_", "norm_")):
+            stale = mtime < cutoff_tmp
+        elif base.startswith(("orig_", "result_")):
+            stale = mtime < cutoff_job
+        else:
+            continue
+        if stale and _safe_remove(path):
+            removed += 1
+    if removed:
+        log.info("启动清理：删除 %d 个过期上传/结果文件", removed)
+
+
+def _bg_sweeper() -> None:
+    """后台定时清理过期任务（内存表 + 磁盘文件）。"""
+    while True:
+        time.sleep(600)
+        try:
+            jobs.sweep()
+        except Exception:  # noqa: BLE001
+            log.exception("后台任务清理失败")
+
+
+jobs = JobStore(JOB_TTL_SECONDS, JOB_MAX_ENTRIES, on_evict=_cleanup_job_files)
 
 
 # --------------------------------------------------------------------------- #
@@ -749,6 +865,8 @@ def _run_pipeline(job_id: str, quality: str, style: str,
             except OSError:
                 pass
             jobs.update(job_id, status="failed", stage=stage, error=reject)
+            _refund_charged(job.get("openid", ""), job_id,
+                            int(job.get("price") or 0))
             log.warning("[%s] 结果被审核拦截: %s", job_id, reject)
             return
         # 结果图上传 COS（登记时预留的 result_cos 键），用户下载走 COS 直链
@@ -767,6 +885,8 @@ def _run_pipeline(job_id: str, quality: str, style: str,
     except Exception as exc:  # noqa: BLE001
         log.exception("[%s] 处理失败（stage=%s）", job_id, stage)
         jobs.update(job_id, status="failed", error=str(exc)[:500], stage=stage)
+        _refund_charged(job.get("openid", ""), job_id,
+                        int(job.get("price") or 0))
     finally:
         for path in (norm, tmp):
             try:
@@ -1011,6 +1131,7 @@ def _resolve_template(template_id: str, text_fields_raw: str = ""
 
     返回 (模板快照或 None, 引擎档位, 文字字段值)。
     template_id 提供但找不到/已停用 -> 400（客户端拿到的是旧列表时保护）；
+    模板存在时引擎档位以模板 engine 为准（quality 参数仅纯修复模式生效）；
     模板文字字段做长度截断 + 默认值补齐（collect_values）。
     """
     template_id = (template_id or "").strip()
@@ -1038,23 +1159,59 @@ def _resolve_template(template_id: str, text_fields_raw: str = ""
     return tpl, quality, merged
 
 
-def _safe_remove(path: str) -> None:
+def _safe_remove(path: str) -> bool:
     try:
         if os.path.exists(path):
             os.remove(path)
+            return True
     except OSError:
         pass
+    return False
+
+
+class _LoginBody(BaseModel):
+    code: str = ""
+
+
+class _EarnBody(BaseModel):
+    kind: str = ""
+
+
+class _InviteBody(BaseModel):
+    code: str = ""
+
+
+class _RescueByUploadBody(BaseModel):
+    upload_id: str = ""
+    quality: str = ""
+    style: str = ""
+    template_id: str = ""
+    text_fields: str = ""
+    aspect_ratio: str = ""
+
+
+def _login_response(openid: str) -> Dict[str, Any]:
+    user = users.ensure_user(openid)
+    users.audit(openid, "login")
+    return {
+        "token": user_token(openid),
+        "user": {"openid_masked": openid[:6] + "***",
+                 "total_jobs": user["total_jobs"]},
+        "balance": user["balance"],
+        "invite_code": user["invite_code"],
+        "free_mode": settings.free_mode(),
+        "cos_ready": settings.cos_ready(),
+    }
 
 
 @app.post("/api/auth/login")
-async def wechat_login(request: Request):
-    """wx.login 的 code 换用户会话 token（12h）。"""
-    try:
-        raw = await request.body()
-        body = json.loads(raw.decode("utf-8") or "{}")
-    except (ValueError, UnicodeDecodeError) as exc:
-        raise HTTPException(status_code=400, detail="请求体不是合法 JSON") from exc
-    code = str(body.get("code") or "").strip()
+def wechat_login(body: _LoginBody):
+    """wx.login 的 code 换用户会话 token（12h）。
+
+    同步处理：code2session 是阻塞网络调用，交给 FastAPI 线程池，
+    不许堵住事件循环。
+    """
+    code = (body.code or "").strip()
     if not code:
         raise HTTPException(status_code=400, detail="缺少 code")
     try:
@@ -1062,21 +1219,86 @@ async def wechat_login(request: Request):
     except WechatAuthError as exc:
         raise HTTPException(status_code=401 if exc.code != "NOT_CONFIGURED" else 503,
                             detail=str(exc)) from exc
-    user = users.ensure_user(openid)
-    users.audit(openid, "login")
+    return _login_response(openid)
+
+
+@app.post("/api/auth/web")
+def web_login(request: Request):
+    """网页控制台登录：按来源 IP 派生稳定访客身份，发同样的会话 token。
+
+    网页端做不了 wx.login，用 IP 哈希当 openid 即可接入同一套
+    配额 / 光子 / 任务归属体系（同 IP 共享配额与余额）。
+    """
+    ip = request.client.host if request.client else "unknown"
+    openid = "web-" + hashlib.sha256(("web:" + ip).encode("utf-8")).hexdigest()[:12]
+    return _login_response(openid)
+
+
+@app.get("/api/me")
+def get_me(request: Request):
+    """当前用户资料：光子余额、邀请码、今日奖励进度。"""
+    user = _current_user(request)
+    openid = user["openid"]
     return {
-        "token": user_token(openid),
-        "user": {"openid_masked": openid[:6] + "***",
-                 "total_jobs": user["total_jobs"]},
-        "free_mode": settings.free_mode(),
-        "cos_ready": settings.cos_ready(),
+        "openid_masked": openid[:6] + "***",
+        "balance": user["balance"],
+        "total_jobs": user["total_jobs"],
+        "invite_code": user["invite_code"],
+        "earn": {
+            "checkin_done": users.earn_count_today(openid, "checkin") > 0,
+            "video_today": users.earn_count_today(openid, "video"),
+        },
     }
 
 
+@app.post("/api/me/earn")
+def earn_points(body: _EarnBody, request: Request):
+    """每日奖励：checkin（1 次/天）与 video（3 次/天）。
+
+    次数校验与发放同事务落 SQLite，清缓存 / 改本地数据都刷不掉。
+    """
+    user = _current_user(request)
+    kind = (body.kind or "").strip()
+    conf = EARN_DEFS.get(kind)
+    if conf is None:
+        raise HTTPException(status_code=400, detail="未知的奖励类型")
+    ok, balance, count = users.earn(user["openid"], kind,
+                                    conf["reward"], conf["limit"])
+    if not ok:
+        raise HTTPException(status_code=429,
+                            detail="今日%s奖励已领完，明天再来吧" % conf["label"])
+    return {"ok": True, "kind": kind, "reward": conf["reward"],
+            "balance": balance, "count_today": count}
+
+
+@app.post("/api/me/invite")
+def bind_invite(body: _InviteBody, request: Request):
+    """绑定邀请码：邀请人与被邀请人各得奖励，每人只能被邀请一次。"""
+    user = _current_user(request)
+    openid = user["openid"]
+    code = (body.code or "").strip().upper()
+    if not re.fullmatch(r"INV-[0-9A-F]{8}", code):
+        raise HTTPException(status_code=400, detail="邀请码格式不对")
+    inviter = users.get_by_invite_code(code)
+    if inviter is None:
+        raise HTTPException(status_code=400, detail="邀请码不存在")
+    if inviter["openid"] == openid:
+        raise HTTPException(status_code=400, detail="不能填写自己的邀请码")
+    if users.action_count(openid, "invite_bound") > 0:
+        raise HTTPException(status_code=400, detail="已经绑定过邀请码了")
+    inviter_balance = users.add_balance(inviter["openid"], 30)
+    my_balance = users.add_balance(openid, 30)
+    users.audit(openid, "invite_bound", "by=%s" % inviter["invite_code"])
+    users.audit(inviter["openid"], "invite_reward",
+                "invitee=%s***" % openid[:6])
+    return {"ok": True, "balance": my_balance,
+            "inviter_balance": inviter_balance}
+
+
 @app.post("/api/uploads")
-async def create_upload(request: Request,
-                        filename: str = Form("photo.jpg"),
-                        byte_size: int = Form(0)):
+def create_upload(request: Request,
+                  filename: str = Form("photo.jpg"),
+                  byte_size: int = Form(0)):
     """申请 COS 预签名直传地址。未配置 COS 时返回 503。"""
     user = _current_user(request)
     if not settings.cos_ready():
@@ -1100,7 +1322,8 @@ async def create_upload(request: Request,
 
 
 @app.post("/api/uploads/{upload_id}/complete")
-async def complete_upload(upload_id: str, request: Request):
+def complete_upload(upload_id: str, request: Request):
+    """确认直传已完成（COS HEAD 验证对象确实存在）。"""
     user = _current_user(request)
     if not settings.cos_ready():
         raise HTTPException(status_code=503, detail="对象存储未配置")
@@ -1114,8 +1337,18 @@ async def complete_upload(upload_id: str, request: Request):
     return {"ok": True, "key": rec["key"]}
 
 
+def _chosen_quality(req_q: str, tpl_quality: str) -> str:
+    """引擎档位：模板模式跟模板走（与 _resolve_template 的文档口径一致），
+    纯修复模式用用户选择的档位，缺省 fine。"""
+    if tpl_quality:
+        return tpl_quality
+    if req_q in ("light", "fine"):
+        return req_q
+    return "fine"
+
+
 @app.post("/api/rescue")
-async def create_rescue_job(
+def create_rescue_job(
     request: Request,
     image: UploadFile = File(...),
     quality: str = Form("fine"),
@@ -1127,16 +1360,16 @@ async def create_rescue_job(
     """提交修图任务（multipart 路径；启用 COS 直传后小程序走 /by-upload）。
 
     支持画幅比例 aspect_ratio（1:1, 3:4, 4:3, 9:16, 16:9, original）。
-    用户显式选择的 quality（light/fine）优先；template_id 非空时合并模板提示词/排版。
+    template_id 非空时引擎档位/提示词/输出尺寸/文字排版全部以模板为准；
+    纯修复模式用用户显式选择的 quality（light/fine）。
+
+    同步处理：cv2 解码、内容审核、COS 上传全是阻塞 IO，
+    FastAPI 会把整个 handler 丢进线程池，事件循环不被拖住。
     """
     user = _rescue_guard(request)
     tpl, tpl_quality, text_values = _resolve_template(template_id, text_fields)
-    req_q = (quality or "").strip().lower()
-    if req_q in ("light", "fine"):
-        chosen_q = req_q
-    else:
-        chosen_q = tpl_quality or "fine"
-    quality, style = _validate_quality_style(chosen_q, style)
+    quality, style = _validate_quality_style(
+        _chosen_quality((quality or "").strip().lower(), tpl_quality), style)
 
     ext = os.path.splitext(image.filename or "")[1].lower()
     if ext not in ALLOWED_EXT:
@@ -1150,7 +1383,7 @@ async def create_rescue_job(
         written = 0
         with open(job_tmp, "wb") as fh:
             while True:
-                chunk = await image.read(1024 * 1024)
+                chunk = image.file.read(1024 * 1024)
                 if not chunk:
                     break
                 written += len(chunk)
@@ -1166,7 +1399,10 @@ async def create_rescue_job(
         _safe_remove(job_tmp)
         raise HTTPException(status_code=500, detail="保存上传文件失败") from exc
     finally:
-        await image.close()
+        try:
+            image.file.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     try:
         _validate_image(job_tmp)
@@ -1181,35 +1417,30 @@ async def create_rescue_job(
         _safe_remove(job_tmp)
         raise HTTPException(status_code=400, detail=reject)
 
-    return _register_job(user["openid"], quality, style, job_tmp, ext,
-                         template=tpl, text_values=text_values,
-                         aspect_ratio=aspect_ratio)
+    try:
+        return _register_job(user["openid"], quality, style, job_tmp, ext,
+                             template=tpl, text_values=text_values,
+                             aspect_ratio=aspect_ratio)
+    except Exception:
+        _safe_remove(job_tmp)  # 含 402 光子不足等失败路径，别留下孤儿临时文件
+        raise
 
 
 @app.post("/api/rescue/by-upload")
-async def create_rescue_job_by_upload(request: Request):
+def create_rescue_job_by_upload(payload: _RescueByUploadBody,
+                                request: Request):
     """COS 直传路径：JSON {upload_id, quality, style, template_id, text_fields, aspect_ratio}，
-    图片字节不过本服务器。"""
+    图片字节不过本服务器（从 COS 拉回到本地归一化，出方向流量为零）。"""
     user = _rescue_guard(request)
-    try:
-        raw = await request.body()
-        body = json.loads(raw.decode("utf-8") or "{}")
-    except (ValueError, UnicodeDecodeError) as exc:
-        raise HTTPException(status_code=400, detail="请求体不是合法 JSON") from exc
-    upload_id = str(body.get("upload_id") or "")
-    aspect_ratio = str(body.get("aspect_ratio") or "")
+    upload_id = (payload.upload_id or "").strip()
     tpl, tpl_quality, text_values = _resolve_template(
-        str(body.get("template_id") or ""), str(body.get("text_fields") or ""))
-    req_q = str(body.get("quality") or "").strip().lower()
-    if req_q in ("light", "fine"):
-        chosen_q = req_q
-    else:
-        chosen_q = tpl_quality or "fine"
+        payload.template_id, payload.text_fields)
     quality, style = _validate_quality_style(
-        chosen_q, str(body.get("style") or ""))
+        _chosen_quality((payload.quality or "").strip().lower(), tpl_quality),
+        payload.style)
 
     with _uploads_lock:
-        rec = _uploads.get(upload_id)
+        rec = _uploads.pop(upload_id, None)  # 登记用后即焚，同一 upload_id 不能重复提交
     if rec is None or rec["openid"] != user["openid"]:
         raise HTTPException(status_code=404, detail="上传登记不存在")
     if not cos_head(settings, rec["key"]):
@@ -1236,17 +1467,22 @@ async def create_rescue_job_by_upload(request: Request):
         _safe_remove(job_tmp)
         raise HTTPException(status_code=400, detail=reject)
 
-    return _register_job(user["openid"], quality, style, job_tmp, ext,
-                         template=tpl, text_values=text_values,
-                         aspect_ratio=aspect_ratio)
+    try:
+        return _register_job(user["openid"], quality, style, job_tmp, ext,
+                             template=tpl, text_values=text_values,
+                             aspect_ratio=payload.aspect_ratio)
+    except Exception:
+        _safe_remove(job_tmp)
+        raise
 
 
 @app.get("/api/jobs/{job_id}")
-def query_job_status(job_id: str) -> Dict[str, Any]:
-    """前端轮询接口。"""
+def query_job_status(job_id: str, request: Request):
+    """前端轮询接口。任务只对提交者本人可见（他人查询一律 404，不泄露存在性）。"""
+    user = _current_user(request)
     job_id = _safe_job_id(job_id)
     job = jobs.get(job_id)
-    if job is None:
+    if job is None or job.get("openid") != user["openid"]:
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
     def _media_url(kind: str, fallback: Optional[str]) -> Optional[str]:
         """COS 可用时给签名直链（免服务器带宽），否则本地路径。"""

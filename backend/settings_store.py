@@ -101,6 +101,27 @@ def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+# 误删后服务会残废的关键结构：合并后一律用默认值兜底补齐
+_DICT_SECTIONS = ("providers", "wechat", "tencent", "moderation", "quota",
+                  "prompts", "prices", "maintenance", "quality_to_style")
+
+
+def _rebase_defaults(candidate: Dict[str, Any]) -> None:
+    """patch 里 value 为 None 会删掉整段配置（如 providers.baidu），
+    这里在校验前把缺的关键节点从默认值补回来，保证服务永远可跑。"""
+    for key in _DICT_SECTIONS:
+        default_val = copy.deepcopy(DEFAULT_SETTINGS.get(key, {}))
+        current = candidate.get(key)
+        if not isinstance(current, dict):
+            candidate[key] = default_val
+        else:
+            candidate[key] = _deep_merge(default_val, current)
+    if not (isinstance(candidate.get("chain"), list) and candidate["chain"]):
+        candidate["chain"] = list(DEFAULT_SETTINGS["chain"])
+    if not (isinstance(candidate.get("styles"), list) and candidate["styles"]):
+        candidate["styles"] = copy.deepcopy(DEFAULT_SETTINGS["styles"])
+
+
 def _validate(doc: Dict[str, Any]) -> None:
     """整档校验,不合法直接抛 ValueError,调用方放弃本次写入。"""
     chain = doc.get("chain")
@@ -136,7 +157,7 @@ def _validate(doc: Dict[str, Any]) -> None:
     for tier in ("light", "fine"):
         value = prices.get(tier)
         if not isinstance(value, int) or not 0 <= value <= 9999:
-            raise ValueError("prices.%s 必须是 0~9999 的整数(小鱼干)" % tier)
+            raise ValueError("prices.%s 必须是 0~9999 的整数(光子)" % tier)
 
     if not isinstance(doc.get("free_mode"), bool):
         raise ValueError("free_mode 必须是布尔值")
@@ -254,9 +275,10 @@ class SettingsStore:
             return copy.deepcopy(self._data)
 
     def update(self, patch: Dict[str, Any]) -> Dict[str, Any]:
-        """递归合并 patch,校验通过才落盘。返回更新后的完整快照。"""
+        """递归合并 patch,关键节点兜底补齐,校验通过才落盘。返回更新后的完整快照。"""
         with self._lock:
             candidate = _deep_merge(self._data, patch)
+            _rebase_defaults(candidate)
             _validate(candidate)
             self._data = candidate
             self._save_locked(self._data)

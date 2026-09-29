@@ -594,3 +594,32 @@ page {
   color: #9a9a9f;
   text-align: center;
 }
+
+/* 模板自定义文字字段 */
+.tpl-text-row {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  padding: 12rpx 0;
+}
+
+.tpl-text-row + .tpl-text-row {
+  border-top: 1rpx solid #f0ece2;
+}
+
+.tpl-text-label {
+  flex: 0 0 130rpx;
+  font-size: 22rpx;
+  font-weight: 600;
+  color: #1a1917;
+}
+
+.tpl-text-input {
+  flex: 1;
+  padding: 14rpx 18rpx;
+  border: 1rpx solid #d8d2c4;
+  border-radius: 8rpx;
+  background: #ffffff;
+  font-size: 24rpx;
+  color: #1a1917;
+}

@@ -1,3 +1,6 @@
+const app = getApp();
+const api = require('../../utils/api.js');
+
 const DEMO_ORIG = 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800';
 const DEMO_RESULT = 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&q=80';
 
@@ -20,6 +23,8 @@ Page({
     const quality = options.quality === 'light' ? 'light' : 'fine';
     const demo = !!options.demo || (!orig && !res);
 
+    this._jobId = options.job ? decodeURIComponent(options.job) : '';
+
     this.setData({
       originalUrl: demo ? DEMO_ORIG : orig,
       resultUrl: demo ? DEMO_RESULT : res,
@@ -27,6 +32,23 @@ Page({
       demo: demo,
       label: quality === 'fine' ? '2K 深度超分' : '1.5K 标准修复'
     });
+  },
+
+  /**
+   * 向服务端换一张新的结果图直链（COS 签名 2 小时过期，老图会 403）。
+   * 有 jobId 才能刷新；成功后把新地址写回，失败保持原样。
+   */
+  refreshUrls() {
+    if (!this._jobId || this.data.demo) return Promise.resolve(false);
+    return api.request('/api/jobs/' + this._jobId)
+      .then((job) => {
+        if (!job || job.status !== 'succeeded' || !job.result_url) return false;
+        const orig = api.absolute(job.orig_url || this.data.originalUrl);
+        const res = api.absolute(job.result_url);
+        this.setData({ originalUrl: orig, resultUrl: res });
+        return true;
+      })
+      .catch(() => false);
   },
 
   onReady() {
@@ -97,8 +119,12 @@ Page({
   onResultError() {
     const url = this.data.resultUrl;
     if (!url || this.data.demo || /[?&]retry=/.test(url)) return;
-    const sep = url.indexOf('?') >= 0 ? '&' : '?';
-    this.setData({ resultUrl: url + sep + 'retry=' + Date.now() });
+    // 先向服务端换新鲜直链（COS 签名过期场景），换不到再做本地缓存击穿
+    this.refreshUrls().then((ok) => {
+      if (ok) return;
+      const sep = url.indexOf('?') >= 0 ? '&' : '?';
+      this.setData({ resultUrl: url + sep + 'retry=' + Date.now() });
+    });
   },
 
   onOrigError() {
@@ -106,7 +132,7 @@ Page({
   },
 
   /** 保存高清修复照片到系统相册 */
-  onDownload() {
+  async onDownload() {
     const url = this.data.resultUrl;
     if (!url || this.data.saving) return;
     if (this.data.demo) {
@@ -126,10 +152,13 @@ Page({
       wx.hideLoading();
     };
 
-    if (/^https?:\/\//i.test(url)) {
-      const cleanUrl = url.split('?')[0];
+    // 直链可能已过签名时效：下载前先向服务端换一次新鲜地址
+    await this.refreshUrls();
+    // 注意：COS 预签名地址的查询串就是鉴权本身，绝不能剥掉
+    const target = this.data.resultUrl;
+    if (/^https?:\/\//i.test(target)) {
       wx.downloadFile({
-        url: cleanUrl,
+        url: target,
         success: (res) => {
           if (res.statusCode === 200 && res.tempFilePath) {
             this.saveToAlbum(res.tempFilePath, done);
@@ -144,7 +173,7 @@ Page({
         }
       });
     } else {
-      this.saveToAlbum(url, done);
+      this.saveToAlbum(target, done);
     }
   },
 

@@ -90,7 +90,7 @@ def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFon
             continue
         if _text_width(draw, line + ch, font) > max_width and line:
             lines.append(line)
-            line = ch if not ch.isascii() or ch == " " else ch
+            line = ch
         else:
             line += ch
     if line:

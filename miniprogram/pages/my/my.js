@@ -1,18 +1,18 @@
 const app = getApp();
+const api = require('../../utils/api.js');
 
 Page({
   data: {
     userId: '',
     nickName: '微信用户',
     avatarUrl: '/images/logo.jpg',
-    fishTokens: 0,
+    lightPoints: 0,
     freeMode: false,
     historyList: [],
     previewWorks: [],
-    processingCount: 0,
-    creditRecordCount: 2,
     videoTasksToday: 0,
-    maxVideoTasks: 3
+    maxVideoTasks: 3,
+    videoReward: 10
   },
 
   onLoad() {
@@ -32,12 +32,21 @@ Page({
     const list = app.globalData.historyList || [];
     this.setData({
       userId: app.globalData.userId || 'PX-8A2F90B1',
-      fishTokens: app.globalData.fishTokens || 0,
+      lightPoints: app.globalData.lightPoints || 0,
+      freeMode: !!app.globalData.freeMode,
       historyList: list,
-      previewWorks: list.slice(0, 3),
-      videoTasksToday: app.globalData.videoTasksToday || 0,
-      maxVideoTasks: app.globalData.maxVideoTasks || 3
+      previewWorks: list.slice(0, 3)
     });
+
+    // 光子余额 / 视频补给进度以服务端为准
+    api.me().then((d) => {
+      if (!d) return;
+      if (typeof d.balance === 'number') app.setBalance(d.balance);
+      this.setData({
+        lightPoints: app.globalData.lightPoints,
+        videoTasksToday: (d.earn && d.earn.video_today) || 0
+      });
+    }).catch(() => {});
   },
 
   onCopyUserId() {
@@ -96,6 +105,7 @@ Page({
     });
   },
 
+  /** 看视频补给：服务端记账（3 次/天，每次 +10 光子），本地只做播放动效 */
   onWatchVideo() {
     if (this.data.videoTasksToday >= this.data.maxVideoTasks) {
       wx.showToast({
@@ -108,17 +118,23 @@ Page({
     wx.showLoading({ title: '正在调取补给影像…' });
 
     setTimeout(() => {
-      wx.hideLoading();
-      const success = app.recordVideoTask();
-      if (success) {
-        this.refreshUserData();
-        wx.showModal({
-          title: '补给完成',
-          content: '已成功注入 +10 积分！今日已观看 ' + this.data.videoTasksToday + '/' + this.data.maxVideoTasks,
-          showCancel: false,
-          confirmText: '太棒了'
+      api.earn('video')
+        .then((d) => {
+          wx.hideLoading();
+          if (d && typeof d.balance === 'number') app.setBalance(d.balance);
+          this.refreshUserData();
+          wx.showModal({
+            title: '补给完成',
+            content: '已成功注入 ✦' + this.data.videoReward + ' 光子！今日已观看 ' +
+              d.count_today + '/' + this.data.maxVideoTasks,
+            showCancel: false,
+            confirmText: '太棒了'
+          });
+        })
+        .catch((err) => {
+          wx.hideLoading();
+          wx.showToast({ title: err.message || '补给失败，稍后再试', icon: 'none' });
         });
-      }
     }, 1500);
   },
 
@@ -143,10 +159,11 @@ Page({
     });
   },
 
+  /** 清理本地缓存：光子在服务端记账，清缓存不再丢余额 */
   onClearStorage() {
     wx.showModal({
       title: '清理缓存数据',
-      content: '将清除本地临时图像缓存，但会保留您的积分余额。确定清理吗？',
+      content: '将清除本机的临时数据与历史记录缓存。光子余额保存在服务器，不受影响。确定清理吗？',
       confirmText: '确认清理',
       confirmColor: '#9e4b3c',
       cancelText: '取消',

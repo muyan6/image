@@ -16,22 +16,22 @@
     <view class="user-arrow" bindtap="onEditProfile">›</view>
   </view>
 
-  <!-- 2. 可用算力黑卡 (Studio Pass Black Card) -> 点击进入二级页面【积分中心】 -->
+  <!-- 2. 可用光子黑卡 (Studio Pass Black Card) -> 点击进入二级页面【光子中心】 -->
   <view class="credit-black-card" bindtap="onGoCredits">
     <view class="black-card-bg-mark">新生</view>
     <view class="black-card-top">
-      <text class="black-card-label">可用积分</text>
+      <text class="black-card-label">可用光子</text>
       <view class="black-card-link">
-        <text>积分中心</text>
+        <text>光子中心</text>
         <text class="black-card-arrow">›</text>
       </view>
     </view>
     <view class="black-card-balance">
-      <text class="balance-num">{{ fishTokens }}</text>
-      <text class="balance-unit">积分</text>
+      <text class="balance-num">✦ {{ lightPoints }}</text>
+      <text class="balance-unit">光子</text>
     </view>
     <view class="black-card-foot">
-      <text class="black-card-status">{{ freeMode ? '全站免费体验中 · 无限制' : '轻量消耗 1 · 精细消耗 3' }}</text>
+      <text class="black-card-status">{{ freeMode ? '全站免费体验中 · 无限制' : '轻量消耗 ✦1 · 精细消耗 ✦3' }}</text>
     </view>
   </view>
 
@@ -49,7 +49,7 @@
     <view class="stat-divider"></view>
     <view class="stat-col" bindtap="onGoCredits">
       <text class="stat-number">{{ creditRecordCount }}</text>
-      <text class="stat-label">积分记录</text>
+      <text class="stat-label">光子记录</text>
     </view>
   </view>
 
@@ -60,8 +60,8 @@
         <text class="play-triangle">▶</text>
       </view>
       <view class="task-info">
-        <text class="task-title">看视频得积分</text>
-        <text class="task-desc">完整观看一次 +10 积分</text>
+        <text class="task-title">看视频得光子</text>
+        <text class="task-desc">完整观看一次 +✦10 光子</text>
         <text class="task-progress">今日 {{ videoTasksToday }}/{{ maxVideoTasks }}</text>
       </view>
     </view>
@@ -111,7 +111,7 @@
   <!-- 6. 服务与设置菜单列表 (全部导航到二级页面) -->
   <view class="menu-card gallery-card">
     <view class="menu-item" bindtap="onGoCredits">
-      <text class="menu-label">积分与订单</text>
+      <text class="menu-label">光子与订单</text>
       <text class="menu-arrow">›</text>
     </view>
     <view class="menu-divider"></view>

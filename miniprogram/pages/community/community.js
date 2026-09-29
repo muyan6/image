@@ -89,7 +89,7 @@ Page({
         category: 'old_photo',
         categoryName: '老照片复苏',
         templateId: 't_master',
-        templateName: '质感超分',
+        templateName: '深度超分',
         quality: 'fine',
         resultUrl: baseCovers + 't_master_v1.jpg?v=1',
         origUrl: '/images/logo.jpg',
@@ -164,10 +164,10 @@ Page({
     const tid = e.currentTarget.dataset.templateId;
     const tname = e.currentTarget.dataset.name;
 
+    // 只带 id/名字；档位与价格由调整页从服务端模板数据现读，不在这里猜
     app.globalData.selectedTemplate = {
       id: tid,
-      name: tname,
-      engine: tid === 't_ghibli' ? 'light' : 'fine'
+      name: tname
     };
 
     wx.showToast({

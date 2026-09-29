@@ -7,8 +7,8 @@ Page({
     templateId: '',
     selectedTemplate: null,
     allTemplates: [],
-    
-    // 画幅设置 (截图2)
+
+    // 画幅设置
     currentRatioKey: '1:1',
     currentRatioLabel: '1:1',
     previewStyle: 'height: 694rpx;',
@@ -22,17 +22,20 @@ Page({
       { key: '16:9', label: '16:9', desc: '宽屏电影画幅构图', rec: false }
     ],
 
-    // 档位与价格 (截图3)
-    quality: 'fine', // 'light' | 'fine'
-    costLight: 80,
-    costFine: 120,
-    currentQualityCost: 120,
-    priceRangeText: '80~120 积分',
+    // 档位与价格：与后端口径一致（价格就是光子数，不再另行折算）
+    quality: 'fine',
+    costLight: 1,
+    costFine: 3,
+    currentQualityCost: 3,
+    priceRangeText: '1~3 光子',
+
+    // 模板文字排版字段（模板非空时展示，值随任务提交给后端排版引擎）
+    textValues: {},
 
     // 用户与权益
-    fishTokens: 90,
+    lightPoints: 0,
     freeMode: false,
-    rightsOk: true, // 默认打勾，符合截图3
+    rightsOk: true,
 
     // 状态
     processing: false,
@@ -42,7 +45,7 @@ Page({
   onLoad(options) {
     const img = options.image ? decodeURIComponent(options.image) : '';
     const tid = options.templateId ? decodeURIComponent(options.templateId) : '';
-    
+
     this.setData({
       imagePath: img,
       templateId: tid
@@ -53,31 +56,36 @@ Page({
   },
 
   onShow() {
-    this.loadUserData();
+    this.setData({ lightPoints: app.globalData.lightPoints });
   },
 
   loadUserData() {
-    const tokens = app.globalData.fishTokens != null ? app.globalData.fishTokens : 90;
     this.setData({
-      fishTokens: tokens
+      lightPoints: app.globalData.lightPoints,
+      freeMode: app.globalData.freeMode
     });
 
     api.config().then((c) => {
       if (!c) return;
       const free = !!c.free_mode;
+      app.globalData.freeMode = free;
       const prices = c.prices || {};
-      // 如果后端配置了 light/fine 价格，折算为积分展示 (若 price < 10 比如 1, 3 则放大到截图同款 80, 120)
-      const pLight = (prices.light != null) ? (prices.light >= 10 ? prices.light : prices.light * 80) : 80;
-      const pFine = (prices.fine != null) ? (prices.fine >= 10 ? prices.fine : prices.fine * 40) : 120;
-      
-      const currentCost = this.data.quality === 'fine' ? pFine : pLight;
+      const pLight = (prices.light != null) ? prices.light : this.data.costLight;
+      const pFine = (prices.fine != null) ? prices.fine : this.data.costFine;
+
       this.setData({
         freeMode: free,
         costLight: pLight,
         costFine: pFine,
-        currentQualityCost: currentCost,
-        priceRangeText: `${pLight}~${pFine} 积分`
+        priceRangeText: `${pLight}~${pFine} 光子`
       });
+      this.refreshCurrentCost();
+    }).catch(() => {});
+
+    // 光子余额以服务端为准
+    api.me().then((d) => {
+      if (d && typeof d.balance === 'number') app.setBalance(d.balance);
+      this.setData({ lightPoints: app.globalData.lightPoints });
     }).catch(() => {});
   },
 
@@ -97,7 +105,43 @@ Page({
         allTemplates: list,
         selectedTemplate: current
       });
+      if (current) this.applyTemplateTextDefaults(current);
+      this.refreshCurrentCost();
     }).catch(() => {});
+  },
+
+  /** 模板文字字段默认值（{today} 换成当天） */
+  applyTemplateTextDefaults(tpl) {
+    const textValues = {};
+    (tpl.text_fields || []).forEach((f) => {
+      let v = f.default || '';
+      if (v === '{today}') {
+        const d = new Date();
+        const p = (n) => (n < 10 ? '0' + n : '' + n);
+        v = d.getFullYear() + '.' + p(d.getMonth() + 1) + '.' + p(d.getDate());
+      }
+      textValues[f.key] = v;
+    });
+    this.setData({ textValues: textValues });
+  },
+
+  /** 当前消耗光子：模板价 > 0 用模板价，否则按（模板/手选）档位的默认价 */
+  refreshCurrentCost() {
+    const tpl = this.data.selectedTemplate;
+    let cost;
+    if (tpl) {
+      const tierPrice = tpl.engine === 'fine' ? this.data.costFine : this.data.costLight;
+      cost = (typeof tpl.price === 'number' && tpl.price > 0) ? tpl.price : tierPrice;
+    } else {
+      cost = this.data.quality === 'fine' ? this.data.costFine : this.data.costLight;
+    }
+    this.setData({ currentQualityCost: cost });
+  },
+
+  /** 模板文字排版字段输入 */
+  onTextFieldInput(e) {
+    const key = e.currentTarget.dataset.key;
+    this.setData({ ['textValues.' + key]: e.detail.value });
   },
 
   /** 切换画幅比例 */
@@ -128,33 +172,32 @@ Page({
     });
   },
 
-  /** 切换风格 (截图3) */
+  /** 切换风格（档位跟模板走） */
   onSelectTemplate(e) {
     const tpl = e.currentTarget.dataset.template;
-    if (!tpl) return;
+    if (!tpl || tpl.id === this.data.templateId) return;
     this.setData({
       selectedTemplate: tpl,
       templateId: tpl.id
     });
+    this.applyTemplateTextDefaults(tpl);
+    this.refreshCurrentCost();
     try {
       wx.vibrateShort({ type: 'light' });
     } catch (err) {}
   },
 
-  /** 切换生成档位 (截图3) */
+  /** 纯修复模式切换生成档位（选了模板时档位跟模板走，此入口隐藏） */
   onSelectQuality(e) {
     const q = e.currentTarget.dataset.quality;
-    const cost = q === 'fine' ? this.data.costFine : this.data.costLight;
-    this.setData({
-      quality: q,
-      currentQualityCost: cost
-    });
+    this.setData({ quality: q });
+    this.refreshCurrentCost();
     try {
       wx.vibrateShort({ type: 'light' });
     } catch (err) {}
   },
 
-  /** 切换版权勾选 (截图3) */
+  /** 切换版权勾选 */
   onToggleRights() {
     this.setData({
       rightsOk: !this.data.rightsOk
@@ -182,7 +225,7 @@ Page({
     });
   },
 
-  /** 点击【开始生成】(截图2/3) */
+  /** 点击【开始生成】 */
   async onStartGenerate() {
     if (this.data.processing) return;
 
@@ -195,11 +238,11 @@ Page({
     }
 
     const cost = this.data.currentQualityCost;
-    if (!this.data.freeMode && this.data.fishTokens < cost) {
+    if (!this.data.freeMode && this.data.lightPoints < cost) {
       wx.showModal({
-        title: '算力余额不足',
-        content: `本次生成需要 ${cost} 积分，当前剩余 ${this.data.fishTokens} 积分。是否前往补给？`,
-        confirmText: '补充算力',
+        title: '光子余额不足',
+        content: `本次生成需要 ✦${cost}，当前余额 ✦${this.data.lightPoints}。是否前往补给？`,
+        confirmText: '补充光子',
         cancelText: '取消',
         success: (r) => {
           if (r.confirm) {
@@ -225,23 +268,28 @@ Page({
   },
 
   async executeUpload(path) {
-    const quality = this.data.quality;
     const tpl = this.data.selectedTemplate;
     const ratio = this.data.currentRatioKey;
 
     try {
       const formData = {
-        quality: quality,
+        quality: this.data.quality,
         aspect_ratio: ratio
       };
       if (tpl && tpl.id) {
         formData.template_id = tpl.id;
+        // 模板文字排版字段：后端做长度截断与默认值补齐
+        if ((tpl.text_fields || []).length) {
+          formData.text_fields = JSON.stringify(this.data.textValues);
+        }
       }
 
-      const created = await api.upload(path, formData);
+      // COS 直传优先（图片字节不过服务器），失败自动回退 multipart
+      const created = await api.submitJob(path, formData);
       if (!created || created.code !== 0 || !created.job_id) {
         throw new Error((created && created.detail) || '服务响应异常');
       }
+      if (typeof created.balance === 'number') app.setBalance(created.balance);
 
       this.setData({
         processingText: `正在进行${tpl ? tpl.name : 'AI'}风格重构…`
@@ -255,21 +303,15 @@ Page({
         }
       });
 
-      // 扣费
-      const cost = this.data.currentQualityCost;
-      if (!this.data.freeMode && cost > 0) {
-        app.consumeToken(cost);
-      }
-
       const origUrl = api.absolute(job.orig_url || created.orig_url);
       const resUrl = api.absolute(job.result_url || created.result_url);
       const bustUrl = resUrl + (resUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
 
-      // 记录历史
+      // 记录历史（存 jobId，展示时可向服务端换取新鲜签名直链）
       const historyItem = {
         original: origUrl,
         result: bustUrl,
-        quality: quality,
+        quality: created.quality || this.data.quality,
         templateName: tpl ? tpl.name : '',
         jobId: created.job_id,
         time: this.formatTime(new Date())
@@ -279,15 +321,30 @@ Page({
       if (app.globalData.historyList.length > 50) app.globalData.historyList.length = 50;
       app.persist();
 
-      this.setData({ processing: false });
+      this.setData({ processing: false, lightPoints: app.globalData.lightPoints });
 
-      // 跳转至全屏拖拽滑块对比页
+      // 跳转至全屏拖拽滑块对比页（带 jobId，供签名过期后刷新）
       wx.redirectTo({
-        url: `/pages/compare/compare?original=${encodeURIComponent(origUrl)}&result=${encodeURIComponent(bustUrl)}&quality=${quality}`
+        url: `/pages/compare/compare?original=${encodeURIComponent(origUrl)}&result=${encodeURIComponent(bustUrl)}&quality=${historyItem.quality}&job=${encodeURIComponent(created.job_id)}`
       });
     } catch (err) {
       console.error('生成失败', err);
       this.setData({ processing: false });
+      this.setData({ lightPoints: app.globalData.lightPoints });
+
+      // 402 = 服务端判定光子不足（余额是服务端记账，客户端预判可能过期）
+      if (err && err.status === 402) {
+        wx.showModal({
+          title: '光子余额不足',
+          content: err.message || '光子不足，前往补给？',
+          confirmText: '补充光子',
+          cancelText: '取消',
+          success: (r) => {
+            if (r.confirm) wx.navigateTo({ url: '/pages/credits/credits' });
+          }
+        });
+        return;
+      }
       wx.showModal({
         title: '生成未完成',
         content: err.message || '网络连接超时，请重试',

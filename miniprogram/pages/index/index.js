@@ -3,72 +3,59 @@ const api = require('../../utils/api.js');
 
 Page({
   data: {
-    state: 'empty', // 'empty' | 'ready' | 'processing' | 'result'
-    selectedImage: '',
-    selectedImageSize: '',
-    currentQuality: 'fine',
-    currentStyle: '',
+    lightPoints: 0,
+    freeMode: false,
     priceLight: 1,
     priceFine: 3,
-    fishTokens: 0,
-    freeMode: false,
-    processingText: '正在拯救这张照片…',
-    resultImage: '',
-    originalImage: '',
-    splitPercent: 50,
-    isDragging: false,
-    historyList: [],
     notice: null,
-    showCreditModal: false,
-    showHistoryModal: false,
-    saving: false,
     featuredTemplates: [],
     activeTemplate: null,
-    textValues: {},
-    rightsOk: false
+    historyCount: 0
   },
 
-  onLoad() {
+  onLoad(options) {
+    // 分享路径携带的邀请码：先存本地，登录成功后绑定（服务端发奖，仅一次）
+    if (options && options.invite) {
+      try { wx.setStorageSync('pendingInvite', options.invite); } catch (e) {}
+    }
     this.loadNotice();
     this.loadConfig();
     this.loadTemplates();
+    this.bindPendingInvite();
   },
 
   onShow() {
     this.setData({
-      fishTokens: app.globalData.fishTokens,
-      historyList: (app.globalData.historyList || [])
+      lightPoints: app.globalData.lightPoints,
+      freeMode: app.globalData.freeMode,
+      historyCount: (app.globalData.historyList || []).length
     });
 
-    // 检查是否有跨页面携带过来的模板 (例如在模板库或社区点了"做同款")
+    // 检查是否有跨页面携带过来的模板（模板库/社区点了「做同款」）
     if (app.globalData.selectedTemplate) {
       const tpl = app.globalData.selectedTemplate;
       app.globalData.selectedTemplate = null;
-      this.applyTemplate(tpl);
-      if (this.data.state === 'empty') {
-        this.onPickImage();
-      }
+      this.setData({ activeTemplate: tpl });
     }
   },
 
-  /** 应用模板：档位跟模板走，文字字段初始化默认值（{today} 换成当天） */
-  applyTemplate(tpl) {
-    if (!tpl) return;
-    const textValues = {};
-    (tpl.text_fields || []).forEach((f) => {
-      let v = f.default || '';
-      if (v === '{today}') {
-        const d = new Date();
-        const p = (n) => (n < 10 ? '0' + n : '' + n);
-        v = d.getFullYear() + '.' + p(d.getMonth() + 1) + '.' + p(d.getDate());
-      }
-      textValues[f.key] = v;
-    });
-    this.setData({
-      activeTemplate: tpl,
-      currentQuality: tpl.engine === 'fine' ? 'fine' : 'light',
-      textValues: textValues
-    });
+  /** 登录后绑定邀请码，双方 +30 光子（失败静默，不打扰正常使用） */
+  bindPendingInvite() {
+    let code = '';
+    try { code = wx.getStorageSync('pendingInvite') || ''; } catch (e) {}
+    if (!code) return;
+    api.ensureLogin()
+      .then(() => api.bindInvite(code))
+      .then((d) => {
+        try { wx.removeStorageSync('pendingInvite'); } catch (e) {}
+        if (d && typeof d.balance === 'number') app.setBalance(d.balance);
+        this.setData({ lightPoints: app.globalData.lightPoints });
+        wx.showToast({ title: '邀请奖励 ✦30 已到账', icon: 'none' });
+      })
+      .catch((err) => {
+        try { wx.removeStorageSync('pendingInvite'); } catch (e) {}
+        console.warn('邀请码绑定失败', err);
+      });
   },
 
   loadTemplates() {
@@ -101,19 +88,9 @@ Page({
     });
   },
 
+  /** 清除待使用模板 */
   onClearTemplate() {
-    this.setData({ activeTemplate: null, textValues: {} });
-  },
-
-  /** 模板文字排版字段输入 */
-  onTextFieldInput(e) {
-    const key = e.currentTarget.dataset.key;
-    this.setData({ ['textValues.' + key]: e.detail.value });
-  },
-
-  /** 版权确认 */
-  onRightsChange(e) {
-    this.setData({ rightsOk: (e.detail.value || []).length > 0 });
+    this.setData({ activeTemplate: null });
   },
 
   loadNotice() {
@@ -141,6 +118,7 @@ Page({
       .then((c) => {
         if (!c) return;
         const p = c.prices || {};
+        app.globalData.freeMode = !!c.free_mode;
         this.setData({
           priceLight: (p.light != null) ? p.light : this.data.priceLight,
           priceFine: (p.fine != null) ? p.fine : this.data.priceFine,
@@ -148,12 +126,17 @@ Page({
         });
       })
       .catch(() => {});
+    // 光子余额以服务端为准
+    api.me()
+      .then((d) => {
+        if (d && typeof d.balance === 'number') app.setBalance(d.balance);
+        this.setData({ lightPoints: app.globalData.lightPoints });
+      })
+      .catch(() => {});
   },
 
-  /** 选择照片入口：选完直接跳转至【调整作品】页 (图2/3) */
+  /** 选择照片入口：选完直接跳转至【调整作品】页，待用模板一并带过去 */
   onPickImage() {
-    if (this.data.state === 'processing') return;
-
     wx.chooseMedia({
       count: 1,
       mediaType: ['image'],
@@ -162,260 +145,15 @@ Page({
       success: (res) => {
         const file = res.tempFiles[0];
         if (!file || !file.tempFilePath) return;
-        const defaultTid = (this.data.featuredTemplates.length > 0)
-          ? this.data.featuredTemplates[0].id
-          : 't_anime_dots';
+        const pending = this.data.activeTemplate;
+        const defaultTid = pending ? pending.id
+          : (this.data.featuredTemplates.length > 0 ? this.data.featuredTemplates[0].id : 't_anime_dots');
+        if (pending) this.setData({ activeTemplate: null });
 
         wx.navigateTo({
           url: `/pages/adjust/adjust?image=${encodeURIComponent(file.tempFilePath)}&templateId=${encodeURIComponent(defaultTid)}`
         });
       }
-    });
-  },
-
-  /** 切换画质档位 */
-  onSelectQuality(e) {
-    if (this.data.state === 'processing') return;
-    const q = e.currentTarget.dataset.quality;
-    this.setData({ currentQuality: q });
-  },
-
-  /** 重新选图或换一张 */
-  onChangePhoto() {
-    if (this.data.state === 'processing') return;
-    this.setData({
-      state: 'empty',
-      selectedImage: '',
-      selectedImageSize: '',
-      resultImage: '',
-      originalImage: '',
-      splitPercent: 50
-    });
-  },
-
-  /** 状态 2：点击【拯救这张照片】开始处理 */
-  onRescue() {
-    if (this.data.state === 'processing' || !this.data.selectedImage) return;
-    if (!this.data.rightsOk) {
-      wx.showToast({ title: '请先确认照片使用权', icon: 'none' });
-      return;
-    }
-
-    const quality = this.data.currentQuality;
-    const cost = quality === 'fine' ? this.data.priceFine : this.data.priceLight;
-
-    if (!this.data.freeMode && this.data.fishTokens < cost) {
-      wx.showModal({
-        title: '算力不足',
-        content: `本次修复需要 ${cost} 点算力，当前剩余 ${this.data.fishTokens} 点。是否立即补充？`,
-        confirmText: '免费补给',
-        cancelText: '取消',
-        success: (r) => {
-          if (r.confirm) this.onOpenCreditModal();
-        }
-      });
-      return;
-    }
-
-    this.setData({
-      state: 'processing',
-      processingText: '正在提交照片…'
-    });
-
-    wx.compressImage({
-      src: this.data.selectedImage,
-      quality: 88,
-      success: (r) => this.doUpload(r.tempFilePath || this.data.selectedImage),
-      fail: () => this.doUpload(this.data.selectedImage)
-    });
-  },
-
-  async doUpload(filePath) {
-    const quality = this.data.currentQuality;
-    const tpl = this.data.activeTemplate;
-    const qualityLabel = tpl ? `${tpl.name}风格重构` : (quality === 'fine' ? '精细 2K 超分重构' : '轻量 1.5K 快速修复');
-
-    try {
-      const formData = { quality };
-      if (tpl && tpl.id) {
-        formData.template_id = tpl.id;
-        // 模板文字排版字段：后端做长度截断与默认值补齐
-        if ((tpl.text_fields || []).length) {
-          formData.text_fields = JSON.stringify(this.data.textValues);
-        }
-      }
-      const created = await api.upload(filePath, formData);
-      if (!created || created.code !== 0 || !created.job_id) {
-        throw new Error((created && created.detail) || '服务响应异常');
-      }
-
-      this.setData({
-        processingText: `正在进行${qualityLabel}…`
-      });
-
-      const job = await api.waitForJob(created.job_id, {
-        onTick: (j) => {
-          if (j.stage === 'enhance') {
-            this.setData({ processingText: 'AI 深度重构光影与细节中…' });
-          }
-        }
-      });
-
-      // 扣费：模板价 > 0 用模板价，0 表示按档位默认价（与后端口径一致）
-      let cost = quality === 'fine' ? this.data.priceFine : this.data.priceLight;
-      if (tpl && typeof tpl.price === 'number' && tpl.price > 0) {
-        cost = tpl.price;
-      }
-      if (!this.data.freeMode && cost > 0) {
-        app.consumeToken(cost);
-      }
-
-      const origUrl = api.absolute(job.orig_url || created.orig_url);
-      const resUrl = api.absolute(job.result_url || created.result_url);
-      const bustUrl = resUrl + (resUrl.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now();
-
-      // 记录历史
-      const historyItem = {
-        original: origUrl,
-        result: bustUrl,
-        quality: quality,
-        jobId: created.job_id,
-        time: this.formatTime(new Date())
-      };
-      app.globalData.historyList.unshift(historyItem);
-      if (app.globalData.historyList.length > 50) app.globalData.historyList.length = 50;
-      app.persist();
-
-      this.setData({
-        state: 'result',
-        originalImage: origUrl,
-        resultImage: bustUrl,
-        fishTokens: app.globalData.fishTokens,
-        historyList: app.globalData.historyList,
-        splitPercent: 50
-      });
-
-      try {
-        wx.vibrateShort({ type: 'medium' });
-      } catch (e) {}
-
-    } catch (err) {
-      this.setData({ state: 'ready' });
-      if (err.code === 'NETWORK') {
-        wx.showModal({
-          title: '网络连接失败',
-          content: '后端服务未开启，进入演示对比模式？',
-          confirmText: '体验演示',
-          success: (r) => {
-            if (r.confirm) wx.navigateTo({ url: '/pages/compare/compare?demo=1' });
-          }
-        });
-        return;
-      }
-      wx.showModal({
-        title: '拯救未完成',
-        content: err.message || '请稍后重试',
-        showCancel: false,
-        confirmText: '我知道了'
-      });
-    }
-  },
-
-  /** 对比舞台尺寸测量与滑块拖动 */
-  measure() {
-    return new Promise((resolve) => {
-      wx.createSelectorQuery()
-        .select('#photo-stage')
-        .boundingClientRect((rect) => {
-          if (rect && rect.width > 0) this._rect = rect;
-          resolve(this._rect || null);
-        })
-        .exec();
-    });
-  },
-
-  onTouchStart(e) {
-    if (this.data.state !== 'result') return;
-    this.setData({ isDragging: true });
-    this.measure().then(() => this.moveTo(e));
-  },
-
-  onTouchMove(e) {
-    if (this.data.state !== 'result') return;
-    this.moveTo(e);
-  },
-
-  onTouchEnd() {
-    this.setData({ isDragging: false });
-  },
-
-  moveTo(e) {
-    const touch = e.touches && e.touches[0];
-    const rect = this._rect;
-    if (!rect || !touch) return;
-    const raw = ((touch.clientX - rect.left) / rect.width) * 100;
-    const pct = Math.max(0, Math.min(100, Math.round(raw)));
-    if (pct === this.data.splitPercent) return;
-    this.setData({ splitPercent: pct });
-  },
-
-  /** 保存修复后的照片到相册 */
-  onSave() {
-    const url = this.data.resultImage;
-    if (!url || this.data.saving) return;
-
-    this.setData({ saving: true });
-    wx.showLoading({ title: '正在保存照片…', mask: true });
-
-    const done = () => {
-      this.setData({ saving: false });
-      wx.hideLoading();
-    };
-
-    const cleanUrl = url.split('?')[0];
-    wx.downloadFile({
-      url: cleanUrl,
-      success: (res) => {
-        if (res.statusCode === 200 && res.tempFilePath) {
-          wx.saveImageToPhotosAlbum({
-            filePath: res.tempFilePath,
-            success: () => {
-              done();
-              wx.showToast({ title: '已保存至相册', icon: 'success' });
-            },
-            fail: (err) => {
-              done();
-              const msg = (err && err.errMsg) || '';
-              if (msg.indexOf('auth') >= 0) {
-                wx.showModal({
-                  title: '需要相册权限',
-                  content: '请在设置中允许访问相册',
-                  confirmText: '去授权',
-                  success: (r) => { if (r.confirm) wx.openSetting(); }
-                });
-              } else if (msg.indexOf('cancel') < 0) {
-                wx.showToast({ title: '保存失败', icon: 'none' });
-              }
-            }
-          });
-        } else {
-          done();
-          wx.showToast({ title: '下载失败', icon: 'none' });
-        }
-      },
-      fail: () => {
-        done();
-        wx.showToast({ title: '下载失败', icon: 'none' });
-      }
-    });
-  },
-
-  /** 全屏暗房深度对比 */
-  onOpenFullscreen() {
-    wx.navigateTo({
-      url: '/pages/compare/compare?original=' + encodeURIComponent(this.data.originalImage) +
-        '&result=' + encodeURIComponent(this.data.resultImage) +
-        '&quality=' + this.data.currentQuality
     });
   },
 
@@ -426,65 +164,10 @@ Page({
     });
   },
 
-  onCloseCreditModal() {
-    this.setData({ showCreditModal: false });
-  },
-
-  onGainCredits() {
-    app.addToken(3);
-    this.setData({
-      fishTokens: app.globalData.fishTokens,
-      showCreditModal: false
-    });
-    wx.showToast({ title: '已领取 +3 算力', icon: 'success' });
-  },
-
   /** 我的作品管理页面 */
   onOpenHistory() {
     wx.navigateTo({
       url: '/pages/works/works'
     });
-  },
-
-  onCloseHistory() {
-    this.setData({ showHistoryModal: false });
-  },
-
-  onSelectHistoryItem(e) {
-    const idx = e.currentTarget.dataset.index;
-    const item = this.data.historyList[idx];
-    if (!item) return;
-
-    this.setData({
-      showHistoryModal: false,
-      state: 'result',
-      originalImage: item.original,
-      resultImage: item.result,
-      currentQuality: item.quality || 'fine',
-      splitPercent: 50
-    });
-  },
-
-  onClearHistory() {
-    wx.showModal({
-      title: '清空历史',
-      content: '确定要清空本地所有修复记录吗？',
-      confirmColor: '#9e4b3c',
-      success: (r) => {
-        if (r.confirm) {
-          app.clearHistory();
-          this.setData({ historyList: [], showHistoryModal: false });
-          wx.showToast({ title: '已清空', icon: 'success' });
-        }
-      }
-    });
-  },
-
-  formatTime(date) {
-    const m = date.getMonth() + 1;
-    const d = date.getDate();
-    const h = date.getHours().toString().padStart(2, '0');
-    const min = date.getMinutes().toString().padStart(2, '0');
-    return `${m}月${d}日 ${h}:${min}`;
   }
 });
