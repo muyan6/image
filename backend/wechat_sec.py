@@ -1,0 +1,226 @@
+# -*- coding: utf-8 -*-
+"""微信小程序免费内容安全接口（mediaCheckAsync）客户端。
+
+对比腾讯云 IMS（≈ ¥13~22/万张），微信官方的 mediaCheckAsync 对小程序
+免费（有 QPS 限制），但它是**异步**接口：
+
+    1. 服务端拿 access_token，POST media_check_async（传图片的公网 URL + 用户 openid）
+       -> 立即返回 trace_id；
+    2. 审核结果由微信**推回**小程序后台配置的「消息推送」URL；
+    3. 我们在推送端点里解出 trace_id -> result.suggest，唤醒等待中的任务。
+
+前提（微信公众平台 mp.weixin.qq.com 配置）：
+    开发 -> 开发设置 -> 消息推送
+        URL            = https://你的备案域名/api/wxpush
+        Token          = 与后台「内容审核」里的推送 Token 一致
+        消息加密方式   = 明文模式（本实现按明文校验签名，不引入 AES 依赖）
+        数据格式       = JSON
+    把该域名加进 request 合法域名并完成 ICP 备案。
+
+图片限制：mediaCheckAsync 支持 ≤10M 的图片（jpg/jpeg/png/bmp/gif），
+且要求 COS 已配置（需要给微信一个可拉的公网 URL）。
+"""
+from __future__ import annotations
+
+import hashlib
+import logging
+import threading
+import time
+import uuid
+from typing import Any, Dict, Optional, Tuple
+
+import requests
+
+from settings_store import SettingsStore
+
+log = logging.getLogger("rescue.wechatsec")
+
+_TOKEN_URL = "https://api.weixin.qq.com/cgi-bin/stable_token"
+_CHECK_URL = "https://api.weixin.qq.com/wxa/media_check_async"
+
+# mediaCheckAsync 的图片大小上限
+MAX_WECHAT_CHECK_BYTES = 10 * 1024 * 1024
+
+# 异步等待结果的时间上限：微信推送一般 1~3 秒内到达
+WAIT_VERDICT_SECONDS = 12.0
+
+_token_lock = threading.Lock()
+_token_cache: Dict[str, Any] = {"token": None, "expires_at": 0.0}
+
+
+class WechatSecError(RuntimeError):
+    def __init__(self, message: str, *, code: str = "WECHAT_SEC_ERROR") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def wechat_sec_ready(settings: SettingsStore) -> bool:
+    """微信免费审核是否可用：机审开启 + 微信密钥齐全 + COS 可用 + 推送 Token 已配。"""
+    mod = settings.moderation()
+    if not mod.get("enabled") or not str(mod.get("wechat_push_token") or "").strip():
+        return False
+    conf = settings.wechat()
+    return bool(conf.get("app_id") and conf.get("app_secret")
+                and settings.cos_ready())
+
+
+def get_access_token(settings: SettingsStore) -> str:
+    """取小程序全局 access_token（stable_token，缓存到过期前 5 分钟）。"""
+    with _token_lock:
+        if _token_cache["token"] and time.time() < _token_cache["expires_at"]:
+            return _token_cache["token"]
+
+        conf = settings.wechat()
+        try:
+            resp = requests.post(_TOKEN_URL, json={
+                "grant_type": "client_credential",
+                "appid": conf.get("app_id"),
+                "secret": conf.get("app_secret"),
+                "force_refresh": False,
+            }, timeout=(10, 15))
+        except requests.RequestException as exc:
+            raise WechatSecError("获取 access_token 网络错误: %s"
+                                 % exc.__class__.__name__, code="NETWORK") from exc
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise WechatSecError("access_token 响应不是 JSON", code="BAD_RESPONSE") from exc
+        if data.get("errcode"):
+            raise WechatSecError("获取 access_token 失败(%s): %s"
+                                 % (data.get("errcode"), data.get("errmsg", "")),
+                                 code="API_%s" % data.get("errcode"))
+        token = data.get("access_token")
+        if not token:
+            raise WechatSecError("微信未返回 access_token", code="BAD_RESPONSE")
+        _token_cache["token"] = token
+        _token_cache["expires_at"] = time.time() + max(60, int(data.get("expires_in", 7200)) - 300)
+        return token
+
+
+def check_image(settings: SettingsStore, image_bytes: bytes, openid: str
+                ) -> Tuple[str, str, int]:
+    """送审一张 ≤10M 的图片（异步接口同步等待）。
+
+    返回 (suggestion, label, score)，suggestion: pass / review / risk。
+    需要 COS 可用（给微信一个可拉取的签名直链）；等待超时抛 WechatSecError。
+    """
+    from cos_store import CosError, presign as cos_presign, put_object as cos_put
+
+    if len(image_bytes) > MAX_WECHAT_CHECK_BYTES:
+        raise WechatSecError("图片超过微信审核 10M 上限", code="TOO_LARGE")
+
+    key = "moderation/%s/%s.jpg" % ((openid or "anon")[:8], uuid.uuid4().hex[:12])
+    try:
+        cos_put(settings, key, image_bytes)
+        media_url = cos_presign(settings, "get", key, ttl_seconds=3600)
+    except CosError as exc:
+        raise WechatSecError("送审图传 COS 失败: %s" % exc, code="COS") from exc
+
+    token = get_access_token(settings)
+    trace_id = uuid.uuid4().hex
+    pending = register_pending(trace_id)
+    try:
+        try:
+            resp = requests.post(_CHECK_URL, params={"access_token": token}, json={
+                "media_url": media_url,
+                "media_type": 2,        # 2 = 图片
+                "version": 2,           # 2 = v2 版本接口（result.suggest）
+                "scene": 3,             # 3 = 论坛/评论内容场景
+                "openid": openid,
+            }, timeout=(10, 15))
+        except requests.RequestException as exc:
+            raise WechatSecError("mediaCheckAsync 网络错误: %s"
+                                 % exc.__class__.__name__, code="NETWORK") from exc
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise WechatSecError("mediaCheckAsync 响应不是 JSON", code="BAD_RESPONSE") from exc
+        if data.get("errcode"):
+            raise WechatSecError("mediaCheckAsync 失败(%s): %s"
+                                 % (data.get("errcode"), data.get("errmsg", "")),
+                                 code="API_%s" % data.get("errcode"))
+        if not data.get("trace_id"):
+            raise WechatSecError("微信未返回 trace_id: %s" % str(data)[:150],
+                                 code="BAD_RESPONSE")
+
+        # 微信推送通常 1~3 秒内到达；到了推送端点会 set 这个 event
+        if not pending["event"].wait(WAIT_VERDICT_SECONDS):
+            raise WechatSecError("等待微信审核推送超时（%ds）" % int(WAIT_VERDICT_SECONDS),
+                                 code="TIMEOUT")
+        return pending["verdict"]
+    finally:
+        discard_pending(trace_id)
+
+
+# --------------------------------------------------------------------------- #
+# 推送端点使用的登记表：trace_id -> (event, verdict)
+# --------------------------------------------------------------------------- #
+_pending: Dict[str, Dict[str, Any]] = {}
+_pending_lock = threading.Lock()
+
+
+def register_pending(trace_id: str) -> Dict[str, Any]:
+    entry = {"event": threading.Event(),
+             "verdict": ("review", "timeout", 0)}
+    with _pending_lock:
+        # 顺手清掉 5 分钟前残留的（未被丢弃的异常路径）
+        cutoff = time.time() - 300
+        for tid in [k for k, v in _pending.items() if v["ts"] < cutoff]:
+            _pending.pop(tid, None)
+        entry["ts"] = time.time()
+        _pending[trace_id] = entry
+    return entry
+
+
+def discard_pending(trace_id: str) -> None:
+    with _pending_lock:
+        _pending.pop(trace_id, None)
+
+
+def resolve_pending(trace_id: str, suggestion: str, label: str, score: int) -> bool:
+    """消息推送端点收到结果后调用；返回是否命中一个等待中的任务。"""
+    with _pending_lock:
+        entry = _pending.get(trace_id)
+        if entry is None:
+            return False
+        entry["verdict"] = (suggestion, label, score)
+    entry["event"].set()
+    return True
+
+
+# --------------------------------------------------------------------------- #
+# 消息推送端点的签名校验与解析（明文模式 + JSON 数据格式）
+# --------------------------------------------------------------------------- #
+def verify_push_signature(token: str, signature: str, timestamp: str,
+                          nonce: str) -> bool:
+    """微信推送签名：sha1(sort(token, timestamp, nonce))。"""
+    if not (token and signature and timestamp and nonce):
+        return False
+    calc = hashlib.sha1("".join(sorted([token, timestamp, nonce]))
+                        .encode("utf-8")).hexdigest()
+    return calc == signature
+
+
+def parse_push_body(body: Dict[str, Any]) -> Optional[Tuple[str, str, str, int]]:
+    """从明文 JSON 推送里解出 (trace_id, suggest, label, score)。
+
+    非审核事件（或安全模式的 Encrypt 包体）返回 None —— 本实现要求
+    后台配置为「明文模式 + JSON」，安全模式需要 AES 依赖，不在零依赖范围。
+    """
+    if not isinstance(body, dict) or "Encrypt" in body:
+        return None
+    trace_id = str(body.get("trace_id") or "")
+    if not trace_id:
+        return None
+    result = body.get("result") or {}
+    suggest = str(result.get("suggest") or "pass").lower()
+    label = str(result.get("label") or 100)
+    try:
+        label_num = int(label)
+    except (TypeError, ValueError):
+        label_num = 100
+    try:
+        score = int(body.get("probation") or 0)
+    except (TypeError, ValueError):
+        score = 0
+    return trace_id, suggest, str(label), score

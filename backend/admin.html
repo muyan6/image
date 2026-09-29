@@ -429,15 +429,19 @@
             <div class="field"><label>SecretKey</label><input type="text" id="tc-key"></div>
             <div class="field"><label>COS 桶名 <small>如 bucket-1250000000</small></label><input type="text" id="tc-bucket"></div>
             <div class="field"><label>COS 地域 <small>如 ap-guangzhou</small></label><input type="text" id="tc-region"></div>
+            <div class="field"><label>自定义域名 <small>选填，如 image.example.com（备案过、须加进小程序域名白名单）</small></label><input type="text" id="tc-domain" placeholder="留空用默认桶域名"></div>
           </div>
-          <p class="muted" style="margin:0">四项齐全即启用直传与封面 COS 存储（上传/下载不占服务器带宽）</p>
+          <p class="muted" style="margin:0">前三项+地域齐全即启用直传与封面 COS 存储；填了自定义域名后，所有签名直链都走它（小程序 request/downloadFile 白名单里加这一个域名即可）</p>
         </div>
         <div class="card">
           <div class="card-head"><h2>内容审核</h2></div>
           <label class="check"><span class="switch"><input type="checkbox" id="mod-enabled"><span class="knob"></span></span>
-            启用图片机审（上传与结果各查一道，≈ ¥0.0015/张）</label><br>
+            启用图片机审（上传与结果各查一道：≤10M 走微信免费接口，超限/不可用走腾讯云 ≈¥0.0015/张）</label><br>
           <label class="check"><span class="switch"><input type="checkbox" id="mod-strict"><span class="knob"></span></span>
             审核服务异常时也拦截（默认放行并记日志，生产建议开启）</label>
+          <div class="form-grid" style="margin-top:10px">
+            <div class="field"><label>微信消息推送 Token <small>公众平台「消息推送」里填的 Token（明文模式+JSON），免费审核必填</small></label><input type="text" id="mod-wx-token" placeholder="如 myPushToken123"></div>
+          </div>
         </div>
         <div class="card">
           <div class="card-head"><h2>频控与配额</h2></div>
@@ -719,8 +723,10 @@ function renderSec() {
   $("tc-key").value = SETTINGS.tencent?.secret_key || "";
   $("tc-bucket").value = SETTINGS.tencent?.cos_bucket || "";
   $("tc-region").value = SETTINGS.tencent?.cos_region || "";
+  $("tc-domain").value = SETTINGS.tencent?.cos_custom_domain || "";
   $("mod-enabled").checked = SETTINGS.moderation?.enabled || false;
   $("mod-strict").checked = SETTINGS.moderation?.block_on_error || false;
+  $("mod-wx-token").value = SETTINGS.moderation?.wechat_push_token || "";
   $("quota-daily").value = SETTINGS.quota?.daily ?? 20;
   $("quota-minute").value = SETTINGS.quota?.per_minute ?? 3;
 }
@@ -729,8 +735,10 @@ window.saveSec = async () => {
     SETTINGS = await api("/settings", { method: "PUT", body: {
       wechat: { app_id: $("wx-appid").value.trim(), app_secret: $("wx-secret").value.trim() },
       tencent: { secret_id: $("tc-id").value.trim(), secret_key: $("tc-key").value.trim(),
-                 cos_bucket: $("tc-bucket").value.trim(), cos_region: $("tc-region").value.trim() },
-      moderation: { enabled: $("mod-enabled").checked, block_on_error: $("mod-strict").checked },
+                 cos_bucket: $("tc-bucket").value.trim(), cos_region: $("tc-region").value.trim(),
+                 cos_custom_domain: $("tc-domain").value.trim() },
+      moderation: { enabled: $("mod-enabled").checked, block_on_error: $("mod-strict").checked,
+                    wechat_push_token: $("mod-wx-token").value.trim() },
       quota: { daily: parseInt($("quota-daily").value, 10) || 0,
                per_minute: parseInt($("quota-minute").value, 10) || 0 } } });
     renderSec();
@@ -1143,18 +1151,51 @@ async function loadUsers() {
   try {
     const data = await api("/users?limit=30");
     const t = $("users-table");
-    t.innerHTML = "<thead><tr><th>用户</th><th>首次使用</th><th>最近活跃</th><th>已修图</th><th>被拦截</th><th>光子余额</th></tr></thead><tbody></tbody>";
+    t.innerHTML = "<thead><tr><th>用户</th><th>首次使用</th><th>最近活跃</th><th>已修图</th><th>被拦截</th><th>光子余额</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody>";
     const tbody = t.tBodies[0];
     data.items.forEach((u) => {
       const tr = document.createElement("tr");
       tr.innerHTML = `<td><code>${esc(u.openid.slice(0, 8))}…</code></td>` +
         `<td>${fmtTime(u.created_at)}</td><td>${fmtTime(u.last_seen)}</td>` +
-        `<td>${u.total_jobs}</td><td>${u.blocked}</td><td>✦ ${u.balance ?? 0}</td>`;
+        `<td>${u.total_jobs}</td><td>${u.blocked}</td><td>✦ ${u.balance ?? 0}</td>` +
+        `<td>${u.banned ? '<span class="badge red">已封禁</span>' : '<span class="badge">正常</span>'}</td>` +
+        `<td><button class="btn-ghost" data-act="bal" style="padding:3px 10px;font-size:12px" data-oid="${esc(u.openid)}" data-bal="${u.balance ?? 0}">改光子</button> ` +
+        `<button class="btn-danger" data-act="ban" style="padding:3px 10px;font-size:12px" data-oid="${esc(u.openid)}" data-banned="${u.banned ? 1 : 0}">${u.banned ? "解封" : "封禁"}</button></td>`;
       tbody.appendChild(tr);
     });
-    if (!data.items.length) tbody.innerHTML = '<tr><td colspan="6" class="empty">还没有用户</td></tr>';
+    if (!data.items.length) tbody.innerHTML = '<tr><td colspan="8" class="empty">还没有用户</td></tr>';
   } catch (e) { console.error(e); }
 }
+
+/* ---------- 用户操作：改光子 / 封禁 ---------- */
+$("users-table").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  const oid = btn.dataset.oid;
+  if (btn.dataset.act === "bal") {
+    const cur = parseInt(btn.dataset.bal || "0", 10);
+    const input = prompt("调整该用户的光子（当前 ✦" + cur + "）\n输入绝对值，或输入 +50 / -20 做增减：", String(cur));
+    if (input === null) return;
+    const v = input.trim();
+    if (!v) return;
+    let body;
+    if (/^[+-]\d+$/.test(v)) body = { delta: parseInt(v, 10) };
+    else if (/^\d+$/.test(v)) body = { balance: parseInt(v, 10) };
+    else return alert("请输入整数或 +N / -N");
+    try {
+      const r = await api("/users/" + encodeURIComponent(oid) + "/balance", { method: "PUT", body });
+      alert("已更新，当前余额 ✦" + r.balance);
+      loadUsers();
+    } catch (err) { alert("失败: " + err.message); }
+  } else if (btn.dataset.act === "ban") {
+    const banned = btn.dataset.banned === "1";
+    if (!confirm((banned ? "解封" : "封禁") + "用户 " + oid.slice(0, 8) + "…？封禁后该用户将无法提交任务。")) return;
+    try {
+      await api("/users/" + encodeURIComponent(oid) + "/ban", { method: "PUT", body: { banned: !banned } });
+      loadUsers();
+    } catch (err) { alert("失败: " + err.message); }
+  }
+});
 
 /* ---------- 周期刷新 ---------- */
 setInterval(() => {

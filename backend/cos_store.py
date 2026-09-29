@@ -46,6 +46,13 @@ def _conf(settings: SettingsStore) -> Dict[str, str]:
 
 
 def _host(conf: Dict[str, str]) -> str:
+    """优先用自定义源站域名（如备案过的 image.example.com），
+    便于把域名加入小程序服务器域名白名单；未配置则回退默认桶域名。"""
+    custom = str(conf.get("cos_custom_domain") or "").strip()
+    if custom:
+        custom = custom.replace("https://", "").replace("http://", "").rstrip("/")
+        if custom:
+            return custom
     return "%s.cos.%s.myqcloud.com" % (conf["cos_bucket"], conf["cos_region"])
 
 

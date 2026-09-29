@@ -1,6 +1,14 @@
 const app = getApp();
 const api = require('../../utils/api.js');
 
+/**
+ * 微信官方激励式视频广告位 ID。
+ * 开通条件：mp.weixin.qq.com → 流量主（累计独立访客 UV ≥ 1000）
+ * → 广告位管理 → 新建「激励式视频广告」，把 ad-unit-id 填在这里。
+ * 填好后"看视频补给"就走真实广告（微信官方结算分成）；留空则用模拟动画。
+ */
+const REWARDED_AD_UNIT_ID = '';
+
 Page({
   data: {
     userId: '',
@@ -105,7 +113,8 @@ Page({
     });
   },
 
-  /** 看视频补给：服务端记账（3 次/天，每次 +10 光子），本地只做播放动效 */
+  /** 看视频补给：服务端记账（3 次/天，每次 +10 光子）。
+   *  配了 REWARDED_AD_UNIT_ID 走微信官方激励视频；否则用模拟动画。 */
   onWatchVideo() {
     if (this.data.videoTasksToday >= this.data.maxVideoTasks) {
       wx.showToast({
@@ -115,27 +124,64 @@ Page({
       return;
     }
 
-    wx.showLoading({ title: '正在调取补给影像…' });
+    if (REWARDED_AD_UNIT_ID && wx.createRewardedVideoAd) {
+      this._playRewardedAd();
+      return;
+    }
 
+    // 模拟流程（未开通流量主时）
+    wx.showLoading({ title: '正在调取补给影像…' });
     setTimeout(() => {
-      api.earn('video')
-        .then((d) => {
-          wx.hideLoading();
-          if (d && typeof d.balance === 'number') app.setBalance(d.balance);
-          this.refreshUserData();
-          wx.showModal({
-            title: '补给完成',
-            content: '已成功注入 ✦' + this.data.videoReward + ' 光子！今日已观看 ' +
-              d.count_today + '/' + this.data.maxVideoTasks,
-            showCancel: false,
-            confirmText: '太棒了'
-          });
-        })
-        .catch((err) => {
-          wx.hideLoading();
-          wx.showToast({ title: err.message || '补给失败，稍后再试', icon: 'none' });
-        });
+      this._grantVideoReward();
     }, 1500);
+  },
+
+  /** 微信官方激励式视频：完整观看后 onClose 里 isEnded 才发奖 */
+  _playRewardedAd() {
+    if (!this._rewardedAd) {
+      this._rewardedAd = wx.createRewardedVideoAd({ adUnitId: REWARDED_AD_UNIT_ID });
+      this._rewardedAd.onError((err) => {
+        console.warn('激励视频加载失败', err);
+        wx.showToast({ title: '广告暂时拉取失败，稍后再试', icon: 'none' });
+      });
+    }
+    const ad = this._rewardedAd;
+    const onClose = (res) => {
+      ad.offClose(onClose);
+      if (res && res.isEnded) {
+        this._grantVideoReward();
+      } else {
+        wx.showToast({ title: '完整观看才能领取补给哦', icon: 'none' });
+      }
+    };
+    ad.onClose(onClose);
+    ad.show().catch(() => {
+      // 广告拉取失败时先 load 再 show 一次
+      ad.load().then(() => ad.show()).catch(() => {
+        ad.offClose(onClose);
+        wx.showToast({ title: '广告暂时拉取失败，稍后再试', icon: 'none' });
+      });
+    });
+  },
+
+  /** 向服务端领取视频奖励（次数与发放都在服务端校验） */
+  _grantVideoReward() {
+    wx.hideLoading();
+    api.earn('video')
+      .then((d) => {
+        if (d && typeof d.balance === 'number') app.setBalance(d.balance);
+        this.refreshUserData();
+        wx.showModal({
+          title: '补给完成',
+          content: '已成功注入 ✦' + this.data.videoReward + ' 光子！今日已观看 ' +
+            d.count_today + '/' + this.data.maxVideoTasks,
+          showCancel: false,
+          confirmText: '太棒了'
+        });
+      })
+      .catch((err) => {
+        wx.showToast({ title: err.message || '补给失败，稍后再试', icon: 'none' });
+      });
   },
 
   onContactSupport() {

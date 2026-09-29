@@ -35,6 +35,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -50,6 +51,8 @@ from templates_store import TemplateStore, covers_dir
 from text_overlay import apply as apply_text_overlay, collect_values
 from tencent_cs import ModerationError, moderate_image_bytes
 from user_store import UserStore
+import wechat_sec
+from wechat_sec import WechatSecError
 from wechat_auth import (WechatAuthError, bearer_of, code2session,
                          make_token as user_token, verify_token as verify_user_token)
 from fal_ai import FalImageEnhance
@@ -315,24 +318,47 @@ def _check_quota(openid: str) -> Optional[str]:
 
 
 def _moderate_or_reject(image_bytes: bytes, job_ctx: str, openid: str) -> Optional[str]:
-    """内容审核。返回拒绝原因，None = 放行。
+    """内容审核（分级省钱）。返回拒绝原因，None = 放行。
 
-    - 未启用或未配密钥：直接放行；
-    - 审核服务异常：默认放行并大声记日志（block_on_error 可改为拦截）；
-    - Block / Review 一律拦截（Review 走人审也来不及，先拦住再说）。
+    - ≤10M 且微信免费审核可用（机审开启 + 微信密钥 + COS + 推送 Token 齐全）
+      -> mediaCheckAsync：免费，异步接口，同步等待微信推送 1~3 秒（上限 12 秒）；
+    - 否则若腾讯云密钥齐全 -> 腾讯云 IMS（≈ ¥0.0015/张，同步 1~2 秒）；
+    - 两级都不可用：放行（机审开关本身关闭时也放行）。
+
+    微信 suggest pass/review/risk 与腾讯 Block/Review 映射为同一判定：
+    非 pass/Pass 一律拦截。审核服务异常按 block_on_error 策略（默认放行大声记日志）。
     """
-    if not settings.moderation_ready():
+    mod = settings.moderation()
+    if not mod.get("enabled"):
         return None
-    try:
-        suggestion, label, score = moderate_image_bytes(image_bytes, settings)
-    except ModerationError as exc:
-        if settings.moderation().get("block_on_error"):
-            users.audit(openid, "moderation_error", str(exc))
-            return "安全审核服务异常，已按策略拦截"
-        log.warning("[%s] 审核服务异常(%s)，本次放行: %s", job_ctx, exc.code, exc)
-        return None
-    if suggestion in ("Block", "Review"):
-        users.audit(openid, "blocked", "label=%s score=%s" % (label, score))
+
+    suggestion = label = score = None
+    if wechat_sec.wechat_sec_ready(settings) \
+            and len(image_bytes) <= wechat_sec.MAX_WECHAT_CHECK_BYTES:
+        try:
+            suggestion, label, score = wechat_sec.check_image(
+                settings, image_bytes, openid)
+            log.info("[%s] 微信免费审核完成: %s/%s/%s", job_ctx, suggestion, label, score)
+        except WechatSecError as exc:
+            log.warning("[%s] 微信免费审核不可用(%s)，回退腾讯云: %s",
+                        job_ctx, exc.code, exc)
+            suggestion = None
+
+    if suggestion is None:
+        if not settings.moderation_ready():
+            return None  # 腾讯云也没配密钥：放行
+        try:
+            suggestion, label, score = moderate_image_bytes(image_bytes, settings)
+        except ModerationError as exc:
+            if mod.get("block_on_error"):
+                users.audit(openid, "moderation_error", str(exc))
+                return "安全审核服务异常，已按策略拦截"
+            log.warning("[%s] 审核服务异常(%s)，本次放行: %s", job_ctx, exc.code, exc)
+            return None
+
+    if str(suggestion).lower() in ("block", "review", "risk"):
+        users.audit(openid, "blocked",
+                    "label=%s score=%s" % (label, score))
         users.inc_blocked(openid)
         return "图片内容未通过安全审核(%s)" % label
     return None
@@ -1101,8 +1127,11 @@ app.include_router(make_admin_router(
 
 
 def _rescue_guard(request) -> Dict[str, Any]:
-    """所有提交路径共用的前置检查：登录 -> 维护 -> 频控/配额。返回用户行。"""
+    """所有提交路径共用的前置检查：登录 -> 维护 -> 封禁 -> 频控/配额。返回用户行。"""
     user = _current_user(request)
+    if user.get("banned"):
+        users.audit(user["openid"], "banned_submit_attempt")
+        raise HTTPException(status_code=403, detail="账号已被封禁，如有疑问请联系客服")
     mt = settings.maintenance()
     if mt.get("enabled"):
         raise HTTPException(
@@ -1236,7 +1265,7 @@ def web_login(request: Request):
 
 @app.get("/api/me")
 def get_me(request: Request):
-    """当前用户资料：光子余额、邀请码、今日奖励进度。"""
+    """当前用户资料：光子余额、邀请码、今日奖励进度、封禁状态。"""
     user = _current_user(request)
     openid = user["openid"]
     return {
@@ -1244,6 +1273,7 @@ def get_me(request: Request):
         "balance": user["balance"],
         "total_jobs": user["total_jobs"],
         "invite_code": user["invite_code"],
+        "banned": user.get("banned", False),
         "earn": {
             "checkin_done": users.earn_count_today(openid, "checkin") > 0,
             "video_today": users.earn_count_today(openid, "video"),
@@ -1293,6 +1323,53 @@ def bind_invite(body: _InviteBody, request: Request):
                 "invitee=%s***" % openid[:6])
     return {"ok": True, "balance": my_balance,
             "inviter_balance": inviter_balance}
+
+
+# 微信消息推送（明文模式 + JSON）的请求体，字段不固定，收下整个对象
+_WxPushBody = Dict[str, Any]
+
+
+def _wxpush_signature_ok(request: Request) -> bool:
+    token = str(settings.moderation().get("wechat_push_token") or "").strip()
+    if not token:
+        return False  # 未配置推送 Token：无法校验，视为不通过
+    q = request.query_params
+    return wechat_sec.verify_push_signature(
+        token, q.get("msg_signature", ""), q.get("timestamp", ""),
+        q.get("nonce", ""))
+
+
+@app.get("/api/wxpush")
+def wxpush_verify(request: Request):
+    """微信公众平台「消息推送」的 URL 校验：原样返回 echostr。
+
+    后台配置见 README：URL 填 https://你的备案域名/api/wxpush，
+    加密方式选「明文模式」、数据格式选「JSON」，Token 与后台一致。
+    """
+    if not _wxpush_signature_ok(request):
+        raise HTTPException(status_code=403, detail="签名校验失败")
+    return PlainTextResponse(request.query_params.get("echostr") or "")
+
+
+@app.post("/api/wxpush")
+def wxpush_message(body: _WxPushBody, request: Request):
+    """微信内容安全 mediaCheckAsync 的异步结果推送端点。
+
+    解出 trace_id -> result.suggest，唤醒正在等待该结果的提交请求。
+    未命中等待任务的结果（超时后才到的推送）记录后丢弃。
+    """
+    if not _wxpush_signature_ok(request):
+        raise HTTPException(status_code=403, detail="签名校验失败")
+    parsed = wechat_sec.parse_push_body(body or {})
+    if parsed is None:
+        log.info("收到非审核类微信推送或安全模式包体，忽略: %s",
+                 str(body)[:150])
+    else:
+        trace_id, suggest, label, score = parsed
+        hit = wechat_sec.resolve_pending(trace_id, suggest, label, score)
+        log.info("微信审核推送: trace=%s suggest=%s label=%s 命中=%s",
+                 trace_id, suggest, label, hit)
+    return PlainTextResponse("success")
 
 
 @app.post("/api/uploads")

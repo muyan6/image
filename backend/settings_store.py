@@ -70,8 +70,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "prices": {"light": 1, "fine": 3},
     "free_mode": False,
     "wechat": {"app_id": "", "app_secret": ""},
-    "tencent": {"secret_id": "", "secret_key": "", "cos_bucket": "", "cos_region": "ap-guangzhou"},
-    "moderation": {"enabled": False, "block_on_error": False},
+    "tencent": {"secret_id": "", "secret_key": "", "cos_bucket": "", "cos_region": "ap-guangzhou", "cos_custom_domain": ""},
+    "moderation": {"enabled": False, "block_on_error": False, "wechat_push_token": ""},
     "quota": {"daily": 20, "per_minute": 3},
     "quality_to_style": {"light": "clear", "fine": "gym_contrast"},
     "styles": [
@@ -170,13 +170,16 @@ def _validate(doc: Dict[str, Any]) -> None:
         if not isinstance(wx.get(field, ""), str) or len(wx.get(field, "")) > 128:
             raise ValueError("wechat.%s 必须是不超过 128 字的文本" % field)
     tc = doc.get("tencent", {})
-    for field in ("secret_id", "secret_key", "cos_bucket", "cos_region"):
-        if not isinstance(tc.get(field, ""), str) or len(tc.get(field, "")) > 160:
-            raise ValueError("tencent.%s 必须是不超过 160 字的文本" % field)
+    for field in ("secret_id", "secret_key", "cos_bucket", "cos_region", "cos_custom_domain"):
+        if not isinstance(tc.get(field, ""), str) or len(tc.get(field, "")) > 200:
+            raise ValueError("tencent.%s 必须是不超过 200 字的文本" % field)
     mod = doc.get("moderation", {})
     for field in ("enabled", "block_on_error"):
         if not isinstance(mod.get(field), bool):
             raise ValueError("moderation.%s 必须是布尔值" % field)
+    if not isinstance(mod.get("wechat_push_token", ""), str) \
+            or len(mod.get("wechat_push_token", "")) > 128:
+        raise ValueError("moderation.wechat_push_token 必须是不超过 128 字的文本")
     quota = doc.get("quota", {})
     for field, top in (("daily", 100000), ("per_minute", 1000)):
         value = quota.get(field)

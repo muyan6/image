@@ -74,15 +74,20 @@ class UserStore:
             if "invite_code" not in cols:
                 self._conn.execute(
                     "ALTER TABLE users ADD COLUMN invite_code TEXT NOT NULL DEFAULT ''")
+            if "banned" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0")
             self._conn.commit()
 
-    _USER_COLS = "openid, created_at, last_seen, total_jobs, blocked, balance, invite_code"
+    _USER_COLS = ("openid, created_at, last_seen, total_jobs, blocked, "
+                  "balance, invite_code, banned")
 
     @staticmethod
     def _user_row(row) -> Dict[str, Any]:
         return {"openid": row[0], "created_at": row[1], "last_seen": row[2],
                 "total_jobs": row[3], "blocked": row[4],
-                "balance": int(row[5] or 0), "invite_code": row[6] or ""}
+                "balance": int(row[5] or 0), "invite_code": row[6] or "",
+                "banned": bool(row[7])}
 
     def ensure_user(self, openid: str) -> Dict[str, Any]:
         now = time.time()
@@ -141,6 +146,25 @@ class UserStore:
                 return False, bal
             self._conn.commit()
             return True, bal - amount
+
+    def set_balance(self, openid: str, value: int) -> int:
+        """管理员直接设置余额（后台改光子用），返回设置后的余额。"""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE users SET balance=? WHERE openid=?",
+                (max(0, int(value)), openid))
+            self._conn.commit()
+            row = self._conn.execute(
+                "SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
+        return int(row[0] or 0) if row else 0
+
+    def set_banned(self, openid: str, banned: bool) -> None:
+        """封禁/解封：封禁后无法提交任务（登录与历史查看不受影响）。"""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE users SET banned=? WHERE openid=?",
+                (1 if banned else 0, openid))
+            self._conn.commit()
 
     def add_balance(self, openid: str, delta: int) -> int:
         """加光子（奖励/退款），返回加完后的余额。"""

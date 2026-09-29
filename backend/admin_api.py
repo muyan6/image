@@ -308,6 +308,36 @@ def make_admin_router(*, settings: SettingsStore,
         _guard(request)
         return {"items": users.list_users(min(max(1, limit), 200))}
 
+    @router.put("/users/{openid}/balance")
+    async def set_user_balance(openid: str, request: Request) -> Dict[str, Any]:
+        """管理员调整用户光子：body 传 {balance: 绝对值} 或 {delta: 增减量}。"""
+        _guard(request)
+        if users.get_user(openid) is None:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        body = await _json_body(request)
+        try:
+            if body.get("delta") is not None:
+                balance = users.add_balance(openid, int(body["delta"]))
+            else:
+                balance = users.set_balance(openid, int(body.get("balance") or 0))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="金额必须是整数") from exc
+        users.audit(openid, "admin_adjust_balance",
+                    "delta=%s balance=%s" % (body.get("delta"), balance))
+        return {"ok": True, "balance": balance}
+
+    @router.put("/users/{openid}/ban")
+    async def set_user_ban(openid: str, request: Request) -> Dict[str, Any]:
+        """封禁/解封用户：封禁后无法提交任务，登录与历史查看不受影响。"""
+        _guard(request)
+        if users.get_user(openid) is None:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        body = await _json_body(request)
+        banned = bool(body.get("banned"))
+        users.set_banned(openid, banned)
+        users.audit(openid, "banned_by_admin" if banned else "unbanned_by_admin")
+        return {"ok": True, "banned": banned}
+
     @router.get("/audit")
     def list_audit(request: Request, limit: int = 50) -> Dict[str, Any]:
         _guard(request)
