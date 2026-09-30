@@ -885,6 +885,32 @@ class JobStore:
                 len(ordered),
             )
 
+    def purge_summary(self) -> Dict[str, int]:
+        with self._lock:
+            return {"jobs": len(self._data), "processing": sum(
+                1 for job in self._data.values()
+                if job.get("status") == "processing" and not job.get("deleted_at"))}
+
+    def take_all_for_purge(self) -> List[Dict[str, Any]]:
+        """停掉新账号受理后清空任务索引；返回快照供失败恢复与成功后的媒体清理。"""
+        with self._lock:
+            if any(j.get("status") == "processing" and not j.get("deleted_at")
+                   for j in self._data.values()):
+                raise ValueError("仍有任务处理中，请完成后再删除全部账号")
+            snapshot = [dict(job) for job in self._data.values()]
+            self._delete_rows([job["id"] for job in snapshot])
+            self._data.clear()
+            return snapshot
+
+    def restore_purged(self, snapshot: List[Dict[str, Any]]) -> None:
+        with self._lock:
+            for job in snapshot:
+                self._persist(job)
+                self._data[job["id"]] = dict(job)
+
+    def cleanup_purged(self, snapshot: List[Dict[str, Any]]) -> None:
+        self._notify_evicted(snapshot)
+
     def list_for_openid(self, openid: str, offset: int = 0, limit: int = 50) -> List[Dict[str, Any]]:
         """按 openid 筛选当前用户的任务列表：按创建时间倒序。"""
         with self._lock:

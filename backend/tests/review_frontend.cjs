@@ -181,6 +181,20 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}) {
     return [data.code===0&&logins===1&&uploads===2&&app.globalData.lightPoints===87,{logins,uploads,balance:app.globalData.lightPoints}];
   });
 
+  await test('admin_dialog_backdrop_and_layout_and_bulk_delete_controls',()=>{
+    const html=fs.readFileSync(path.join(ROOT,'backend/admin.html'),'utf8');
+    const wxss=fs.readFileSync(path.join(ROOT,'miniprogram/pages/compare/compare.wxss'),'utf8');
+    const ok=!html.includes('onclick="maskClose(event)"') &&
+      !html.includes('<button class="btn-ghost" onclick="closeModal()">取消</button>') &&
+      html.includes('onclick="openPurgeUsersModal()"') &&
+      html.includes("confirmation:'删除全部账号'") &&
+      html.includes('input[type=url]') &&
+      html.includes('.form-grid > .field > label') &&
+      /\.dock-btn\s*\{[^}]*flex:\s*1/.test(wxss) &&
+      /\.dock-btn-save\s*\{[^}]*flex:\s*1/.test(wxss);
+    return [ok,{modal_backdrop_closes:false,bulk_delete_control:html.includes('openPurgeUsersModal()'),equal_compare_buttons:ok}];
+  });
+
   await test('works_repair_old_server_media_without_loading_photo_bytes_from_api',async()=>{
     const app=appFixture([]);let repaired=0;
     const api={myJobs:async()=>({jobs:[{id:'abcdef123456',status:'succeeded',result_url:'/api/images/result.jpg',orig_url:'/api/images/orig.jpg'}]}),

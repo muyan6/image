@@ -203,28 +203,36 @@ page {
 
 /* 底部操作坞 */
 .gallery-dock {
-  height: 140rpx;
+  height: 128rpx;
   background: rgba(23, 22, 20, 0.98);
   border-top: 1rpx solid rgba(255, 255, 255, 0.1);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 32rpx 16rpx;
-  gap: 20rpx;
+  padding: 0 24rpx 16rpx;
+  gap: 16rpx;
   z-index: 100;
 }
 
 .dock-btn {
+  flex: 1;
+  min-width: 0;
+  height: 82rpx;
   border: 1rpx solid rgba(255, 255, 255, 0.3);
   color: #f5f2eb;
-  padding: 22rpx 32rpx;
+  padding: 12rpx 14rpx;
   border-radius: 0;
   background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .dock-btn-save {
   flex: 1;
-  height: 88rpx;
+  min-width: 0;
+  height: 82rpx;
   border-radius: 0;
   background: #f5f2eb;
   border: 1rpx solid #b38b4d;
@@ -236,9 +244,11 @@ page {
 
 .dock-save-text {
   font-family: var(--font-serif);
-  font-size: 26rpx;
+  font-size: 22rpx;
   font-weight: 700;
-  letter-spacing: 2rpx;
+  letter-spacing: 1rpx;
+  line-height: 1.25;
+  text-align: center;
   color: #1a1917;
 }
 .media-notice {

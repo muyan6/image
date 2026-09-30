@@ -406,6 +406,46 @@ def make_admin_router(*, settings: SettingsStore,
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"items": items, "account_type": account_type, "stats": users.stats()}
 
+    @router.get("/users/purge-summary")
+    def purge_users_summary(request: Request) -> Dict[str, Any]:
+        _guard(request)
+        return {**users.purge_summary(), **jobs.purge_summary()}
+
+    @router.delete("/users")
+    async def purge_all_users(request: Request) -> Dict[str, Any]:
+        """彻底删除全部账号、流水和作品；不是封禁或仅移出后台列表。"""
+        _guard(request)
+        body = await _json_body(request)
+        if body.get("confirmation") != "删除全部账号":
+            raise HTTPException(status_code=400, detail="请输入“删除全部账号”确认")
+        for field in ("expected_accounts", "expected_jobs"):
+            if type(body.get(field)) is not int or body[field] < 0:
+                raise HTTPException(status_code=400, detail="缺少删除前的账号与作品数量确认")
+        try:
+            users.begin_purge()
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        snapshot = []
+        try:
+            summary = {**users.purge_summary(), **jobs.purge_summary()}
+            if (summary["accounts"] != body["expected_accounts"] or
+                    summary["jobs"] != body["expected_jobs"]):
+                raise HTTPException(status_code=409, detail="账号或作品数量已变化，请刷新后重新确认")
+            try:
+                snapshot = jobs.take_all_for_purge()
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            try:
+                deleted = users.purge_all_accounts()
+            except Exception:
+                jobs.restore_purged(snapshot)
+                raise
+        finally:
+            users.end_purge()
+        jobs.cleanup_purged(snapshot)
+        return {"ok": True, "deleted_accounts": deleted["accounts"],
+                "deleted_jobs": len(snapshot)}
+
     @router.delete("/users/{openid}")
     def cleanup_user(openid: str, request: Request) -> Dict[str, Any]:
         """仅清理后台列表；保留账户，用户再次登录/使用自动恢复显示。"""

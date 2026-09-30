@@ -53,6 +53,7 @@ class UserStore:
         os.makedirs(data_dir, exist_ok=True)
         self._path = os.path.join(data_dir, "users.db")
         self._lock = threading.Lock()
+        self._purging = False
         self._conn = sqlite3.connect(self._path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._init_schema()
@@ -135,6 +136,8 @@ class UserStore:
         now = time.time()
         amount = max(0, int(amount))
         with self._lock, self._conn:
+            if self._purging:
+                raise AdmissionError(503, "账号清理中，请稍后再试")
             self._conn.execute("BEGIN IMMEDIATE")
             row = self._conn.execute(
                 "SELECT balance, banned FROM users WHERE openid=?", (openid,)).fetchone()
@@ -351,6 +354,8 @@ class UserStore:
         if kind not in ACCOUNT_TYPES:
             raise ValueError("未知的账号来源")
         with self._lock, self._conn:
+            if self._purging:
+                raise ValueError("账号清理中，请稍后再试")
             self._conn.execute("BEGIN IMMEDIATE")
             existing = self._conn.execute("SELECT account_type,app_id FROM users WHERE openid=?", (openid,)).fetchone()
             if existing and (existing[0] != kind or (app_id and existing[1] and existing[1] != app_id)):
@@ -553,6 +558,39 @@ class UserStore:
             rows = self._conn.execute(
                 "SELECT %s FROM users%s ORDER BY last_seen DESC LIMIT ?" % (self._USER_COLS, where), params).fetchall()
         return [self._user_row(r) for r in rows]
+
+    def purge_summary(self) -> Dict[str, int]:
+        """包含隐藏账号的真实总数；删除确认不能依赖分页管理列表。"""
+        with self._lock:
+            rows = self._conn.execute("SELECT account_type,COUNT(*) FROM users GROUP BY account_type").fetchall()
+        counts = dict(rows)
+        return {"accounts": sum(counts.values()), "wechat": counts.get("wechat", 0),
+                "web": counts.get("web", 0)}
+
+    def begin_purge(self) -> None:
+        with self._lock:
+            if self._purging:
+                raise ValueError("账号清理正在进行")
+            self._purging = True
+
+    def end_purge(self) -> None:
+        with self._lock:
+            self._purging = False
+
+    def purge_all_accounts(self) -> Dict[str, int]:
+        """原子删除全部账号和账户关联记录，不把封禁/隐藏当作删除。"""
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            summary = self.purge_summary_unlocked()
+            for table in ("violations", "ad_rewards", "invite_bindings", "job_charges", "audit", "users"):
+                self._conn.execute("DELETE FROM " + table)
+            return summary
+
+    def purge_summary_unlocked(self) -> Dict[str, int]:
+        rows = self._conn.execute("SELECT account_type,COUNT(*) FROM users GROUP BY account_type").fetchall()
+        counts = dict(rows)
+        return {"accounts": sum(counts.values()), "wechat": counts.get("wechat", 0),
+                "web": counts.get("web", 0)}
 
     def stats(self) -> Dict[str, Any]:
         midnight = _local_midnight()
