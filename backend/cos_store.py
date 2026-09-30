@@ -17,11 +17,13 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import hmac
 import logging
 import time
 import json
-from urllib.parse import quote
+import xml.etree.ElementTree as ET
+from urllib.parse import quote, urlsplit, urlunsplit
 from typing import Any, Dict, Optional
 
 import requests
@@ -102,16 +104,107 @@ def process_image(settings: SettingsStore, source: str, target: str, rule: str) 
     """CI basic processing persists a separate object; source is never overwritten."""
     if source == target:
         raise ValueError("Processed object must have a separate key")
-    operations=json.dumps({'is_pic_info':1,'rules':[{'fileid':quote(target,safe='/'),'rule':rule}]},separators=(',',':'))
+    # CI treats a fileid without '/' as relative to the source directory.
+    # Always use an absolute key, otherwise results/... is stored under images/results/...
+    operations=json.dumps({'is_pic_info':1,'rules':[{'bucket':_conf(settings)['cos_bucket'],
+        'fileid':quote('/'+target.lstrip('/'),safe='/'),'rule':rule}]},separators=(',',':'))
     headers={'Pic-Operations':operations}
-    for internal in (True,False):
-        try:
-            response=requests.post(presign(settings,'post',source,internal=internal,
-                params={'image_process':''},headers=headers),headers=headers,data=b'',timeout=(5,30))
-            if response.status_code==200 and head_exists(settings,target):return
-            if not internal:raise CosError('CI 基础图片处理失败 HTTP %s'%response.status_code,code='CI_PROCESSING_FAILED')
-        except requests.RequestException as exc:
-            if not internal:raise CosError('CI 基础图片处理请求失败',code='CI_PROCESSING_FAILED') from exc
+    # Only small control responses cross the VM; no internal-DNS retry or CDN negative-cache probe.
+    response=control_request(settings,'POST',source,params={'image_process':''},headers=headers,data=b'')
+    if response.status_code!=200:
+        raise CosError('CI 基础图片处理失败 HTTP %s'%response.status_code,code='CI_PROCESSING_FAILED')
+    meta=object_metadata(settings,target)
+    if meta['size']<=0:raise CosError('CI 处理结果为空',code='CI_PROCESSING_FAILED')
+
+
+def control_url(settings,method,key='',params=None,headers=None):
+    conf=_conf(settings);host='%s.cos.%s.myqcloud.com'%(conf['cos_bucket'],conf['cos_region'])
+    signed=presign(settings,method,key,params=params,headers={**(headers or {}),'Host':host})
+    u=urlsplit(signed)
+    return urlunsplit((u.scheme,host,u.path,u.query,'')),host
+
+
+def control_request(settings,method,key='',params=None,headers=None,data=None,stream=False):
+    headers = dict(headers or {})
+    if isinstance(data, bytes) and method.upper() == 'PUT':
+        headers.setdefault('Content-MD5', base64.b64encode(hashlib.md5(data).digest()).decode('ascii'))
+    url,host=control_url(settings,method.lower(),key,params,headers)
+    try:
+        return requests.request(method.upper(),url,headers={**(headers or {}),'Host':host},data=data,
+                                timeout=(5,30),allow_redirects=False,stream=stream)
+    except requests.RequestException as exc:raise CosError('COS 元数据请求未完成',code='NETWORK') from exc
+
+
+def object_metadata(settings,key):
+    response=control_request(settings,'HEAD',key)
+    if response.status_code!=200:raise CosError('COS 对象校验失败 HTTP %s'%response.status_code,status=response.status_code)
+    return {'size':int(response.headers.get('Content-Length','0')),'content_type':response.headers.get('Content-Type','')}
+
+
+def image_info(settings,key):
+    response=control_request(settings,'GET',key,params={'imageInfo':''})
+    if response.status_code!=200:raise CosError('CI 图片信息校验失败 HTTP %s'%response.status_code,status=response.status_code)
+    try:
+        result=response.json();width=int(result['width']);height=int(result['height'])
+        if width<=0 or height<=0:raise ValueError()
+    except (ValueError,KeyError,TypeError):raise CosError('CI 未返回有效图片尺寸',code='INVALID_IMAGE_INFO')
+    return {**result,'width':width,'height':height}
+
+
+def copy_object(settings,source,target):
+    if source==target:return
+    conf=_conf(settings);origin='%s.cos.%s.myqcloud.com/%s'%(conf['cos_bucket'],conf['cos_region'],quote(source,safe='/'))
+    response=control_request(settings,'PUT',target,headers={'x-cos-copy-source':origin},data=b'')
+    if response.status_code!=200 or b'<Error>' in response.content:raise CosError('COS 云端复制失败',code='COPY_FAILED')
+
+
+def origin_ready(settings,media_host,prefix='images/'):
+    response=control_request(settings,'GET',params={'origin':''})
+    if response.status_code!=200:return False
+    try:root=ET.fromstring(response.content)
+    except ET.ParseError:return False
+    return any(rule.findtext('OriginType')=='Mirror' and rule.findtext('OriginCondition/Prefix')==prefix and
+               rule.findtext('OriginCondition/HTTPStatusCode')=='404' and
+               rule.findtext('OriginParameter/Protocol')=='HTTPS' and
+               rule.findtext('OriginParameter/FollowQueryString')=='false' and
+               rule.findtext('OriginParameter/FollowRedirection')=='false' and
+               rule.findtext('OriginParameter/HttpHeader/FollowAllHeaders')=='false' and
+               len(rule.findall('OriginInfo/HostInfo'))==1 and
+               not any(x.tag.startswith('StandbyHostName') for x in rule.findall('OriginInfo/HostInfo/*')) and
+               rule.find('OriginInfo/FileInfo') is None and
+               rule.find('OriginParameter/HttpHeader/NewHttpHeaders') is None and
+               rule.findtext('OriginInfo/HostInfo/HostName')==media_host for rule in root.findall('OriginRule'))
+
+
+def mirror_key(url,media_host,prefix='images/'):
+    try:
+        u=urlsplit(url);port=u.port
+    except ValueError:raise CosError('供应商结果地址格式无效',code='UNSUPPORTED_RESULT_URL')
+    if u.scheme!='https' or u.hostname!=media_host or port not in (None,443) or u.username or u.password or u.query or u.fragment or '\\' in url:
+        raise CosError('供应商结果地址与限定回源规则不一致',code='UNSUPPORTED_RESULT_URL')
+    key=u.path.lstrip('/')
+    if not key.startswith(prefix) or '..' in key or '%' in key or len(key)>600:
+        raise CosError('供应商结果路径不符合限定回源规则',code='UNSUPPORTED_RESULT_URL')
+    return key
+
+
+def trigger_mirror(settings,key):
+    # Headers-only streaming GET triggers COS Mirror; never consumes image bytes or follows redirects.
+    with control_request(settings,'GET',key,stream=True) as response:
+        if response.status_code!=200:raise CosError('COS HTTPS 镜像导入失败 HTTP %s'%response.status_code,status=response.status_code)
+
+
+def audit_object(settings,key,biz_type=''):
+    params={'ci-process':'sensitive-content-recognition','large-image-detect':'1','async':'0'}
+    if biz_type:params['biz-type']=biz_type
+    response=control_request(settings,'GET',key,params=params)
+    if response.status_code!=200:raise CosError('CI 图片审核请求失败',code='AUDIT_UNAVAILABLE')
+    try:
+        root=ET.fromstring(response.content);result=root.findtext('Result')
+        if result not in ('0','1','2'):raise ValueError()
+        if any(x.text not in (None,'0') for x in root.findall('./*/Code')):raise ValueError()
+    except (ET.ParseError,ValueError):raise CosError('CI 未返回有效审核结果',code='AUDIT_UNAVAILABLE')
+    return {'result':int(result),'label':root.findtext('Label') or ''}
 
 
 def put_object(settings: SettingsStore, key: str, data: bytes,

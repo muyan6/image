@@ -36,6 +36,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from functools import partial
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
@@ -49,6 +50,7 @@ from cleanup_store import CleanupStore
 from community_store import CommunityStore
 from template_output import select_template_output, select_template_quality
 from text_generation import make_text_router, ready as text_generation_ready
+from cloud_pipeline import CloudPipeline
 from image_processing import IMAGE_LOCK, image_limited, upload_limited, normalization_rule, BoundedExecutor, QueueFull
 from cos_store import process_image as cos_process_image
 from credit_packages import GENERATION_COST, POINTS_PER_YUAN, public_packages
@@ -194,8 +196,10 @@ async def lifespan(_app: FastAPI):
     _startup_file_gc()
     threading.Thread(target=_bg_sweeper, name="job-sweeper",
                      daemon=True).start()
+    cloud.start()
     yield
     _sweeper_stop.set()
+    cloud.stop()
     pool.shutdown(wait=False, cancel_futures=True)
     log.info("已停止")
 
@@ -215,6 +219,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware('http')
+async def cloud_upload_gate(request: Request, call_next):
+    # Reject the legacy upload before FastAPI parses/spools its multipart body.
+    if request.method=='POST' and request.url.path=='/api/rescue' and cloud.enabled():
+        return JSONResponse(status_code=503,content={'detail':'云端模式请使用 COS 直传，不经后端上传图片'})
+    return await call_next(request)
 
 engine = ImageRescueEngine(lut_dir=LUT_DIR)
 
@@ -700,7 +712,7 @@ class JobStore:
                 "orig_file", "result_file", "orig_url", "result_url",
                 "orig_cos", "result_cos", "norm_cos",
                 "created_at", "updated_at", "charged_amount", "deleted_at",
-                "completed_at", "width", "height", "style")
+                "completed_at", "width", "height", "style", "extra_json")
 
     def __init__(self, ttl: int, max_entries: int,
                  on_evict: Optional[Any] = None,
@@ -738,7 +750,7 @@ class JobStore:
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(jobs)")}
         for field, kind in {"charged_amount": "INTEGER", "deleted_at": "REAL",
                             "completed_at": "REAL", "width": "INTEGER", "height": "INTEGER",
-                            "style": "TEXT"}.items():
+                            "style": "TEXT", "extra_json": "TEXT"}.items():
             if field not in columns:
                 self._conn.execute("ALTER TABLE jobs ADD COLUMN %s %s" % (field, kind))
         self._conn.commit()
@@ -753,9 +765,15 @@ class JobStore:
         all_statuses = {}
         for row in rows:
             job = dict(zip(self._COLUMNS, row))
+            raw_extra=job.pop('extra_json',None)
+            if raw_extra:
+                try:
+                    extra=json.loads(raw_extra)
+                    if isinstance(extra,dict):job.update({k:v for k,v in extra.items() if k not in self._COLUMNS})
+                except (ValueError,TypeError):log.error('任务扩展元数据损坏：%s',job['id'])
             # 重启时仍在 processing 的任务，其工作线程已随旧进程消失：
             # 标记失败并退还预扣光子，避免前端永远转圈
-            if job.get("status") == "processing":
+            if job.get("status") == "processing" and not job.get('cloud_pipeline'):
                 job["status"] = "failed"
                 job["error"] = job.get("error") or "服务重启，任务中断"
                 if users.charged_amount(job["id"]) is None:
@@ -780,6 +798,7 @@ class JobStore:
     def _persist(self, job: Dict[str, Any]) -> None:
         """整行 upsert。调用方必须持锁。"""
         values = [job.get(col) for col in self._COLUMNS]
+        values[-1]=json.dumps({k:v for k,v in job.items() if k not in self._COLUMNS},ensure_ascii=False,separators=(',',':'))
         placeholders = ", ".join("?" * len(self._COLUMNS))
         try:
             self._conn.execute(
@@ -981,8 +1000,10 @@ def _startup_file_gc() -> None:
             continue
         orig_due = float(job.get("created_at") or now) + ORIGINAL_TTL_SECONDS
         result_due = float(job.get("completed_at") or job.get("created_at") or now) + JOB_TTL_SECONDS
+        if job.get('cloud_pipeline') and job.get('status')=='processing':
+            result_due=float(job.get('created_at') or now)+2*JOB_TTL_SECONDS
         for kind, field, due in (("local", "orig_file", orig_due), ("cos", "orig_cos", orig_due),
-                                 ("cos", "norm_cos", result_due if job.get('comparison_cos')==job.get('norm_cos') else orig_due),
+                               ("cos", "norm_cos", result_due if job.get('cloud_pipeline') or job.get('comparison_cos')==job.get('norm_cos') else orig_due),
                                  ("local", "comparison_file", result_due), ("cos", "comparison_cos", result_due),
                                  ("local", "result_file", result_due), ("cos", "result_cos", result_due)):
             if job.get(field):
@@ -1000,6 +1021,7 @@ def _bg_sweeper() -> None:
 
 
 jobs = JobStore(JOB_TTL_SECONDS, JOB_MAX_ENTRIES, on_evict=_cleanup_job_files)
+cloud = CloudPipeline(lambda: sys.modules[__name__])
 
 
 # --------------------------------------------------------------------------- #
@@ -1526,6 +1548,7 @@ def health() -> Dict[str, Any]:
         "ok": True,
         "source_revision": SOURCE_REVISION,
         "generation_queue": pool.snapshot(),
+        "cloud_pipeline": cloud.snapshot(),
         "gateway": gateway_ok,
         "fal": fal_conf,
         "baidu": baidu_conf,
@@ -1537,7 +1560,7 @@ def health() -> Dict[str, Any]:
             "block_on_error": bool(mod.get("block_on_error")),
             "wechat_sec_ready": wx_ready,
             "tencent_ims_ready": tc_ready,
-            "active_engine": "wechat_free" if wx_ready else ("tencent_ims" if tc_ready else "none"),
+            "active_engine": "ci_object" if cloud.enabled() and mod.get('enabled') else ("wechat_free" if wx_ready else ("tencent_ims" if tc_ready else "none")),
         },
         "chain": settings.chain(),
         "maintenance": settings.maintenance().get("enabled", False),
@@ -1562,6 +1585,7 @@ def public_config() -> Dict[str, Any]:
         "free_mode": settings.free_mode(),
         "cos_ready": settings.cos_ready(),
         "template_output_modes": ["template", "single"],
+        "cloud_pipeline": cloud.snapshot(),
         "template_quality_options": ["light", "fine"],
         "text_generation": {'ready':text_generation_ready(sys.modules[__name__]),'price':settings.snapshot()['text_generation']['price']},
         "image_processing": {"ci_enabled":settings.snapshot()["processing"]["ci_enabled"],"local_image_parallelism":1},
@@ -2111,6 +2135,8 @@ def create_rescue_job(
     FastAPI 会把整个 handler 丢进线程池，事件循环不被拖住。
     """
     user = _rescue_guard(request)
+    if cloud.enabled():
+        raise HTTPException(status_code=503, detail='云端模式请使用 COS 直传，不经后端上传图片')
     tpl, tpl_quality, text_values = _resolve_template(template_id, text_fields)
     tpl = _apply_template_output(tpl, template_output_mode)
     quality, style = _validate_quality_style(
@@ -2177,11 +2203,11 @@ def create_rescue_job(
 
 
 @app.post("/api/rescue/by-upload")
-@upload_limited
+@partial(upload_limited, should_limit=lambda: not cloud.enabled())
 def create_rescue_job_by_upload(payload: _RescueByUploadBody,
                                 request: Request):
-    """COS 直传路径：JSON {upload_id, quality, style, template_id, text_fields, aspect_ratio}，
-    图片字节不过本服务器（从 COS 拉回到本地归一化，出方向流量为零）。"""
+    """COS 直传路径。云端模式只登记元数据，由 CI/供应商/COS 完成图片处理；
+    明确关闭云端模式时保留原有同步链路，不在失败时自动切换链路。"""
     user = _rescue_guard(request)
     upload_id = (payload.upload_id or "").strip()
     tpl, tpl_quality, text_values = _resolve_template(
@@ -2197,6 +2223,15 @@ def create_rescue_job_by_upload(payload: _RescueByUploadBody,
         if rec is None or rec["openid"] != user["openid"] or time.time() - rec["created_at"] > 3600:
             raise HTTPException(status_code=404, detail="上传登记不存在或已过期")
         _uploads.pop(upload_id)
+    if cloud.enabled():
+        try:
+            text_reject = _moderate_text_or_reject(combined_text, user['openid'])
+            if text_reject:_reject_uploaded_content(user['openid'], 'text', text_reject, quality, tpl)
+            return cloud.admit(user['openid'],quality,style,source=rec,template=tpl,
+                               text_values=text_values,aspect_ratio=payload.aspect_ratio,custom_prompt=custom_prompt)
+        except Exception:
+            with _uploads_lock:_uploads.setdefault(upload_id,rec)
+            raise
     if not cos_head(settings, rec["key"]):
         raise HTTPException(status_code=400, detail="COS 上没有这个文件")
 
@@ -2251,6 +2286,7 @@ def query_job_status(job_id: str, request: Request):
         "id": job["id"],
         "status": job["status"],
         "stage": job.get("stage"),
+        "cloud_pipeline":bool(job.get('cloud_pipeline')),
         "quality": job.get("quality"),
         "aspect_ratio": job.get("aspect_ratio", ""),
         "template_id": job.get("template_id", ""),

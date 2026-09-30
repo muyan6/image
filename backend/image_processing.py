@@ -34,9 +34,10 @@ class BoundedExecutor(ThreadPoolExecutor):
 IMAGE_LOCK=threading.RLock()
 UPLOAD_SLOTS=threading.BoundedSemaphore(2)
 
-def upload_limited(fn):
+def upload_limited(fn, should_limit=None):
     @functools.wraps(fn)
     def run(*args,**kwargs):
+        if should_limit is not None and not should_limit():return fn(*args,**kwargs)
         with UPLOAD_SLOTS:return fn(*args,**kwargs)
     run.__signature__=inspect.signature(fn,eval_str=True)
     return run

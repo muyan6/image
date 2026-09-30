@@ -325,7 +325,7 @@ async function waitForJob(jobId, options) {
     }
     try {
       const job = await request('/api/jobs/' + jobId);
-      delay = job.stage === 'queued' ? Math.max(5000, interval) : interval;
+      delay = (job.stage === 'queued' || job.cloud_pipeline) ? Math.max(5000, interval) : interval;
       if (opts.isCanceled && opts.isCanceled()) {
         const err = new Error('任务已转入后台'); err.code = 'USER_BACKGROUND'; throw err;
       }
@@ -508,18 +508,21 @@ async function submitJob(filePath, formData) {
   await ensureLogin();
   const form = _stringifyFormData(formData);
   let cfg = null;
-  try { cfg = await config(); } catch (e) { /* multipart may still be reachable */ }
+    // Unknown deployment state must not cause an image upload through the VM.
+    cfg = await config();
   if(form.template_id&&(!cfg||!Array.isArray(cfg.template_quality_options)||!cfg.template_quality_options.includes('light')||!cfg.template_quality_options.includes('fine'))){
     const e=new Error('模板双档需更新后端后启用');e.status=503;throw e;
   }
   if (cfg && cfg.cos_ready) {
-    try { return await _submitViaCos(filePath, form); }
-    catch (err) {
+      try { return await _submitViaCos(filePath, form); }
+      catch (err) {
+        if (cfg.cloud_pipeline && cfg.cloud_pipeline.enabled) throw err;
       if (err.jobSubmissionAttempted || (err.status && err.status < 500)) throw err;
       console.warn('COS 上传链路异常，回退 multipart：', err);
     }
-  }
-  return upload(filePath, form);
+    }
+    if (cfg.cloud_pipeline && cfg.cloud_pipeline.enabled) throw new Error('云端 COS 上传通道未配置，请稍后重试');
+    return upload(filePath, form);
 }
 
 function deleteJob(jobId) {

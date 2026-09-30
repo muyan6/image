@@ -26,12 +26,12 @@ class CITests(WorkflowTests):
         self.assertIn('image_process=',a)
 
     def test_ci_cloud_request_has_no_image_bytes_and_keeps_source(self):
-        with patch.object(cos_store,'presign',return_value='https://fixture.invalid/signed'), \
-             patch.object(cos_store.requests,'post',return_value=SimpleNamespace(status_code=200)) as post, \
-             patch.object(cos_store,'head_exists',return_value=True):
+        with patch.object(m.settings,'tencent',return_value={'secret_id':'fixture','secret_key':'fixture','cos_bucket':'fixture-123','cos_region':'ap-guangzhou'}), \
+             patch.object(cos_store,'control_request',return_value=SimpleNamespace(status_code=200)) as post, \
+             patch.object(cos_store,'object_metadata',return_value={'size':1234}):
             cos_store.process_image(m.settings,'orig.jpg','comparisons/new.jpg','imageMogr2/thumbnail/1536x1536>')
         self.assertEqual(post.call_args.kwargs['data'],b'')
-        self.assertEqual(json.loads(post.call_args.kwargs['headers']['Pic-Operations'])['rules'][0]['fileid'],'comparisons/new.jpg')
+        self.assertEqual(json.loads(post.call_args.kwargs['headers']['Pic-Operations'])['rules'][0]['fileid'],'/comparisons/new.jpg')
         with self.assertRaises(ValueError):cos_store.process_image(m.settings,'same.jpg','same.jpg','bad')
 
     def test_ci_pipeline_uses_cloud_norm_and_keeps_comparison_after_24h(self):

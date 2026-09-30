@@ -73,6 +73,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "pricing_revision": 2,
     "free_mode": False,
     "processing": {"ci_enabled": True},
+    "cloud_pipeline": {"enabled": False, "generation_concurrency": 16, "max_queued": 256,
+                       "poll_interval": 5, "timeout_seconds": 1800, "ci_biz_type": ""},
     "text_generation": {"enabled":False,"model":"","endpoint":"/v1/images/generations","price":40},
     "wechat": {"app_id": "", "app_secret": ""},
     "payment": {"offer_id": "", "sandbox_app_key": "", "production_app_key": ""},
@@ -115,7 +117,7 @@ def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # 误删后服务会残废的关键结构：合并后一律用默认值兜底补齐
-_DICT_SECTIONS = ("providers", "wechat", "payment", "tencent", "moderation", "quota", "processing", "text_generation",
+_DICT_SECTIONS = ("providers", "wechat", "payment", "tencent", "moderation", "quota", "processing", "text_generation", "cloud_pipeline",
                   "prompts", "prices", "rewards", "maintenance", "quality_to_style",
                   "community", "ads")
 
@@ -168,6 +170,14 @@ def _validate(doc: Dict[str, Any]) -> None:
         raise ValueError("worldcodes.timeout 必须是 10~600 的整数(秒)")
 
     prices = doc.get("prices", {})
+    cloud = doc.get('cloud_pipeline', {})
+    if type(cloud.get('enabled')) is not bool: raise ValueError('cloud_pipeline.enabled 必须是布尔值')
+    for field, low, high in [('generation_concurrency', 1, 64), ('max_queued', 0, 1000),
+                             ('poll_interval', 2, 30), ('timeout_seconds', 60, 3600)]:
+        if type(cloud.get(field)) is not int or not low <= cloud[field] <= high:
+            raise ValueError('cloud_pipeline.' + field + ' 超出范围')
+    if not isinstance(cloud.get('ci_biz_type'), str) or len(cloud['ci_biz_type']) > 100:
+        raise ValueError('CI 审核策略无效')
     tg=doc.get('text_generation',{})
     if type(tg.get('enabled')) is not bool:raise ValueError('text_generation.enabled 必须是布尔值')
     if not isinstance(tg.get('model'),str) or len(tg['model'])>200:raise ValueError('文生图模型名无效')

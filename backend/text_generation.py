@@ -13,7 +13,8 @@ class TextBody(BaseModel):
 
 def ready(m):
     conf=m.settings.snapshot()['text_generation'];provider=m.settings.provider('worldcodes')
-    return bool(conf['enabled'] and conf['model'] and m.settings.provider_enabled('worldcodes') and provider.get('base_url') and provider.get('api_key') and m.settings.cos_ready())
+    return bool(conf['enabled'] and conf['model'] and m.settings.provider_enabled('worldcodes') and provider.get('base_url') and provider.get('api_key') and m.settings.cos_ready()
+                and (not m.cloud.enabled() or m.cloud.ready()))
 
 def run_text_job(m,jid,conf,provider,prompt,size):
     job=m.jobs.get(jid)
@@ -59,6 +60,9 @@ def make_text_router(runtime):
         conf=m.settings.snapshot()['text_generation'];provider=m.settings.provider('worldcodes')
         rejected=m._moderate_text_or_reject(prompt,user['openid'])
         if rejected:m._reject_uploaded_content(user['openid'],'text',rejected,'light',{'price':conf['price']})
+        if m.cloud.enabled():
+            return m.cloud.admit(user['openid'],aspect_ratio=payload.aspect_ratio,
+                text={**conf,'prompt':prompt,'size':SIZES[payload.aspect_ratio]})
         jid=uuid.uuid4().hex[:12];free=m.settings.free_mode();charged=0 if free else conf['price']
         try:balance=m.users.reserve_job(user['openid'],jid,charged,m.settings.quota(),free)
         except m.AdmissionError as exc:raise HTTPException(status_code=exc.status,detail=str(exc)) from exc
