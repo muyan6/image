@@ -215,7 +215,7 @@
       </view>
       <text class="violation-explain">{{ violationDetail.banned ? '账号已永久封禁，剩余点数不予退还。' : '一周内累计 3 次将永久封禁账号。若有误判，请联系在线客服。' }}</text>
       <view class="violation-actions">
-        <button class="violation-secondary" open-type="contact" session-from="violation-{{ violationId }}" bindtap="onAcknowledgeViolation">误判反馈</button>
+        <button class="violation-secondary" open-type="contact" session-from="violation-{{ violationId }}">误判反馈</button>
         <button class="violation-primary" bindtap="onAcknowledgeViolation">我知道了</button>
       </view>
     </view>
