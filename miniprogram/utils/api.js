@@ -199,6 +199,18 @@ function isJobCosUrl(url) {
     url.split('/')[2].toLowerCase() !== apiBase().split('/')[2].toLowerCase();
 }
 
+/** 已下载临时文件可复用；COS 预签名在临近到期时不能继续当作永久缩略图。 */
+function isReusableMediaUrl(url) {
+  if (/^(wxfile:|http:\/\/tmp\/)/i.test(url || '')) return true;
+  if (!isJobCosUrl(url)) return false;
+  const match = /[?&]q-sign-time=([^&]+)/i.exec(url);
+  if (!match) return !/[?&]q-signature=/i.test(url);
+  try {
+    const expiry = Number(decodeURIComponent(match[1]).split(';')[1]);
+    return Number.isFinite(expiry) && expiry > Math.floor(Date.now() / 1000) + 30;
+  } catch (err) { return false; }
+}
+
 /** 只返回直连 COS 的新地址；缺失对象只能经内网补存，不代理图片给客户端。 */
 function repairJobMedia(jobId, kind = 'result') {
   if (!jobId || !['orig', 'result'].includes(kind)) return Promise.reject(new Error('图片参数错误'));
@@ -518,6 +530,7 @@ module.exports = {
   cleanUrl,
   request,
   isJobCosUrl,
+  isReusableMediaUrl,
   repairJobMedia,
   downloadJobMedia,
   upload,

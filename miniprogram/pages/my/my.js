@@ -1,5 +1,7 @@
 const app = getApp();
 const api = require('../../utils/api.js');
+const reusablePreview = url => !!url &&
+  (typeof api.isReusableMediaUrl !== 'function' || api.isReusableMediaUrl(url));
 
 /**
  * 激励视频广告配置全部来自后端 GET /api/config 的 ads 字段，
@@ -58,11 +60,14 @@ Page({
     const previewList = list.slice(0, 3).map(w => {
       const local = w.jobId && app.globalData.mediaCache && app.globalData.mediaCache[w.jobId] &&
         app.globalData.mediaCache[w.jobId].result;
-      return local ? Object.assign({}, w, {preview: local}) : w;
+      const preview = local || (reusablePreview(w.preview) ? w.preview :
+        (reusablePreview(w.result) ? w.result : ''));
+      return Object.assign({}, w, {preview});
     });
     const keys = list.map(w => w.jobId || w.result || '').join('|');
     if (!force && this._lastProfileSync && Date.now() - this._lastProfileSync < 30000 &&
-        keys === this._lastHistoryKeys && !list.some(w => w.status === 'processing')) {
+        keys === this._lastHistoryKeys && !list.some(w => w.status === 'processing') &&
+        !this.data.previewWorks.some(w => w.preview && !reusablePreview(w.preview))) {
       this.setData({lightPoints: app.globalData.lightPoints || 0,
         nickName: app.globalData.nickname || this.data.nickName});
       return;
@@ -108,7 +113,7 @@ Page({
         result: j.status === 'succeeded' ? fresh : '',
         preview: j.status === 'succeeded' &&
           (typeof api.isJobCosUrl !== 'function' || api.isJobCosUrl(j.result_url))
-          ? (local || (old.status === 'succeeded' && old.preview ? old.preview : fresh)) : '',
+          ? (local || (old.status === 'succeeded' && reusablePreview(old.preview) ? old.preview : fresh)) : '',
         status: j.status, quality: j.quality, provider: j.provider,
         templateName: j.template_name || '', createdAt: j.created_at || 0
         });

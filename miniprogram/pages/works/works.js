@@ -1,5 +1,7 @@
 const app = getApp();
 const api = require('../../utils/api.js');
+const reusablePreview = url => !!url &&
+  (typeof api.isReusableMediaUrl !== 'function' || api.isReusableMediaUrl(url));
 
 Page({
   data: {
@@ -23,7 +25,8 @@ Page({
     const localKeys = (app.globalData.historyList || []).map(w => w.jobId || w.result || '').join('|');
     const shownKeys = this.data.works.map(w => w.jobId || w.result || '').join('|');
     if (!force && this._lastLoadedAt && Date.now() - this._lastLoadedAt < 30000 &&
-        localKeys === shownKeys && !this.data.works.some(w => w.status === 'processing')) return;
+        localKeys === shownKeys && !this.data.works.some(w => w.status === 'processing') &&
+        !this.data.works.some(w => w.preview && !reusablePreview(w.preview))) return;
     const version = (this._loadVersion || 0) + 1;
     this._loadVersion = version;
     if (!this.data.works.length) this.setData({ works: (app.globalData.historyList || []).map(w =>
@@ -48,7 +51,8 @@ Page({
           templateName: cj.template_name || '', createdAt: cj.created_at || old.createdAt || 0,
           time: cj.created_at ? this.formatTime(new Date(cj.created_at * 1000)) : old.time || '近期'
         });
-        work.preview = old.status === 'succeeded' && old.preview ? this.safePreview(old) : this.safePreview(work);
+        const pinned = old.status === 'succeeded' && reusablePreview(old.preview) ? this.safePreview(old) : '';
+        work.preview = pinned || this.safePreview(work);
         byId.set(cj.id, work);
       });
       // A successful empty/full cloud response is authoritative for server jobs.
@@ -82,7 +86,7 @@ Page({
     const local = work.jobId && app.globalData.mediaCache && app.globalData.mediaCache[work.jobId] &&
       app.globalData.mediaCache[work.jobId].result;
     if (local) return local;
-    if (work.preview && (/^(wxfile:|http:\/\/tmp\/)/i.test(work.preview) ||
+    if (reusablePreview(work.preview) && (/^(wxfile:|http:\/\/tmp\/)/i.test(work.preview) ||
         (typeof api.isJobCosUrl === 'function' && api.isJobCosUrl(work.preview)))) return work.preview;
     if (!work.jobId) {
       const url = work.result || work.original || '';
@@ -91,7 +95,7 @@ Page({
       return url;
     }
     if (typeof api.isJobCosUrl !== 'function') return work.result || work.original || '';
-    return [work.result, work.original].find(url => api.isJobCosUrl(url)) || '';
+    return [work.result, work.original].find(url => !!url && api.isJobCosUrl(url) && reusablePreview(url)) || '';
   },
 
   onWorkImageError(e) {

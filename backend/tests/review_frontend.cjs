@@ -254,6 +254,37 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}) {
       {calls,preview:first}];
   });
 
+  await test('media_preview_cache_rejects_expired_cos_signatures',()=>{
+    const api=apiModule({},appFixture(),{Date:{now:()=>200000}});
+    if(typeof api.isReusableMediaUrl!=='function')return [false,{helper:'missing'}];
+    const expired=api.isReusableMediaUrl('https://cos.invalid/a.jpg?q-sign-time=100;190');
+    const valid=api.isReusableMediaUrl('https://cos.invalid/a.jpg?q-sign-time=100%3B600');
+    const local=api.isReusableMediaUrl('http://tmp/cached.jpg');
+    return [!expired&&valid&&local,{expired,valid,local}];
+  });
+
+  await test('works_replaces_expired_pinned_thumbnail_with_fresh_url',async()=>{
+    let calls=0;
+    const old='https://cos.invalid/expired.jpg',fresh='https://cos.invalid/fresh.jpg';
+    const app=appFixture([{jobId:'id1',status:'succeeded',result:old,preview:old}]);
+    const {page}=loadPage('works',{myJobs:async()=>{calls++;return {jobs:[{id:'id1',status:'succeeded',result_url:fresh}]};},
+      absolute:x=>x,isJobCosUrl:x=>x.startsWith('https://cos.invalid/'),isReusableMediaUrl:x=>!!x&&!x.includes('expired')},app);
+    page.data.works=app.globalData.historyList;page._lastLoadedAt=Date.now();await page.loadWorks();
+    return [calls===1&&page.data.works[0].preview===fresh,{calls,preview:page.data.works[0].preview}];
+  });
+
+  await test('profile_replaces_expired_pinned_thumbnail_with_fresh_url',async()=>{
+    let calls=0;
+    const old='https://cos.invalid/expired.jpg',fresh='https://cos.invalid/fresh.jpg';
+    const app=appFixture([{jobId:'id1',status:'succeeded',result:old,preview:old}]);
+    const {page}=loadPage('my',{config:async()=>({free_mode:true,ads:{}}),me:async()=>({balance:90}),
+      myJobs:async()=>{calls++;return {jobs:[{id:'id1',status:'succeeded',result_url:fresh}]};},
+      absolute:x=>x,isJobCosUrl:()=>true,isReusableMediaUrl:x=>!!x&&!x.includes('expired')},app);
+    page.data.historyList=app.globalData.historyList;page.data.previewWorks=app.globalData.historyList;
+    page._lastProfileSync=Date.now();page._lastHistoryKeys='id1';page.refreshUserData();await tick();await tick();
+    return [calls===1&&page.data.previewWorks[0].preview===fresh,{calls,preview:page.data.previewWorks[0].preview}];
+  });
+
   await test('nickname_requires_user_input_and_persists_server_reply',async()=>{
     const {page}=loadPage('my',{config:async()=>({free_mode:false,ads:{},prices:{light:40,fine:40}}),
       myJobs:async()=>({jobs:[]}),me:async()=>({user_id:'WX-0123456789ABCDEF',balance:100,nickname:'小山',earn:{}}),
