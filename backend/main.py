@@ -205,6 +205,7 @@ async def lifespan(_app: FastAPI):
     cloud.stop()
     payments.stop()
     web_login_router.close()
+    _uploads.close()
     pool.shutdown(wait=False, cancel_futures=True)
     log.info("已停止")
 
@@ -358,16 +359,15 @@ def _current_user(request) -> Dict[str, Any]:
     return user
 
 
-# 直传登记：upload_id -> 登记，1 小时未完成自动作废
-_uploads: Dict[str, Dict[str, Any]] = {}
+# Durable upload permits; restart does not invalidate an unfinished direct upload.
+from upload_store import UploadRegistry
+_uploads = UploadRegistry(lambda: os.path.join(os.path.dirname(settings._path),'uploads.db'))
 _uploads_lock = threading.Lock()
 _media_repair_lock = threading.Lock()
 
 
 def _sweep_uploads_locked() -> None:
-    cutoff = time.time() - 3600
-    for uid in [k for k, v in _uploads.items() if v["created_at"] < cutoff]:
-        _uploads.pop(uid, None)
+    _uploads.expire(time.time()-3600)
 
 
 def _check_quota(openid: str) -> Optional[str]:
@@ -789,7 +789,8 @@ class JobStore:
                     job["error"] += "（历史扣款记录待核对）"
                     users.audit(job.get("openid") or "", "charge_reconciliation_required", "job=" + job["id"])
                 interrupted.append(job)
-            all_statuses[job["id"]] = "deleted" if job.get("deleted_at") else job["status"]
+            all_statuses[job["id"]] = ("cancelled_charged" if job.get("cancel_without_refund") else
+                                       "deleted" if job.get("deleted_at") else job["status"])
             if now > self._expires_at(job):
                 self._startup_evicted.append(job)
                 continue
@@ -872,6 +873,31 @@ class JobStore:
             if updated['status']=='processing' and not updated.get('deleted_at'):self._processing.add(job_id)
             else:self._processing.discard(job_id)
 
+    def begin_cloud_submission(self, job_id: str) -> bool:
+        """Serialize the paid-submit boundary with deletion; never retry a marked POST."""
+        with self._lock:
+            job = self._data.get(job_id)
+            if (not job or job.get('deleted_at') or job['status'] != 'processing'
+                    or job.get('cloud_phase') != 'submit' or job.get('submitted_at')):
+                return False
+            now = time.time()
+            updated = {**job, 'cloud_phase': 'submitting', 'submitted_at': now, 'updated_at': now}
+            self._persist(updated)
+            self._data[job_id] = updated
+            return True
+
+    def fail_cloud_job(self, job_id: str, **fields: Any) -> bool:
+        """Only a live job can claim the failure/refund transition."""
+        with self._lock:
+            job = self._data.get(job_id)
+            if not job or job.get('deleted_at') or job['status'] != 'processing':
+                return False
+            updated = {**job, **fields, 'status': 'failed', 'updated_at': time.time()}
+            self._persist(updated)
+            self._data[job_id] = updated
+            self._processing.discard(job_id)
+            return True
+
     def _expires_at(self, job: Dict[str, Any]) -> float:
         return float(job.get("completed_at") or job.get("created_at") or 0) + self._ttl
 
@@ -883,6 +909,7 @@ class JobStore:
             updated = {**job, "deleted_at": job.get("deleted_at") or time.time(), "updated_at": time.time()}
             if job.get("status") == "processing":
                 updated.update(status="failed", error="作品已删除，任务已取消")
+                updated['cancel_without_refund'] = bool(job.get('cloud_pipeline') and job.get('submitted_at'))
             self._persist(updated)
             self._data[job_id] = updated
             self._processing.discard(job_id)
@@ -1587,7 +1614,9 @@ def health() -> Dict[str, Any]:
             "block_on_error": bool(mod.get("block_on_error")),
             "wechat_sec_ready": wx_ready,
             "tencent_ims_ready": tc_ready,
-            "active_engine": "ci_object" if cloud.enabled() and mod.get('enabled') else ("wechat_free" if wx_ready else ("tencent_ims" if tc_ready else "none")),
+            "active_engine": ("none" if not mod.get('enabled') else
+                              (("wechat_url_or_cos_auto" if cloud.config().get('audit_mode')=='wechat_auto' else "ci_object") if cloud.enabled() else
+                               ("wechat_free" if wx_ready else ("tencent_ims" if tc_ready else "none")))),
         },
         "chain": settings.chain(),
         "maintenance": settings.maintenance().get("enabled", False),
@@ -2089,7 +2118,7 @@ def bind_invite(body: _InviteBody, request: Request):
 @app.post("/api/uploads")
 def create_upload(payload: _UploadBody, request: Request):
     """申请 COS 预签名直传地址。未配置 COS 时返回 503。"""
-    user = _current_user(request)
+    user = _rescue_guard(request)
     filename = payload.filename
     byte_size = payload.byteSize if payload.byteSize is not None else payload.byte_size
     if not settings.cos_ready():
@@ -2105,13 +2134,16 @@ def create_upload(payload: _UploadBody, request: Request):
         raise HTTPException(status_code=400, detail="图片大小必须是非负整数")
     upload_id = uuid.uuid4().hex[:16]
     key = "uploads/%s/%s%s" % (user["openid"][:8], upload_id, ext)
-    url = cos_presign(settings, "put", key, ttl_seconds=3600)
-    cleanup.schedule("cos", key, time.time() + 3600)
     with _uploads_lock:
         _sweep_uploads_locked()
+        if _uploads.count_owner(user['openid'])>=32:
+            raise HTTPException(429,detail='未提交的上传过多，请先完成已有上传或稍后再试')
+        url = cos_presign(settings, "put", key, ttl_seconds=3600)
+        cleanup.protect_upload_until(key,time.time()+3600)
+        cleanup.schedule("cos", key, time.time() + 3600)
         _uploads[upload_id] = {"openid": user["openid"], "key": key,
                                "filename": filename, "ext": ext,
-                               "created_at": time.time()}
+                               "created_at": time.time(),"byte_size":byte_size}
     return {"upload_id": upload_id, "url": url, "key": key}
 
 
@@ -2125,9 +2157,15 @@ def complete_upload(upload_id: str, request: Request):
         rec = _uploads.get(upload_id)
     if rec is None or rec["openid"] != user["openid"] or time.time() - rec["created_at"] > 3600:
         raise HTTPException(status_code=404, detail="上传登记不存在")
-    if not cos_head(settings, rec["key"]):
-        raise HTTPException(status_code=400,
-                            detail="COS 上还没有这个文件，先完成直传")
+    from cos_store import object_metadata
+    try:meta=object_metadata(settings,rec['key'])
+    except CosError as exc:
+        raise HTTPException(400 if exc.status==404 else 503,detail='COS 上传确认失败，请稍后重试') from exc
+    if not 0<meta['size']<=MAX_UPLOAD_BYTES:
+        cleanup.schedule('cos',rec['key'],time.time())
+        raise HTTPException(413,detail='上传图片为空或超过大小上限')
+    if rec.get('byte_size',0)>0 and meta['size']!=rec['byte_size']:
+        raise HTTPException(400,detail='上传文件大小与登记不一致，请重新上传')
     return {"ok": True, "key": rec["key"]}
 
 
@@ -2253,7 +2291,8 @@ def create_rescue_job_by_upload(payload: _RescueByUploadBody,
         rec = _uploads.get(upload_id)
         if rec is None or rec["openid"] != user["openid"] or time.time() - rec["created_at"] > 3600:
             raise HTTPException(status_code=404, detail="上传登记不存在或已过期")
-        _uploads.pop(upload_id)
+        rec=_uploads.pop(upload_id,None)
+        if rec is None:raise HTTPException(404,detail='上传登记已经使用')
     if cloud.enabled():
         try:
             text_reject = _moderate_text_or_reject(combined_text, user['openid'])
@@ -2434,12 +2473,15 @@ def delete_my_job(job_id: str, request: Request):
     job = jobs.delete_for_openid(_safe_job_id(job_id), user["openid"])
     if job is None:
         raise HTTPException(status_code=404, detail="作品不存在")
-    if job.get("status") == "failed":
+    if job.get('cancel_without_refund'):
+        users.settle_cancelled_charge(job_id)
+    elif job.get("status") == "failed":
         users.refund_job(user["openid"], job_id)
     _cleanup_job_files([job])
     cos_keys = _job_cos_keys(job)
     cos_deleted = cleanup.delete_cos_now(settings, cos_keys)
-    users.audit(user["openid"], "deleted", "job=" + job_id)
+    users.audit(user["openid"], "deleted", "job=" + job_id +
+                (" submitted_no_refund" if job.get('cancel_without_refund') else ""))
     return {"ok": True, "balance": users.get_balance(user["openid"]),
             "cos_deleted": cos_deleted, "cos_pending": len(cos_keys) - cos_deleted}
 

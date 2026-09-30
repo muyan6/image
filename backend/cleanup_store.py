@@ -24,6 +24,7 @@ class CleanupStore:
         self._conn.execute("CREATE TABLE IF NOT EXISTS cleanup (kind TEXT, target TEXT, "
                            "due REAL NOT NULL, next_try REAL NOT NULL, attempts INTEGER DEFAULT 0, "
                            "PRIMARY KEY(kind,target))")
+        self._conn.execute('CREATE TABLE IF NOT EXISTS upload_cleanup_guard(target TEXT PRIMARY KEY,expires REAL NOT NULL)')
         self._conn.commit()
 
     def schedule(self, kind: str, target: str, due: float) -> None:
@@ -73,7 +74,7 @@ class CleanupStore:
                                            (now + min(3600, 30 * 2 ** min(attempts, 7)), kind, target))
                 else:
                     with self._lock, self._conn:
-                        self._conn.execute("DELETE FROM cleanup WHERE kind=? AND target=?", (kind, target))
+                        self._deleted_locked(kind,target,time.time())
                     removed += 1
             return removed
         finally:
@@ -97,9 +98,23 @@ class CleanupStore:
                         log.warning("COS 立即删除未完成，后台队列继续重试 key=%s", key)
                     else:
                         with self._lock, self._conn:
-                            self._conn.execute("DELETE FROM cleanup WHERE kind='cos' AND target=?", (key,))
+                            self._deleted_locked('cos',key,time.time())
                         removed += 1
         return removed
+
+    def protect_upload_until(self,target,expires):
+        """Delete once more after a still-valid PUT URL can no longer be reused."""
+        if not target.startswith('uploads/'):raise ValueError('Upload guard requires uploads/ prefix')
+        with self._lock,self._conn:
+            self._conn.execute('INSERT INTO upload_cleanup_guard VALUES(?,?) ON CONFLICT(target) DO UPDATE SET expires=MAX(expires,excluded.expires)',(target,expires+300))
+
+    def _deleted_locked(self,kind,target,now):
+        guard=self._conn.execute('SELECT expires FROM upload_cleanup_guard WHERE target=?',(target,)).fetchone() if kind=='cos' else None
+        if guard and guard[0]>now:
+            self._conn.execute("INSERT INTO cleanup(kind,target,due,next_try) VALUES('cos',?,?,?) ON CONFLICT(kind,target) DO UPDATE SET due=excluded.due,next_try=excluded.next_try,attempts=0",(target,guard[0],guard[0]))
+        else:
+            self._conn.execute('DELETE FROM cleanup WHERE kind=? AND target=?',(kind,target))
+            if kind=='cos':self._conn.execute('DELETE FROM upload_cleanup_guard WHERE target=?',(target,))
 
     def retain_until(self, kind: str, target: str, due: float) -> None:
         """Set expiry for a known live job object, migrating old 24h records."""

@@ -210,8 +210,6 @@ class CloudPipeline:
         m=self.runtime();p=job['cloud_request'];provider=text_gateway(m.settings) if job.get('input_mode')=='text' else m.settings.gateway_for(job['quality'])
         if provider['base_url']!=p['base'] or key_fingerprint(provider)!=p['key_fingerprint']:
             raise ValueError('供应商配置已变更，本次未提交生成，请重新创建任务')
-        # Persist before sending: a restart/timeout cannot repeat this paid POST.
-        self.require_live(job['id']);m.jobs.update(job['id'],cloud_phase='submitting',submitted_at=time.time())
         url=cos.presign(m.settings,'get',job['norm_cos'],ttl_seconds=3600) if job.get('norm_cos') else None
         size=p['size']
         if not size and p['template']:
@@ -225,7 +223,12 @@ class CloudPipeline:
         if not size:
             w,h=job.get('source_width',1),job.get('source_height',1)
             size='1536x1024' if w/h>1.15 else ('1024x1536' if w/h<.87 else '1024x1024')
-        task=AsyncImages(provider).submit(p['model'],p['prompt'],url,size,p['endpoint'])
+        client=AsyncImages(provider)
+        # This durable boundary is atomic with deletion. No network while holding the job lock.
+        if not m.jobs.begin_cloud_submission(job['id']):
+            self.require_live(job['id'])
+            return  # Another worker already marked this paid POST; never send twice.
+        task=client.submit(p['model'],p['prompt'],url,size,p['endpoint'])
         m.jobs.update(job['id'],vendor_task_id=task,cloud_phase='generating',stage='enhance',cloud_next_at=time.time()+self.config()['poll_interval'])
 
     def poll(self,job):
@@ -300,8 +303,9 @@ class CloudPipeline:
 
     def fail(self,job,message):
         m=self.runtime()
-        m.jobs.update(job['id'],status='failed',stage='failed',cloud_phase='failed',error=message[:500],
-                      failed_phase=job.get('cloud_phase'),failed_stage=job.get('stage'),failed_at=time.time())
+        if not m.jobs.fail_cloud_job(job['id'],stage='failed',cloud_phase='failed',error=message[:500],
+                      failed_phase=job.get('cloud_phase'),failed_stage=job.get('stage'),failed_at=time.time()):
+            return
         m.users.refund_job(job['openid'],job['id'])
         for key in (job.get('result_cos'),job.get('norm_cos'),job.get('orig_cos'),job['cloud_request']['source'].get('key')):
             if key:m.cleanup.schedule('cos',key,time.time())
@@ -319,7 +323,10 @@ class CloudPipeline:
                 m.jobs.update(jid,cloud_phase='unknown',stage='submission_unknown',cloud_next_at=time.time()+30)
             else:getattr(self,{'prepare':'prepare','submit':'submit','generating':'poll','import':'import_result','finalize':'finalize','wait_audit':'wait_audit'}[phase])(job)
         except GatewayAsyncError as exc:
-            if job and exc.uncertain:
+            current=m.jobs.get(jid)
+            if not current or current.get('deleted_at') or current.get('status')!='processing':
+                pass  # A late vendor response cannot refund or revive a cancelled job.
+            elif exc.uncertain:
                 m.jobs.update(jid,cloud_phase='unknown',stage='submission_unknown',cloud_next_at=time.time()+30)
             elif job and job.get('cloud_phase')=='generating':
                 m.jobs.update(jid,cloud_next_at=time.time()+15,last_poll_error=str(exc)[:200])

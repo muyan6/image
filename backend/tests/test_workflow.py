@@ -44,6 +44,9 @@ class WorkflowTests(unittest.TestCase):
         self.admin=TestClient(app);self.admin.post('/admin/api/login',json={'password':'workflow-tests'})
         self.admin.headers.update({'X-Admin-Request':'1'})
     def tearDown(self):
+        m._uploads.close()
+        if m.cloud._audits:
+            m.cloud._audits.close();m.cloud._audits=None
         self.client.close();self.admin.close();m.users.close();m.jobs._conn.close();m.cleanup.close()
     def image(self, size=(160,90)):
         f=io.BytesIO();Image.new('RGB',size,'blue').save(f,'JPEG');return f.getvalue()

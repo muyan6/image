@@ -126,10 +126,16 @@ class CloudAudit:
             current = self.row(job['id'],stage)
             m.jobs.update(job['id'], cloud_phase='wait_audit', audit_stage=stage,
                           stage='audit_input' if stage == 'input' else 'audit_output',
-                          cloud_next_at=0 if current['state']=='done' else current['deadline'])
+                          cloud_next_at=0 if current['state']=='done' else current['deadline'],
+                          audit_engine=current['engine'],**{stage+'_audit_engine':current['engine']})
         return False
 
     def wait(self, job):
+        # Serialize reading the verdict and scheduling against callback writes.
+        # Otherwise a stale waiting snapshot can overwrite a callback's wakeup.
+        with self.lock:self._wait_locked(job)
+
+    def _wait_locked(self,job):
         row = self.row(job['id'], job['audit_stage'])
         if row is None:
             raise RuntimeError('审核登记丢失，本次停止')

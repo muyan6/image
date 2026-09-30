@@ -232,6 +232,13 @@ class UserStore:
                 self.refund_job(openid, job_id, cancel=status is None and state == "reserved")
             elif status == "succeeded":
                 self.complete_charge(job_id)
+            elif status == "cancelled_charged":
+                self.settle_cancelled_charge(job_id)
+
+    def settle_cancelled_charge(self, job_id: str) -> None:
+        """User cancelled after vendor submission began; retain the original debit."""
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE job_charges SET state='cancelled_charged' WHERE job_id=? AND refunded=0", (job_id,))
 
     def complete_charge(self, job_id: str) -> None:
         with self._lock, self._conn:
