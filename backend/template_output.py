@@ -28,3 +28,12 @@ def select_template_output(template, mode="template"):
         result["text_fields"] = []
         result["requires_prompt"] = True
     return result
+
+
+def select_template_quality(template, quality):
+    """Only style/layout come from template; tier models/prices come from global settings."""
+    if quality not in ('light','fine'):raise ValueError('Invalid generation tier')
+    if not template:return None
+    result=copy.deepcopy(template)
+    result.update(engine=quality,model_override='',gateway_size='',output_size=0,requires_prompt=True)
+    return result

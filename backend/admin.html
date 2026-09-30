@@ -1105,9 +1105,9 @@ function renderTplTable() {
            <span class="sub">${esc(tpl.subtitle || "")}</span>
            ${extra ? `<span class="sub">${esc(extra)}</span>` : ""}</td>
        <td>${esc(gname(tpl.group_id))}</td>
-       <td><span class="badge ${tpl.engine === "fine" ? "indigo" : ""}">${esc(tpl.engine)}</span></td>
-       <td>${tpl.price > 0 ? tpl.price + " 光子" : '<span class="muted">按档位</span>'}</td>
-       <td>${tpl.output_size > 0 ? esc(tpl.output_size + "px") : "—"}</td>
+       <td><span class="badge indigo">轻量 / 精细</span></td>
+       <td>${esc((SETTINGS?.prices?.light ?? 40) + ' / ' + (SETTINGS?.prices?.fine ?? 40))} 光子</td>
+       <td>随所选档位模型</td>
        <td>${tpl.usage_count ?? 0}</td>
        <td><label class="switch"><input type="checkbox" ${tpl.enabled ? "checked" : ""}
          onchange="toggleTpl('${tpl.id}', this)"><span class="knob"></span></label></td>
@@ -1171,7 +1171,7 @@ function openTplModal(id) {
       <div class="form-grid">
         <div class="field"><label>名称（≤20 字）</label><input type="text" id="m-tpl-name" maxlength="20" value="${esc(t?.name || "")}"></div>
         <div class="field"><label>所属分组</label><select id="m-tpl-group">${groupOpts}</select></div>
-        <div class="field"><label>引擎档位</label><select id="m-tpl-engine">
+        <div class="field"><label>历史档位<small>保留旧数据；实际生成由用户选择轻量/精细</small></label><select id="m-tpl-engine" disabled>
           <option value="light" ${t && t.engine === "light" ? "selected" : ""}>light（轻量模型）</option>
           <option value="fine" ${t && t.engine === "fine" ? "selected" : ""}>fine（精细模型）</option></select></div>
         <div class="field"><label>排序</label><input type="number" id="m-tpl-sort" value="${t ? t.sort : 99}"></div>
@@ -1185,10 +1185,10 @@ function openTplModal(id) {
         <textarea id="m-tpl-prompt" style="min-height:130px">${esc(t?.prompt || "")}</textarea>
         <span class="muted">要叠加文字的模板，务必写明"画面本身不要包含任何文字"，文字由排版引擎保证正确</span></div>
       <div class="form-grid" style="margin-top:14px">
-        <div class="field"><label>光子价格<small>0 = 按档位默认价</small></label><input type="number" id="m-tpl-price" min="0" max="9999" value="${t ? t.price : 0}"></div>
-        <div class="field"><label>输出长边<small>0 = 不处理；印刷级填 2048</small></label><input type="number" id="m-tpl-outsize" min="0" max="8192" value="${t ? t.output_size : 0}"></div>
-        <div class="field"><label>网关 size 参数<small>如 2048x2048；不支持会自动忽略</small></label><input type="text" id="m-tpl-gsize" value="${esc(t?.gateway_size || "")}" placeholder="留空不传"></div>
-        <div class="field"><label>模型覆盖<small>如供应商原生 2K/4K 模型名</small></label><input type="text" id="m-tpl-model" value="${esc(t?.model_override || "")}" placeholder="留空用档位默认模型"></div>
+        <div class="field"><label>历史价格<small>仅保留；实际与通用设置的两档价格同步</small></label><input type="number" id="m-tpl-price" disabled value="${t ? t.price : 0}"></div>
+        <div class="field"><label>历史输出长边<small>不再强制放大，保留模型原生输出</small></label><input type="number" id="m-tpl-outsize" disabled value="${t ? t.output_size : 0}"></div>
+        <div class="field"><label>历史 size 参数<small>不再覆盖所选档位</small></label><input type="text" id="m-tpl-gsize" disabled value="${esc(t?.gateway_size || "")}"></div>
+        <div class="field"><label>历史模型覆盖<small>实际使用供应商设置的轻量/精细模型</small></label><input type="text" id="m-tpl-model" disabled value="${esc(t?.model_override || "")}"></div>
       </div>
 
       <div class="modal-section">文字排版

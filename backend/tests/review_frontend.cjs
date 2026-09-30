@@ -48,6 +48,19 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
 }
 
 (async()=>{
+  await test('template_tiers_use_restore_prices_not_fixed_template_price',()=>{
+    const {page}=loadPage('adjust');
+    page.setData({selectedTemplate:{id:'poster',engine:'fine',price:999},quality:'light',costLight:20,costFine:80});
+    page.refreshCurrentCost();const light=page.data.currentQualityCost;
+    page.onSelectQuality({currentTarget:{dataset:{quality:'fine'}}});
+    return [light===20&&page.data.currentQualityCost===80,{light,fine:page.data.currentQualityCost}];
+  });
+  await test('text_entry_is_compact_and_after_style_showcase',()=>{
+    const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/index/index.wxml'),'utf8');
+    const css=fs.readFileSync(path.join(ROOT,'miniprogram/pages/index/index.wxss'),'utf8');
+    return [xml.indexOf('text-generation-entry')>xml.indexOf('showcase-scroll') && xml.includes('entry-label')&&css.includes('min-height:88rpx'),
+      {afterShowcase:xml.indexOf('text-generation-entry')>xml.indexOf('showcase-scroll'),compact:css.includes('min-height:88rpx')}];
+  });
   await test('text_generation_separate_page_uses_server_price_and_no_photo',async()=>{
     let sent,route;
     const app=appFixture();
@@ -121,7 +134,7 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
       getFileSystemManager:()=>({statSync:()=>({size:4}),readFile:o=>o.success({data:new ArrayBuffer(4)})}),
       request:o=>{
         let data={};
-        if(o.url.endsWith('/api/config'))data={cos_ready:true};
+        if(o.url.endsWith('/api/config'))data={cos_ready:true,template_quality_options:['light','fine']};
         else if(o.url.endsWith('/api/uploads'))data={url:'https://cos.invalid/upload.jpg',upload_id:'fixture'};
         else if(o.url.endsWith('/api/rescue/by-upload')){body=o.data;data={code:0,job_id:'fixture_job'};}
         o.success({statusCode:200,data});

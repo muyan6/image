@@ -86,15 +86,15 @@
         <view class="tier-card {{ templateOutputMode === 'template' ? 'tier-card-active' : '' }}"
           bindtap="onSelectTemplateOutput" data-mode="template">
           <text class="tier-name">模板原版</text>
-          <text class="tier-desc">按示例构图，拼图模板保留上下排版</text>
+          <text class="tier-desc">按示例构图，照片拼贴由模板决定</text>
         </view>
         <view class="tier-card {{ templateOutputMode === 'single' ? 'tier-card-active' : '' }} {{ !singleOutputAvailable ? 'output-unavailable' : '' }}"
           bindtap="onSelectTemplateOutput" data-mode="single">
-          <text class="tier-name">单独生成图</text>
-          <text class="tier-desc">{{ singleOutputAvailable ? '保留风格，仅输出一张图，不拼图、不加题字' : '后端更新后启用' }}</text>
+          <text class="tier-name">仅风格重绘</text>
+          <text class="tier-desc">{{ singleOutputAvailable ? '重绘整幅，不插入原照片；不是自动分离' : '后端更新后启用' }}</text>
         </view>
       </view>
-      <text class="section-hint">画幅由模型与风格决定，单图模式不是裁掉拼图的一半；光子费用不变。</text>
+      <text class="section-hint">重绘会重新生成画面，可能改变原版布局；撕纸或融合图也不是按切口提取。光子费用按所选档位计算。</text>
     </view>
 
     <!-- 卡片 3：生成档位 / 选择这次的生成方式 -->
@@ -109,19 +109,8 @@
         </view>
       </view>
 
-      <!-- 选了模板：档位跟模板走，只展示不可改 -->
-      <view wx:if="{{ selectedTemplate }}" class="tier-grid">
-        <view class="tier-card tier-card-active">
-          <view class="tier-card-top">
-            <text class="tier-name">{{ selectedTemplate.engine === 'fine' ? '精细生成 · 2K' : '轻量生成 · 1.5K' }}</text>
-            <text class="tier-price">✦ {{ currentQualityCost }} 光子</text>
-          </view>
-          <text class="tier-desc">「{{ selectedTemplate.name }}」的专属配方，档位与价格随风格走</text>
-        </view>
-      </view>
-
-      <!-- 纯修复模式：可自由切换档位 -->
-      <view wx:else class="tier-grid">
+      <!-- 模板和原片修复都可选择两档，使用同一价格 -->
+      <view class="tier-grid">
         <!-- 轻量生成 -->
         <view
           class="tier-card {{ quality === 'light' ? 'tier-card-active' : '' }}"
@@ -132,7 +121,7 @@
             <text class="tier-name">轻量生成</text>
             <text class="tier-price">✦ {{ costLight }} 光子</text>
           </view>
-          <text class="tier-desc">低质量，速度更快，适合日常创作</text>
+          <text class="tier-desc">速度优先，适合日常创作</text>
         </view>
 
         <!-- 精细生成 -->
@@ -145,12 +134,13 @@
             <text class="tier-name">精细生成</text>
             <text class="tier-price">✦ {{ costFine }} 光子</text>
           </view>
-          <text class="tier-desc">中等质量，细节更丰富</text>
+          <text class="tier-desc">细节优先，适合精细创作</text>
         </view>
       </view>
     </view>
 
     <!-- 原片修复自定义需求 -->
+    <text class="section-hint" wx:if="{{ selectedTemplate && !templateTiersAvailable }}">当前后端尚未支持模板双档，请更新后端后生成。</text>
     <view class="card-section" wx:if="{{ !selectedTemplate }}">
       <view class="section-header prompt-toggle" bindtap="onToggleCustomPrompt">
         <text class="section-title">补充要求 · 可选</text>

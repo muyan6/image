@@ -509,6 +509,9 @@ async function submitJob(filePath, formData) {
   const form = _stringifyFormData(formData);
   let cfg = null;
   try { cfg = await config(); } catch (e) { /* multipart may still be reachable */ }
+  if(form.template_id&&(!cfg||!Array.isArray(cfg.template_quality_options)||!cfg.template_quality_options.includes('light')||!cfg.template_quality_options.includes('fine'))){
+    const e=new Error('模板双档需更新后端后启用');e.status=503;throw e;
+  }
   if (cfg && cfg.cos_ready) {
     try { return await _submitViaCos(filePath, form); }
     catch (err) {

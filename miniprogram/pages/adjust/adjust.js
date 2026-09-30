@@ -35,6 +35,7 @@ Page({
     showCustomPrompt: false,
     templateOutputMode: 'template',
     singleOutputAvailable: false,
+    templateTiersAvailable: false,
     showViolationNotice: false,
     violationDetail: {},
     violationId: '',
@@ -115,6 +116,7 @@ Page({
         costLight: pLight,
         costFine: pFine,
         singleOutputAvailable: Array.isArray(c.template_output_modes) && c.template_output_modes.includes('single'),
+        templateTiersAvailable: Array.isArray(c.template_quality_options) && c.template_quality_options.includes('light') && c.template_quality_options.includes('fine'),
         priceRangeText: pLight === pFine ? `${pLight} 光子` : `${pLight}~${pFine} 光子`
       });
       this.refreshCurrentCost();
@@ -172,16 +174,9 @@ Page({
     this.setData({ textValues: textValues });
   },
 
-  /** 当前消耗光子：模板价 > 0 用模板价，否则按（模板/手选）档位的默认价 */
+  /** 模板和原片修复共用用户档位与全局价格。 */
   refreshCurrentCost() {
-    const tpl = this.data.selectedTemplate;
-    let cost;
-    if (tpl) {
-      const tierPrice = tpl.engine === 'fine' ? this.data.costFine : this.data.costLight;
-      cost = (typeof tpl.price === 'number' && tpl.price > 0) ? tpl.price : tierPrice;
-    } else {
-      cost = this.data.quality === 'fine' ? this.data.costFine : this.data.costLight;
-    }
+    const cost = this.data.quality === 'fine' ? this.data.costFine : this.data.costLight;
     this.setData({ currentQualityCost: cost });
   },
 
@@ -333,6 +328,9 @@ Page({
 
   async onStartGenerate() {
     if (this.data.processing) return;
+    if(this.data.selectedTemplate&&!this.data.templateTiersAvailable){
+      wx.showToast({title:'模板双档需更新后端后启用',icon:'none'});return;
+    }
     if (this._submissionUncertain) {
       wx.showModal({
         title: '提交状态待确认',

@@ -136,9 +136,10 @@ Page({
     const freeMode = typeof conf.free_mode === 'boolean' ? conf.free_mode : !!app.globalData.freeMode;
     if (freeMode) return '免扣费';
     const prices = conf.prices || {};
-    const fallback = tpl.engine === 'fine' ? (prices.fine != null ? prices.fine : 40)
-      : (prices.light != null ? prices.light : 40);
-    return `✦ ${tpl.price > 0 ? tpl.price : fallback} 光子`;
+    const light=prices.light!=null?prices.light:40;
+    const fine=prices.fine!=null?prices.fine:40;
+    const low=Math.min(light,fine),high=Math.max(light,fine);
+    return `✦ ${low===high?low:low+'–'+high} 光子`;
   },
 
   onPreviewCover(e) {

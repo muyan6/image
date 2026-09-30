@@ -134,10 +134,10 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
   });
   await test('style_detail_price_badge_uses_current_server_price',async()=>{
     const tpl={id:'poster',name:'复古电影海报',engine:'fine',price:0,cover:'cover.jpg'};
-    const p=page('style-detail',{templates:async()=>({items:[tpl]}),config:async()=>({free_mode:false,prices:{fine:5}}),absolute:x=>x},
+    const p=page('style-detail',{templates:async()=>({items:[tpl]}),config:async()=>({free_mode:false,prices:{light:2,fine:5}}),absolute:x=>x},
       {setNavigationBarTitle(){}});
     p.onLoad({id:'poster'});await tick();await tick();
-    assert.equal(p.data.priceLabel,'✦ 5 光子');
+    assert.equal(p.data.priceLabel,'✦ 2–5 光子');
     assert.equal(p.data.template.coverUrl,'cover.jpg');
   });
   await test('plain_restore_sends_custom_requirement',async()=>{
@@ -159,7 +159,7 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
     p.onSelectRatioOption({currentTarget:{dataset:{key:'9:16',label:'9:16'}}});
     p.onSelectTemplate({currentTarget:{dataset:{template:{id:'poster',name:'长图',engine:'fine',price:4}}}});
     p.onOpenRatioModal();assert.equal(p.data.showRatioModal,false);assert.equal(p.data.currentRatioKey,'original');
-    assert.equal(p.data.currentQualityCost,4);
+    assert.equal(p.data.currentQualityCost,p.data.costLight);
     const xml=fs.readFileSync(path.join(root,'miniprogram/pages/adjust/adjust.wxml'),'utf8');
     assert(xml.includes('wx:if="{{ !selectedTemplate }}"'));assert(xml.includes("selectedTemplate ? 'aspectFit'"));
   });

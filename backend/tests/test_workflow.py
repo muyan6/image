@@ -50,8 +50,9 @@ class WorkflowTests(unittest.TestCase):
         m.jobs.create(jid,openid='sample_user',orig_file=orig,result_file=name,quality='light')
         m.jobs.update(jid,status='succeeded',completed_at=time.time()-age,created_at=time.time()-original_age,**extra)
         return jid
-    def test_default_quality_is_light_and_template_engine_wins(self):
-        self.assertEqual(m._chosen_quality('',''),'light');self.assertEqual(m._chosen_quality('light','fine'),'fine')
+    def test_user_quality_controls_both_template_and_restore(self):
+        self.assertEqual(m._chosen_quality('',''),'light');self.assertEqual(m._chosen_quality('light','fine'),'light')
+        self.assertEqual(m._chosen_quality('fine','light'),'fine')
 
     def test_new_economy_and_credit_package_catalog(self):
         self.assertEqual(m.users.get_balance('sample_user'),100)
@@ -144,7 +145,7 @@ class WorkflowTests(unittest.TestCase):
     def test_template_submission_keeps_uncropped_input(self):
         p=self.d/'input.jpg';p.write_bytes(self.image())
         tpl={'id':'fixture','name':'长图','engine':'fine'}
-        with patch.object(m.pool,'submit') as submit,patch.object(m.templates,'inc_usage'):
+        with patch.object(m.pool,'submit') as submit,patch.object(m.templates,'inc_usage'),patch.object(m,'_get_client',return_value=type('Client',(),{'configured':True})()):
             result=m._register_job('sample_user','fine','',str(p),'.jpg',template=tpl,aspect_ratio='9:16')
         job=m.jobs.get(result['job_id'])
         self.assertEqual(result['aspect_ratio'],'');self.assertEqual(submit.call_args.args[-1],'')

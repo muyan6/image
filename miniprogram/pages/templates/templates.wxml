@@ -44,7 +44,7 @@
           lazy-load
         ></image>
         <view class="card-badge card-engine-badge">
-          <text>{{ item.engine === 'fine' ? '2K精细' : '1.5K轻量' }}</text>
+          <text>双档可选</text>
         </view>
         <view class="card-multi-badge" wx:if="{{ item.covers && item.covers.length > 1 }}">
           <text>{{ item.covers.length }}图</text>

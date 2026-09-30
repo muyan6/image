@@ -732,6 +732,8 @@ class TemplateStore:
                 "engine": t["engine"],
                 "price": int(t.get("price", 0)),
                 "usage_count": max(0,int(t.get('usage_count',0))),
+                "quality_options": ['light','fine'],
+                "tier_prices": settings.prices(),
                 "layout": t.get("layout", ""),
                 "text_fields": t.get("text_fields", []),
                 "guide": _norm_guide(t.get("guide")),

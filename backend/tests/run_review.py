@@ -57,6 +57,9 @@ if not args.legacy and ci_test.exists():
 text_test = Path(__file__).with_name('test_text_generation.py')
 if not args.legacy and text_test.exists():
     commands.append(['python', '-u', text_test.as_posix()])
+tier_test = Path(__file__).with_name('test_template_tiers.py')
+if not args.legacy and tier_test.exists():
+    commands.append(['python', '-u', tier_test.as_posix()])
 executions = []
 for command in commands:
     result = subprocess.run(command, cwd=source, env=environment, capture_output=True, text=True, encoding='utf-8')
@@ -87,6 +90,8 @@ if not args.legacy and ci_test.exists():
     rows.extend(json.loads((output / 'ci_performance_results.json').read_text(encoding='utf-8'))['cases'])
 if not args.legacy and text_test.exists():
     rows.extend(json.loads((output / 'text_generation_results.json').read_text(encoding='utf-8'))['cases'])
+if not args.legacy and tier_test.exists():
+    rows.extend(json.loads((output / 'template_tiers_results.json').read_text(encoding='utf-8'))['cases'])
 errors = [r for r in rows if 'harness_error' in r]
 failed = sum(not r['passed'] for r in rows)
 summary = {'total': len(rows), 'passed': len(rows) - failed, 'failed': failed, 'harness_errors': len(errors)}

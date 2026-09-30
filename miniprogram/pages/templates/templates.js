@@ -93,9 +93,9 @@ Page({
     this._latestGroups = groups;
     this._latestRawItems = rawItems;
     const items = rawItems.map((item) => {
-      const amount = item.price > 0 ? item.price :
-        (item.engine === 'fine' ? this.data.priceFine : this.data.priceLight);
-      const cost = this.data.freeMode ? '免扣费' : ('✦ ' + amount + ' 光子');
+      const low=Math.min(this.data.priceLight,this.data.priceFine);
+      const high=Math.max(this.data.priceLight,this.data.priceFine);
+      const cost = this.data.freeMode ? '免扣费' : ('✦ ' + (low===high?low:low+'–'+high) + ' 光子');
       const rawCovers = Array.isArray(item.covers) && item.covers.length > 0
         ? item.covers
         : (item.cover ? [item.cover] : []);

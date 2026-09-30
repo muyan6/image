@@ -90,10 +90,11 @@ Page({
 
   _renderFeatured(items) {
     const free = !!this.data.freeMode;
-    const pFine = this.data.priceFine || 40;
-    const pLight = this.data.priceLight || 40;
+    const pFine = this.data.priceFine != null ? this.data.priceFine : 40;
+    const pLight = this.data.priceLight != null ? this.data.priceLight : 40;
     const featured = items.slice(0, 6).map((t) => {
-      let cost = free ? '免扣费' : (t.price > 0 ? ('✦ ' + t.price + ' 光子') : (t.engine === 'fine' ? ('✦ ' + pFine + ' 光子') : ('✦ ' + pLight + ' 光子')));
+      const low=Math.min(pLight,pFine),high=Math.max(pLight,pFine);
+      let cost = free ? '免扣费' : ('✦ '+(low===high?low:low+'–'+high)+' 光子');
       return Object.assign({}, t, {
         coverUrl: t.cover ? api.absolute(t.cover) : '/images/logo.jpg',
         costText: cost

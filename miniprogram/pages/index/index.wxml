@@ -51,11 +51,6 @@
 
     <text class="generation-warning">请勿上传违规内容：审核违规不予生图并扣除本次点数；7天内累计3次将永久封禁账号，剩余点数不予退还。</text>
 
-    <view class="text-generation-entry gallery-card" bindtap="onOpenTextGeneration">
-      <text class="portal-btn-title">文字生图 →</text>
-      <text class="portal-desc">没有照片？描述你想创作的画面</text>
-    </view>
-
     <!-- 底部历史记录轻量入口 (不堆砌) -->
     <view
       class="history-entry"
@@ -93,7 +88,7 @@
               mode="aspectFit"
             ></image>
             <view class="showcase-tag">
-              <text>{{ item.engine === 'fine' ? '2K精细' : '1.5K增强' }}</text>
+              <text>轻量 / 精细可选</text>
             </view>
           </view>
           <view class="showcase-info">
@@ -106,6 +101,10 @@
           </view>
         </view>
       </scroll-view>
+    </view>
+    <view class="text-generation-entry" bindtap="onOpenTextGeneration">
+      <view><text class="entry-label">文字生图</text><text class="entry-note">从一句描述开始创作</text></view>
+      <text class="entry-arrow">→</text>
     </view>
   </view>
 </view>

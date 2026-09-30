@@ -47,7 +47,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from admin_api import ensure_admin_password, make_admin_router
 from cleanup_store import CleanupStore
 from community_store import CommunityStore
-from template_output import select_template_output
+from template_output import select_template_output, select_template_quality
 from text_generation import make_text_router, ready as text_generation_ready
 from image_processing import IMAGE_LOCK, image_limited, upload_limited, normalization_rule, BoundedExecutor, QueueFull
 from cos_store import process_image as cos_process_image
@@ -541,12 +541,12 @@ def _register_job(openid: str, quality: str, style: str,
                   aspect_ratio: str = "", custom_prompt: str = "") -> Dict[str, Any]:
     """把已落盘的原图登记为任务（ multipart 与 COS 直传共用这条尾巴）。
 
-    template 非空时，引擎档位/提示词/输出尺寸/文字排版全部以模板为准，
-    价格用模板价（未定价回退到档位默认价）。
+    模板提供风格与排版；档位、模型和价格跟随用户选择及全局修图设置。
     光子在提交时预扣（服务端记账，余额不足直接 402），任务失败自动退款。
     """
     # 模板构图由模板/模型决定，旧客户端传来的比例也不能裁掉原始素材。
     if template:
+        template=select_template_quality(template,quality)
         aspect_ratio = ""
     if (custom_prompt and not template) or (template or {}).get("requires_prompt"):
         prompt_client = _get_client("worldcodes")
@@ -660,7 +660,9 @@ def _register_job(openid: str, quality: str, style: str,
 
 def _effective_price(quality: str,
                      template: Optional[Dict[str, Any]]) -> int:
-    """模板价优先，未定价（0）回退档位默认价。"""
+    """真实模板与修图同档同价；无模板 ID 的内部计费上下文仍可指定价格。"""
+    if (template or {}).get('id'):
+        return int(settings.prices().get(quality,0))
     tpl_price = int((template or {}).get("price", 0) or 0)
     if tpl_price > 0:
         return tpl_price
@@ -1560,6 +1562,7 @@ def public_config() -> Dict[str, Any]:
         "free_mode": settings.free_mode(),
         "cos_ready": settings.cos_ready(),
         "template_output_modes": ["template", "single"],
+        "template_quality_options": ["light", "fine"],
         "text_generation": {'ready':text_generation_ready(sys.modules[__name__]),'price':settings.snapshot()['text_generation']['price']},
         "image_processing": {"ci_enabled":settings.snapshot()["processing"]["ci_enabled"],"local_image_parallelism":1},
         "maintenance": settings.maintenance(),
@@ -1780,7 +1783,7 @@ def _resolve_template(template_id: str, text_fields_raw: str = ""
 
     返回 (模板快照或 None, 引擎档位, 文字字段值)。
     template_id 提供但找不到/已停用 -> 400（客户端拿到的是旧列表时保护）；
-    模板存在时引擎档位以模板 engine 为准（quality 参数仅纯修复模式生效）；
+    返回的模板 engine 仅为旧配置参考；实际档位由请求 quality 决定。
     模板文字字段做长度截断 + 默认值补齐（collect_values）。
     """
     template_id = (template_id or "").strip()
@@ -1790,7 +1793,7 @@ def _resolve_template(template_id: str, text_fields_raw: str = ""
     if tpl is None:
         raise HTTPException(status_code=400,
                             detail="模板不存在或已下架，刷新后重试")
-    # 引擎档位跟模板走（quality 参数在模板模式下仅作兜底）
+    # 兼容返回旧模板元数据，不覆盖用户选择。
     quality = str(tpl.get("engine") or "fine")
 
     values: Dict[str, str] = {}
@@ -2078,12 +2081,10 @@ def complete_upload(upload_id: str, request: Request):
 
 
 def _chosen_quality(req_q: str, tpl_quality: str) -> str:
-    """引擎档位：模板模式跟模板走（与 _resolve_template 的文档口径一致），
-    纯修复模式用用户选择的档位，缺省 light。"""
-    if tpl_quality:
-        return tpl_quality
+    """模板与纯修复共用用户选择，缺省 light。"""
     if req_q in ("light", "fine"):
         return req_q
+    if req_q:raise HTTPException(status_code=400,detail='生成档位必须为 light 或 fine')
     return "light"
 
 
