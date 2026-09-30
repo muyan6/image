@@ -30,7 +30,7 @@
   <view class="state-empty-wrap">
     <!-- 标语区 (优雅中文诗意排版) -->
     <view class="intro-section">
-      <text class="eyebrow">旧日瞬间 · 再度新生</text>
+      <text class="eyebrow">旧日瞬间 · 重现眼前</text>
       <text class="headline">让这一刻，重获新生</text>
       <text class="subhead">修复光影 · 留住真实 · 细节重构</text>
     </view>
@@ -50,15 +50,6 @@
     </view>
 
     <text class="generation-warning">请勿上传违规内容：审核违规不予生图并扣除本次点数；7天内累计3次将永久封禁账号，剩余点数不予退还。</text>
-
-    <!-- 底部历史记录轻量入口 (不堆砌) -->
-    <view
-      class="history-entry"
-      wx:if="{{ historyCount > 0 }}"
-      bindtap="onOpenHistory"
-    >
-      <text>查看过往修复记录 ({{ historyCount }}) ›</text>
-    </view>
 
     <!-- 最近上新 · 艺术画廊精选卡卷 -->
     <view class="showcase-section">
@@ -105,6 +96,14 @@
     <view class="text-generation-entry" bindtap="onOpenTextGeneration">
       <view><text class="entry-label">文字生图</text><text class="entry-note">从一句描述开始创作</text></view>
       <text class="entry-arrow">→</text>
+    </view>
+    <!-- 历史记录置于所有创作入口之后 -->
+    <view
+      class="history-entry"
+      wx:if="{{ historyCount > 0 }}"
+      bindtap="onOpenHistory"
+    >
+      <text>查看过往修复记录 ({{ historyCount }}) ›</text>
     </view>
   </view>
 </view>

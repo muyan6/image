@@ -20,7 +20,7 @@ class OutputTests(WorkflowTests):
         single=select_template_output(template,'single')
         self.assertEqual(template,original)
         self.assertTrue(single['prompt'].endswith(SINGLE_OUTPUT_RULE))
-        self.assertEqual(single['layout'],'');self.assertEqual(single['text_fields'],[])
+        self.assertEqual(single['layout'],original['layout']);self.assertEqual(single['text_fields'],original['text_fields'])
         self.assertEqual(single['price'],40);self.assertEqual(single['engine'],'fine')
         self.assertEqual(select_template_output(template)['prompt'],original['prompt'])
         self.assertEqual(select_template_output(template)['text_fields'],original['text_fields'])
@@ -52,7 +52,8 @@ class OutputTests(WorkflowTests):
         self.assertEqual(len(captured),2)
         for kw in captured:
             self.assertEqual(kw['template']['output_mode'],'single')
-            self.assertEqual(kw['template']['text_fields'],[]);self.assertEqual(kw['text_values'],{})
+            self.assertEqual(kw['template']['text_fields'],self.template()['text_fields'])
+            self.assertEqual(kw['text_values'],{'title':'旧标题'})
 
     def test_output_invalid_input_rejects_before_upload_read(self):
         response=self.client.post('/api/rescue/by-upload',headers=self.headers,
@@ -69,7 +70,7 @@ class OutputTests(WorkflowTests):
                 m._register_job('sample_user','fine','clear','unused.jpg','.jpg',template=single)
         self.assertEqual(caught.exception.status_code,503);reserve.assert_not_called()
 
-    def test_output_pipeline_preserves_style_and_skips_text_overlay(self):
+    def test_output_pipeline_preserves_style_text_and_full_frame(self):
         jid=self.job();m.jobs.update(jid,status='processing');sent=[]
         def enhance(src,out,**kw):
             sent.append(kw);Path(out).write_bytes(self.image((90,160)))
@@ -79,7 +80,27 @@ class OutputTests(WorkflowTests):
             m._run_pipeline(jid,'fine','clear',select_template_output(self.template(),'single'),{'title':'旧标题'},'1:1')
         self.assertEqual(m.jobs.get(jid)['status'],'succeeded')
         self.assertEqual((m.jobs.get(jid)['width'],m.jobs.get(jid)['height']),(90,160))
-        self.assertIn(SINGLE_OUTPUT_RULE,sent[0]['prompt']);overlay.assert_not_called()
+        self.assertIn(SINGLE_OUTPUT_RULE,sent[0]['prompt'])
+        overlay.assert_called_once()
+        self.assertEqual(overlay.call_args.args[2],'postcard_bottom')
+        self.assertEqual(overlay.call_args.args[4],{'title':'旧标题'})
+
+    def test_output_noncomparison_artwork_keeps_layout_and_text(self):
+        raw=self.template();raw['prompt']='单张水彩海报，保留边框和标题，不展示原图对比'
+        selected=select_template_output(raw,'single')
+        self.assertTrue(selected['prompt'].startswith(raw['prompt']))
+        for key in ('layout','text_fields','engine','price'):
+            self.assertEqual(selected[key],raw[key])
+        self.assertIn('如果模板本来不展示原照片作对比',selected['prompt'])
+        self.assertIn('严格沿用模板原有要求',selected['prompt'])
+
+    def test_output_generated_collages_are_not_flattened_or_cropped(self):
+        raw=self.template();raw['prompt']='三色证件照：三张生成后的人像并排，不嵌入原图'
+        selected=select_template_output(raw,'single')
+        self.assertIn(raw['prompt'],selected['prompt'])
+        self.assertIn('不要删除或合并',selected['prompt'])
+        self.assertIn('不要对输入或输出做机械裁半',selected['prompt'])
+        self.assertEqual(select_template_output(raw,'template')['prompt'],raw['prompt'])
 
     def test_output_engine_failure_does_not_silently_return_plain_photo(self):
         jid=self.job();m.jobs.update(jid,status='processing');m.settings.update({'providers':{'worldcodes':{'enabled':True}}})

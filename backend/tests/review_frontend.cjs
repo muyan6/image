@@ -11,6 +11,7 @@ const silent = {log(){}, warn(){}, error(){}};
 const tick = () => new Promise(r => setImmediate(r));
 
 async function test(name, fn) {
+  if (process.env.REVIEW_CASE_PATTERN && !new RegExp(process.env.REVIEW_CASE_PATTERN).test(name)) return;
   try {
     const [passed, observed] = await fn();
     results.push({case:name, passed:!!passed, observed});
@@ -116,7 +117,7 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     return [collapsed&&!sent.custom_prompt&&xml.includes('可选')&&xml.includes('不用填写'),
       {collapsed,submittedPrompt:sent.custom_prompt||'',optionalLabel:xml.includes('可选')}];
   });
-  await test('template_single_output_sets_mode_without_text_overlay_or_crop',async()=>{
+  await test('template_single_output_keeps_artwork_text_without_crop',async()=>{
     let sent;
     const {page}=loadPage('adjust',{submitJob:async(p,f)=>{sent=f;throw new Error('stop before real upload');}});
     if(!page.onSelectTemplateOutput)return [false,{outputHandler:'missing'}];
@@ -124,7 +125,7 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
       textValues:{title:'template text'},currentRatioKey:'1:1'});
     page.onSelectTemplateOutput({currentTarget:{dataset:{mode:'single'}}});
     await page.executeUpload('/isolated.jpg');
-    const single=sent.template_output_mode==='single'&&!sent.text_fields&&!sent.aspect_ratio;
+    const single=sent.template_output_mode==='single'&&JSON.parse(sent.text_fields).title==='template text'&&!sent.aspect_ratio;
     page.onSelectTemplate({currentTarget:{dataset:{template:{id:'next',text_fields:[]}}}});
     return [single&&page.data.templateOutputMode==='template',{single,modeAfterSwitch:page.data.templateOutputMode}];
   });

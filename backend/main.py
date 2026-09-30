@@ -2113,8 +2113,6 @@ def create_rescue_job(
     user = _rescue_guard(request)
     tpl, tpl_quality, text_values = _resolve_template(template_id, text_fields)
     tpl = _apply_template_output(tpl, template_output_mode)
-    if tpl and tpl.get("output_mode") == "single":
-        text_values = {}
     quality, style = _validate_quality_style(
         _chosen_quality((quality or "").strip().lower(), tpl_quality), style)
     custom_prompt, combined_text = _user_text(custom_prompt, text_values, tpl)
@@ -2189,8 +2187,6 @@ def create_rescue_job_by_upload(payload: _RescueByUploadBody,
     tpl, tpl_quality, text_values = _resolve_template(
         payload.template_id, payload.text_fields)
     tpl = _apply_template_output(tpl, payload.template_output_mode)
-    if tpl and tpl.get("output_mode") == "single":
-        text_values = {}
     quality, style = _validate_quality_style(
         _chosen_quality((payload.quality or "").strip().lower(), tpl_quality),
         payload.style)

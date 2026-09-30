@@ -426,7 +426,7 @@ Page({
           formData.template_output_mode = 'single';
         }
         // 模板文字排版字段：后端做长度截断与默认值补齐
-        if (this.data.templateOutputMode !== 'single' && (tpl.text_fields || []).length) {
+        if ((tpl.text_fields || []).length) {
           formData.text_fields = JSON.stringify(this.data.textValues);
         }
       } else {

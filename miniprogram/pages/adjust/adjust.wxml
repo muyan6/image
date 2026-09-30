@@ -80,21 +80,21 @@
     <view class="card-section" wx:if="{{ selectedTemplate }}">
       <view class="section-header">
         <text class="section-title">成品形式</text>
-        <text class="section-headline">保留模板排版，或只要一张成品</text>
+        <text class="section-headline">是否在成品中保留原图对比</text>
       </view>
       <view class="tier-grid">
         <view class="tier-card {{ templateOutputMode === 'template' ? 'tier-card-active' : '' }}"
           bindtap="onSelectTemplateOutput" data-mode="template">
-          <text class="tier-name">模板原版</text>
-          <text class="tier-desc">按示例构图，照片拼贴由模板决定</text>
+          <text class="tier-name">按模板生成</text>
+          <text class="tier-desc">遵循模板；有原图对比时保留拼接</text>
         </view>
         <view class="tier-card {{ templateOutputMode === 'single' ? 'tier-card-active' : '' }} {{ !singleOutputAvailable ? 'output-unavailable' : '' }}"
           bindtap="onSelectTemplateOutput" data-mode="single">
-          <text class="tier-name">仅风格重绘</text>
-          <text class="tier-desc">{{ singleOutputAvailable ? '重绘整幅，不插入原照片；不是自动分离' : '后端更新后启用' }}</text>
+          <text class="tier-name">仅生成后图</text>
+          <text class="tier-desc">{{ singleOutputAvailable ? '省略原图对比区域，保留生成后的画面' : '后端更新后启用' }}</text>
         </view>
       </view>
-      <text class="section-hint">重绘会重新生成画面，可能改变原版布局；撕纸或融合图也不是按切口提取。光子费用按所选档位计算。</text>
+      <text class="section-hint">不含原图对比的模板，两项效果通常相同，保留原有构图、文字与装饰。这是生成时的要求，不会自动裁切，也不是从已有拼图中精确提取。生成档位与光子费用不受此选项影响。</text>
     </view>
 
     <!-- 卡片 3：生成档位 / 选择这次的生成方式 -->
@@ -158,7 +158,7 @@
     <!-- 卡片 4：模板自定义文字（代码叠加中文，保证文字正确） -->
     <view
       class="card-section"
-      wx:if="{{ selectedTemplate && templateOutputMode !== 'single' && selectedTemplate.text_fields && selectedTemplate.text_fields.length > 0 }}"
+      wx:if="{{ selectedTemplate && selectedTemplate.text_fields && selectedTemplate.text_fields.length > 0 }}"
     >
       <view class="section-header section-header-split">
         <view class="header-left">

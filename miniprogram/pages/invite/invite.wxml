@@ -30,7 +30,7 @@
   <!-- 5. 底部固定主行动按钮 -->
   <view class="bottom-action-bar">
     <button class="btn-ink invite-main-btn" open-type="share">
-      邀请好友加入新生
+      邀请好友加入
     </button>
   </view>
 </view>

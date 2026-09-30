@@ -23,6 +23,38 @@ async function test(name,fn) {
 const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/orig?signature=fresh',
   result_url:'https://cos.invalid/result?signature=fresh',width:90,height:160};
 (async()=>{
+  await test('homepage_copy_and_history_follow_all_creation_entries',()=>{
+    const xml=fs.readFileSync(path.join(root,'miniprogram/pages/index/index.wxml'),'utf8');
+    assert(xml.includes('旧日瞬间 · 重现眼前'));
+    assert.equal((xml.match(/class="history-entry"/g)||[]).length,1);
+    assert(xml.indexOf('class="history-entry"')>xml.indexOf('class="text-generation-entry"'));
+    assert(xml.includes('wx:if="{{ historyCount > 0 }}"'));
+    const p=page('index');assert.equal(typeof p.onOpenHistory,'function');
+    assert(!xml.slice(xml.indexOf('class="history-entry"')).includes('bindtap="onOpenTextGeneration"'));
+    assert(fs.readFileSync(path.join(root,'backend/index.html'),'utf8').includes('旧日瞬间 · 重现眼前'));
+  });
+  await test('invite_button_uses_shorter_label_and_keeps_share_handler',()=>{
+    const xml=fs.readFileSync(path.join(root,'miniprogram/pages/invite/invite.wxml'),'utf8');
+    assert(xml.includes('邀请好友加入'));assert(!xml.includes('邀请好友加入新生'));
+    assert(xml.includes('open-type="share"'));
+  });
+  await test('output_options_describe_comparison_not_generation_quality',()=>{
+    const xml=fs.readFileSync(path.join(root,'miniprogram/pages/adjust/adjust.wxml'),'utf8');
+    assert(xml.includes('按模板生成'));assert(xml.includes('仅生成后图'));
+    assert(xml.includes('不含原图对比的模板，两项效果通常相同'));
+    assert(xml.includes('不会自动裁切'));assert(!xml.includes('仅风格重绘'));
+    assert(!xml.includes("selectedTemplate && templateOutputMode !== 'single'"));
+  });
+  await test('output_switch_does_not_change_quality_cost_or_custom_text',()=>{
+    const p=page('adjust');p.data.selectedTemplate={id:'poster',text_fields:[{key:'title'}]};
+    p.data.singleOutputAvailable=true;p.data.textValues={title:'保留标题'};
+    p.data.quality='fine';p.data.costFine=80;p.refreshCurrentCost();
+    for(const mode of ['single','template']) {
+      p.onSelectTemplateOutput({currentTarget:{dataset:{mode}}});
+      assert.equal(p.data.templateOutputMode,mode);assert.equal(p.data.quality,'fine');
+      assert.equal(p.data.currentQualityCost,80);assert.equal(p.data.textValues.title,'保留标题');
+    }
+  });
   await test('fresh_cos_download_is_local_and_no_token_is_sent_to_cos',async()=>{
     let header,url;
     const api=apiModule({downloadFile:o=>{header=o.header;url=o.url;o.success({statusCode:200,tempFilePath:'wxfile://result.jpg'});},
