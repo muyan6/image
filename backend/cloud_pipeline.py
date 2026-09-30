@@ -47,9 +47,7 @@ class CloudPipeline:
     def config(self): return self.runtime().settings.snapshot()['cloud_pipeline']
     def enabled(self): return self.config()['enabled']
     def pending(self):
-        m = self.runtime()
-        return [j for j in m.jobs.list_recent(limit=m.JOB_MAX_ENTRIES)[0]
-                if j.get('cloud_pipeline') and j.get('status') == 'processing' and not j.get('deleted_at')]
+        return self.runtime().jobs.pending_cloud()
 
     def ready(self,quality='light'):
         m = self.runtime(); conf = m.settings.gateway_for(quality)
@@ -176,9 +174,11 @@ class CloudPipeline:
                 m.cleanup.schedule('cos',job['orig_cos'],job['created_at']+m.ORIGINAL_TTL_SECONDS)
                 cos.copy_object(m.settings,source['key'],job['orig_cos'])
                 m.jobs.update(jid,cloud_input_frozen=True)
-            meta=cos.object_metadata(m.settings,job['orig_cos'])
+            cached=job.get('cloud_input_info')
+            meta=cached['meta'] if cached else cos.object_metadata(m.settings,job['orig_cos'])
             if not 0<meta['size']<=m.MAX_UPLOAD_BYTES:raise ValueError('图片超过上传大小上限或为空')
-            info=cos.image_info(m.settings,job['orig_cos']);w,h=info['width'],info['height']
+            info=cached['info'] if cached else cos.image_info(m.settings,job['orig_cos']);w,h=info['width'],info['height']
+            if not cached:m.jobs.update(jid,cloud_input_info={'meta':meta,'info':info})
             if w*h>m.MAX_PIXELS:raise ValueError('图片像素过大，请先缩小')
             if job.get('cloud_audit_mode',self.config().get('audit_mode')) == 'wechat_auto':
                 if not self.audits.gate(job,job['orig_cos'],meta['size'],'input'):return
@@ -246,11 +246,11 @@ class CloudPipeline:
         info=cos.image_info(m.settings,key)
         if info['width']*info['height']>m.MAX_PIXELS:raise ValueError('云端结果像素过大')
         self.require_live(job['id'])
-        m.jobs.update(job['id'],cloud_phase='finalize',stage='finalize')
+        m.jobs.update(job['id'],cloud_phase='finalize',stage='finalize',cloud_import_info=info)
 
     def finalize(self,job):
         m=self.runtime();p=job['cloud_request'];key=job['vendor_result_key']
-        info=cos.image_info(m.settings,key);w,h=info['width'],info['height']
+        info=job.get('cloud_import_info') or cos.image_info(m.settings,key);w,h=info['width'],info['height']
         aspect='' if p['template'] or job['input_mode']=='text' else f"{job['source_width']}:{job['source_height']}"
         rule=normalization_rule(w,h,0,aspect).replace('/quality/85','/quality/95')
         if p['text_values']:
@@ -260,10 +260,12 @@ class CloudPipeline:
         self.require_live(job['id'])
         m.cleanup.schedule('cos',job['result_cos'],time.time()+2*m.JOB_TTL_SECONDS)
         if not job.get('cloud_output_prepared'):
-            cos.process_image(m.settings,key,job['result_cos'],rule)
-            m.jobs.update(job['id'],cloud_output_prepared=True)
-        final=cos.image_info(m.settings,job['result_cos'])
-        meta=cos.object_metadata(m.settings,job['result_cos'])
+            prepared_meta=cos.process_image(m.settings,key,job['result_cos'],rule)
+            final=cos.image_info(m.settings,job['result_cos'])
+            m.jobs.update(job['id'],cloud_output_prepared=True,cloud_output_info=final,cloud_output_meta=prepared_meta)
+        else:final=job.get('cloud_output_info') or cos.image_info(m.settings,job['result_cos'])
+        meta=(prepared_meta if not job.get('cloud_output_prepared') and isinstance(prepared_meta,dict)
+              else cos.object_metadata(m.settings,job['result_cos']))
         if meta['size']<=0:raise ValueError('云端成品为空')
         if job.get('cloud_audit_mode',self.config().get('audit_mode')) == 'wechat_auto':
             if not self.audits.gate(job,job['result_cos'],meta['size'],'output'):return
@@ -271,7 +273,7 @@ class CloudPipeline:
         else:reject=self.audit(job['result_cos'])
         if reject:raise ValueError(reject)  # Output violations refund; no user strikes.
         self.require_live(job['id']);now=time.time()
-        timings={'queue_ms':round((job.get('started_at',now)-job['created_at'])*1000),
+        timings={**(m.jobs.get(job['id']).get('timings') or {}),'queue_ms':round((job.get('started_at',now)-job['created_at'])*1000),
                  'provider_ms':round((job.get('provider_completed_at',now)-job.get('submitted_at',now))*1000),
                  'processing_ms':round((now-job.get('started_at',now))*1000)}
         m.jobs.update(job['id'],status='succeeded',stage='done',cloud_phase='done',provider='worldcodes',
@@ -279,8 +281,8 @@ class CloudPipeline:
         current=m.jobs.get(job['id'])
         if current.get('deleted_at') or current['status']!='succeeded':raise RuntimeError('作品已取消，停止交付')
         m.users.complete_charge(job['id'])
-        for key in (job.get('result_cos'),job.get('norm_cos')):
-            if key:m.cleanup.schedule('cos',key,now+m.JOB_TTL_SECONDS)
+        for key in (job.get('orig_cos'),job.get('result_cos'),job.get('norm_cos')):
+            if key:m._retain_job_object(job['id'],'cos',key,now+m.JOB_TTL_SECONDS)
         if job.get('template_id'):
             try:m.templates.inc_usage(job['template_id'])
             except Exception:m.log.exception('模板热度写入失败')
@@ -296,7 +298,7 @@ class CloudPipeline:
         self.audits.wait(job)
 
     def step(self,jid):
-        m=self.runtime();job=m.jobs.get(jid)
+        m=self.runtime();job=m.jobs.get(jid);phase=(job or {}).get('cloud_phase','unknown');started=time.monotonic()
         try:
             job=self.require_live(jid)
             if time.time()>job['deadline']:raise ValueError('云端任务超时，本次光子退回；提交状态不明时不重复调用供应商')
@@ -318,5 +320,12 @@ class CloudPipeline:
                 # A delete may race a cloud copy; delete unique targets after that copy finishes.
                 for key in (current.get('result_cos'),current.get('norm_cos'),current.get('orig_cos')):
                     if key:m.cleanup.schedule('cos',key,time.time())
+                if current.get('deleted_at'):
+                    m.cleanup.delete_cos_now(m.settings,m._job_cos_keys(current))
         finally:
+            current=m.jobs.get(jid)
+            if current and phase!='wait_audit':
+                timings=dict(current.get('timings') or {})
+                name=phase+'_ms';timings[name]=timings.get(name,0)+round((time.monotonic()-started)*1000)
+                m.jobs.update(jid,timings=timings)
             with self.lock:self.busy.discard(jid)

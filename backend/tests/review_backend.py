@@ -92,7 +92,9 @@ def reset(name):
     d = sandbox / name
     d.mkdir()
     case_dirs.append(d)
-    m.settings = SettingsStore(str(d))
+    # Archived local-pipeline smoke fixtures are explicit; production defaults
+    # now use only the cloud route, covered by cloud/platform suites.
+    m.settings = SettingsStore(str(d),mutate_default=lambda doc:doc['cloud_pipeline'].update(enabled=False))
     m.users = UserStore(str(d))
     m.jobs = m.JobStore(2592000, 5000, db_path=str(d / 'jobs.db'))
     m.users.ensure_user('sample_user')
@@ -435,10 +437,12 @@ def original_retention():
     old=time.time()-2*24*3600
     os.utime(original,(old,old))
     m._startup_file_gc()
-    return not original.exists(), {'original_age_hours':48,'original_still_exists':original.exists(),'default_ttl_days':m.JOB_TTL_SECONDS//86400}
+    kept=original.exists()
+    expired=time.time()-31*86400;os.utime(original,(expired,expired));m._startup_file_gc()
+    return kept and not original.exists(), {'kept_at_48_hours':kept,'deleted_at_31_days':not original.exists(),'default_ttl_days':m.JOB_TTL_SECONDS//86400}
 
 
-case('original_retention_24_hours', original_retention)
+case('original_retention_30_days', original_retention)
 
 
 def refund_race():

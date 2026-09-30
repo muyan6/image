@@ -1,0 +1,1 @@
+.login-card{margin:80rpx 40rpx;padding:48rpx;background:#fff;border-radius:24rpx}.title{display:block;font-size:38rpx;font-weight:600}.message{display:block;margin:36rpx 0;color:#555;line-height:1.8}button{margin-top:24rpx}

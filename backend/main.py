@@ -150,9 +150,9 @@ MAX_PIXELS = int(os.environ.get("MAX_PIXELS", 60_000_000))
 ALLOWED_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 
 # 任务保留
-JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", 30 * 24 * 3600))
+JOB_TTL_SECONDS = 30 * 24 * 3600
 JOB_MAX_ENTRIES = int(os.environ.get("JOB_MAX_ENTRIES", 5000))
-ORIGINAL_TTL_SECONDS = int(os.environ.get("ORIGINAL_TTL_SECONDS", 24 * 3600))
+ORIGINAL_TTL_SECONDS = JOB_TTL_SECONDS
 MEDIA_URL_TTL_SECONDS = 600
 _sweeper_stop = threading.Event()
 
@@ -204,6 +204,7 @@ async def lifespan(_app: FastAPI):
     _sweeper_stop.set()
     cloud.stop()
     payments.stop()
+    web_login_router.close()
     pool.shutdown(wait=False, cancel_futures=True)
     log.info("已停止")
 
@@ -346,6 +347,8 @@ def _current_user(request) -> Dict[str, Any]:
     user = users.get_user(openid)
     if not user:
         raise HTTPException(status_code=401, detail="账号记录不存在，请重新登录")
+    if user.get('account_type')!='wechat':
+        raise HTTPException(status_code=401,detail='请使用微信登录，网页访客账户已停止使用')
     active_app_id = settings.wechat().get("app_id") or ""
     if user.get("account_type") == "wechat" and user.get("app_id") and active_app_id \
             and user["app_id"] != active_app_id:
@@ -723,6 +726,7 @@ class JobStore:
                  on_evict: Optional[Any] = None,
                  db_path: Optional[str] = None) -> None:
         self._data: Dict[str, Dict[str, Any]] = {}
+        self._processing = set()
         self._lock = threading.Lock()
         self._ttl = ttl
         self._max = max_entries
@@ -790,6 +794,7 @@ class JobStore:
                 self._startup_evicted.append(job)
                 continue
             self._data[job["id"]] = job
+            if job['status']=='processing' and not job.get('deleted_at'):self._processing.add(job['id'])
         for job in interrupted:
             # Refund first; re-running after a crash is harmless (ledger unique key).
             users.refund_job(job.get("openid") or "", job["id"])
@@ -837,11 +842,11 @@ class JobStore:
             **fields,
         }
         with self._lock:
-            if len(self._data) >= self._max and all(
-                    item.get("status") == "processing" for item in self._data.values()):
+            if len(self._processing) >= self._max:
                 raise HTTPException(status_code=503, detail="任务队列已满，请稍后再试")
             self._persist(job)
             self._data[job_id] = job
+            if job['status']=='processing' and not job.get('deleted_at'):self._processing.add(job_id)
             evicted: List[Dict[str, Any]] = []
             if len(self._data) > self._max:
                 evicted = self._evict_locked(keep=job_id)
@@ -864,6 +869,8 @@ class JobStore:
                 return
             self._persist(updated)
             self._data[job_id] = updated
+            if updated['status']=='processing' and not updated.get('deleted_at'):self._processing.add(job_id)
+            else:self._processing.discard(job_id)
 
     def _expires_at(self, job: Dict[str, Any]) -> float:
         return float(job.get("completed_at") or job.get("created_at") or 0) + self._ttl
@@ -878,24 +885,22 @@ class JobStore:
                 updated.update(status="failed", error="作品已删除，任务已取消")
             self._persist(updated)
             self._data[job_id] = updated
+            self._processing.discard(job_id)
             return dict(updated)
 
+    def pending_cloud(self):
+        """Dispatch from the active index instead of scanning retained history."""
+        with self._lock:
+            return [dict(self._data[jid]) for jid in self._processing if self._data[jid].get('cloud_pipeline')]
+
     def _evict_locked(self, keep: Optional[str] = None) -> List[Dict[str, Any]]:
-        """先删过期，再按创建时间删最旧。调用方必须持锁。返回被驱逐的任务。"""
+        """Expire records only; capacity must not delete retained works early."""
         evicted: List[Dict[str, Any]] = []
         now = time.time()
         for jid in [k for k, v in self._data.items()
                     if now > self._expires_at(v)]:
             evicted.append(self._data.pop(jid))
-        while len(self._data) > self._max:
-            oldest = min(
-                (k for k in self._data if k != keep and self._data[k].get("status") != "processing"),
-                key=lambda k: self._data[k].get("created_at", 0),
-                default=None,
-            )
-            if oldest is None:
-                break
-            evicted.append(self._data.pop(oldest))
+        for job in evicted:self._processing.discard(job['id'])
         self._delete_rows([j.get("id") for j in evicted if j.get("id")])
         return evicted
 
@@ -975,16 +980,35 @@ def _cleanup_job_files(evicted_jobs: List[Dict[str, Any]]) -> None:
             if name:
                 cleanup.schedule("local", name, time.time())
                 _safe_remove(os.path.join(UPLOAD_DIR, name))
-        for field in ("orig_cos", "result_cos", "norm_cos", "comparison_cos"):
-            if job.get(field):
-                cleanup.schedule("cos", job[field], time.time())
+        for key in _job_cos_keys(job):cleanup.schedule('cos',key,time.time())
+
+
+def _job_cos_keys(job):
+    keys=[job.get(f) for f in ('orig_cos','result_cos','norm_cos','comparison_cos')]
+    keys.append((job.get('cloud_request') or {}).get('source',{}).get('key'))
+    coordinator=globals().get('cloud')
+    if coordinator and job.get('cloud_pipeline'):keys.extend(coordinator.audits.cancel(job['id']))
+    return list(dict.fromkeys(k for k in keys if k))
+
+
+def _retain_job_object(jid,kind,key,due):
+    # Retention refresh and deletion tombstone must be serialized, otherwise a
+    # stale GC snapshot can postpone a failed user's immediate deletion.
+    with jobs._lock:
+        current=jobs._data.get(jid)
+        if current and not current.get('deleted_at') and current['status']!='failed':
+            cleanup.retain_until(kind,key,due)
+        else:cleanup.schedule(kind,key,time.time())
 
 
 def _startup_file_gc() -> None:
-    """Independent retention clocks: originals 24h, completed results 30 days."""
+    """Originals, comparisons and results share the 30-day completion clock."""
     now = time.time()
+    items, _ = jobs.list_recent(0, 10 ** 6)
+    owned_files={job.get(field) for job in items for field in ('orig_file','result_file','comparison_file') if job.get(field)}
     for path in glob.glob(os.path.join(UPLOAD_DIR, "*")):
         base = os.path.basename(path)
+        if base in owned_files:continue  # Job completion clock, not file mtime.
         try:
             mtime = os.path.getmtime(path)
         except OSError:
@@ -998,12 +1022,11 @@ def _startup_file_gc() -> None:
         if mtime < now - ttl:
             _safe_remove(path)
     # Register pre-existing job objects as well as newly created ones.
-    items, _ = jobs.list_recent(0, 10 ** 6)
     for job in items:
         if job.get("deleted_at"):
             _cleanup_job_files([job])
             continue
-        orig_due = float(job.get("created_at") or now) + ORIGINAL_TTL_SECONDS
+        orig_due = float(job.get("completed_at") or job.get("created_at") or now) + ORIGINAL_TTL_SECONDS
         result_due = float(job.get("completed_at") or job.get("created_at") or now) + JOB_TTL_SECONDS
         if job.get('cloud_pipeline') and job.get('status')=='processing':
             result_due=float(job.get('created_at') or now)+2*JOB_TTL_SECONDS
@@ -1012,7 +1035,8 @@ def _startup_file_gc() -> None:
                                  ("local", "comparison_file", result_due), ("cos", "comparison_cos", result_due),
                                  ("local", "result_file", result_due), ("cos", "result_cos", result_due)):
             if job.get(field):
-                cleanup.schedule(kind, job[field], time.time() if field.startswith("result_") and job.get("status") == "failed" else due)
+                if job.get('status')=='failed':cleanup.schedule(kind,job[field],time.time())
+                else:_retain_job_object(job['id'],kind,job[field],due)
 
 
 def _bg_sweeper() -> None:
@@ -1126,8 +1150,7 @@ def _normalize_long_side(src: str, dst: str, target: int = 0,
 
 def _media_expires_at(job: Dict[str, Any], kind: str) -> float:
     origin = float(job.get("created_at") or 0)
-    return origin + ORIGINAL_TTL_SECONDS if kind == "orig" and not (job.get('comparison_cos') or job.get('comparison_file')) else \
-        float(job.get("completed_at") or origin) + JOB_TTL_SECONDS
+    return float(job.get("completed_at") or origin) + JOB_TTL_SECONDS
 
 
 def _media_signature(job: Dict[str, Any], filename: str, expiry: int) -> str:
@@ -1945,22 +1968,10 @@ def wechat_login(body: _LoginBody):
 
 @app.post("/api/auth/web")
 def web_login(request: Request, response: Response):
-    """A browser session is a web visitor, never a WeChat user or an IP account."""
-    token = bearer_of({k.lower(): v for k, v in request.headers.items()})
-    bearer_user = verify_user_token(token) if token else None
-    existing = users.get_user(bearer_user) if bearer_user else None
-    if existing and existing.get("account_type") == "web":
-        openid = bearer_user  # Preserve an authenticated legacy account and balance.
-    else:
-        openid = verify_web_identity(request.cookies.get("rescue_web_identity", ""))
-        stored = users.get_user(openid) if openid else None
-        if stored and stored.get("account_type") != "web":
-            openid = None
-        openid = openid or "web-" + uuid.uuid4().hex
-    data = _login_response(openid, account_type="web")
-    response.set_cookie("rescue_web_identity", make_web_identity(openid), max_age=WEB_IDENTITY_TTL,
-                        httponly=True, secure=request.url.scheme == "https", samesite="lax", path="/api/auth/web")
-    return data
+    """Refresh an existing WeChat session; never create a browser guest."""
+    user=_current_user(request)
+    response.headers['Cache-Control']='no-store'
+    return _login_response(user['openid'],account_type='wechat',app_id=user.get('app_id') or '')
 
 
 @app.get("/api/me")
@@ -2416,7 +2427,7 @@ def delete_my_job(job_id: str, request: Request):
     if job.get("status") == "failed":
         users.refund_job(user["openid"], job_id)
     _cleanup_job_files([job])
-    cos_keys = [job.get(field) for field in ("orig_cos", "result_cos", "norm_cos") if job.get(field)]
+    cos_keys = _job_cos_keys(job)
     cos_deleted = cleanup.delete_cos_now(settings, cos_keys)
     users.audit(user["openid"], "deleted", "job=" + job_id)
     return {"ok": True, "balance": users.get_balance(user["openid"]),
@@ -2443,7 +2454,7 @@ def get_image(filename: str, request: Request) -> FileResponse:
     kind = match[1]
     if kind == "result" and job.get("status") != "succeeded":
         raise HTTPException(status_code=404, detail="图片尚未完成")
-    expires=(float(job.get('created_at') or 0)+ORIGINAL_TTL_SECONDS) if kind=='orig' else _media_expires_at(job,'result')
+    expires=_media_expires_at(job,kind)
     if time.time() >= expires or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="图片已过期或不存在")
     token = bearer_of({k.lower(): v for k, v in request.headers.items()})
@@ -2469,6 +2480,9 @@ async def unhandled(request, exc):  # noqa: ANN001, ARG001
 
 
 app.include_router(make_text_router(lambda:sys.modules[__name__]))
+from web_login import make_web_login_router
+web_login_router=make_web_login_router(lambda:sys.modules[__name__])
+app.include_router(web_login_router)
 app.include_router(make_payment_router(lambda:sys.modules[__name__]))
 
 if __name__ == "__main__":

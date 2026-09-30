@@ -100,7 +100,7 @@ def presign(settings: SettingsStore, method: str, key: str,
     return "https://%s%s?%s" % (_host(conf, internal=internal), uri, query)
 
 
-def process_image(settings: SettingsStore, source: str, target: str, rule: str) -> None:
+def process_image(settings: SettingsStore, source: str, target: str, rule: str) -> Dict[str, Any]:
     """CI basic processing persists a separate object; source is never overwritten."""
     if source == target:
         raise ValueError("Processed object must have a separate key")
@@ -115,6 +115,7 @@ def process_image(settings: SettingsStore, source: str, target: str, rule: str) 
         raise CosError('CI 基础图片处理失败 HTTP %s'%response.status_code,code='CI_PROCESSING_FAILED')
     meta=object_metadata(settings,target)
     if meta['size']<=0:raise CosError('CI 处理结果为空',code='CI_PROCESSING_FAILED')
+    return meta
 
 
 def control_url(settings,method,key='',params=None,headers=None):

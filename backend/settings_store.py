@@ -76,7 +76,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "pricing_revision": 2,
     "free_mode": False,
     "processing": {"ci_enabled": True},
-    "cloud_pipeline": {"enabled": False, "generation_concurrency": 16, "max_queued": 256,
+    "cloud_mode_revision": 1,
+    "cloud_pipeline": {"enabled": True, "generation_concurrency": 16, "max_queued": 256,
                        "poll_interval": 5, "timeout_seconds": 1800, "ci_biz_type": "", "audit_mode": "wechat_auto"},
     "text_generation": {"enabled":False,"model":"","endpoint":"/v1/images/generations","price":40},
     "wechat": {"app_id": "", "app_secret": ""},
@@ -372,6 +373,10 @@ class SettingsStore:
             return
         # 深合并:文件里缺的新字段用默认补齐,未知字段保留
         self._data = _deep_merge(defaults, loaded)
+        if not loaded.get('cloud_mode_revision'):
+            self._data['cloud_pipeline'].update(enabled=True,audit_mode='wechat_auto')
+            self._data['cloud_mode_revision']=1
+            self._save_locked(self._data)
         if int(loaded.get("pricing_revision") or 0) < 2:
             # 一次性将旧站 1/3 光子档位统一切到 40，保留其他运行设置。
             self._data["prices"] = {"light": 40, "fine": 40}

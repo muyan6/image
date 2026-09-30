@@ -118,6 +118,8 @@ class UserStore:
                     "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0")
             if "auto_banned" not in cols:
                 self._conn.execute("ALTER TABLE users ADD COLUMN auto_banned INTEGER NOT NULL DEFAULT 0")
+            if 'ban_reset_at' not in cols:
+                self._conn.execute('ALTER TABLE users ADD COLUMN ban_reset_at REAL NOT NULL DEFAULT 0')
             if "account_type" not in cols:
                 self._conn.execute("ALTER TABLE users ADD COLUMN account_type TEXT NOT NULL DEFAULT ''")
             if "app_id" not in cols:
@@ -244,8 +246,9 @@ class UserStore:
             self._conn.execute("INSERT INTO violations VALUES(?,?,?,?,?,?,?,?)",
                                (violation_id, openid, now, kind, reason[:200], charge, "active", ""))
             count = self._conn.execute(
-                "SELECT COUNT(*) FROM violations WHERE openid=? AND status IN ('active','upheld') AND created_at>=?",
-                (openid, now - 7 * 86400)).fetchone()[0]
+                "SELECT COUNT(*) FROM violations WHERE openid=? AND status IN ('active','upheld') AND created_at>=? "
+                "AND created_at>(SELECT ban_reset_at FROM users WHERE openid=?)",
+                (openid, now - 7 * 86400,openid)).fetchone()[0]
             banned = count >= 3
             if banned:
                 self._conn.execute("UPDATE users SET banned=1,auto_banned=1 WHERE openid=? AND banned=0", (openid,))
@@ -290,8 +293,9 @@ class UserStore:
                 self._conn.execute("UPDATE users SET balance=balance+?,blocked=MAX(0,blocked-1) WHERE openid=?",
                                    (charged, openid))
                 remaining = self._conn.execute("SELECT COUNT(*) FROM violations WHERE openid=? "
-                                               "AND status IN ('active','upheld') AND created_at>=?",
-                                               (openid, time.time() - 7 * 86400)).fetchone()[0]
+                                               "AND status IN ('active','upheld') AND created_at>=? AND created_at>"
+                                               "(SELECT ban_reset_at FROM users WHERE openid=?)",
+                                               (openid, time.time() - 7 * 86400,openid)).fetchone()[0]
                 if remaining < 3:
                     self._conn.execute("UPDATE users SET banned=0,auto_banned=0 WHERE openid=? AND auto_banned=1", (openid,))
             self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
@@ -468,12 +472,14 @@ class UserStore:
                 "SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
         return int(row[0] or 0) if row else 0
 
-    def set_banned(self, openid: str, banned: bool) -> None:
+    def set_banned(self, openid: str, banned: bool, *, reset_count: bool = False) -> None:
         """封禁/解封：封禁后无法提交任务（登录与历史查看不受影响）。"""
         with self._lock:
             self._conn.execute(
                 "UPDATE users SET banned=?,auto_banned=0 WHERE openid=?",
                 (1 if banned else 0, openid))
+            if reset_count and not banned:
+                self._conn.execute('UPDATE users SET ban_reset_at=? WHERE openid=?',(time.time(),openid))
             self._conn.commit()
 
     def add_balance(self, openid: str, delta: int) -> int:

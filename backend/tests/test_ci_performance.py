@@ -84,8 +84,10 @@ class CITests(WorkflowTests):
             self.assertEqual(pool.submit(lambda:'ok').result(timeout=3),'ok')
         finally:gate.set();pool.shutdown()
 
-    def test_ci_old_jobs_keep_original_24h_policy(self):
+    def test_ci_old_jobs_follow_30_day_completion_retention(self):
         jid=self.job(original_age=90000)
+        self.assertIsNotNone(m._job_media_url(m.jobs.get(jid),'orig'))
+        m.jobs.update(jid,completed_at=time.time()-31*86400)
         self.assertIsNone(m._job_media_url(m.jobs.get(jid),'orig'))
 
 if __name__=='__main__':

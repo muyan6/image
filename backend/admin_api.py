@@ -299,6 +299,9 @@ def make_admin_router(*, settings: SettingsStore,
     async def put_settings(request: Request) -> Dict[str, Any]:
         _guard(request)
         patch = _unmask_secrets(await _json_body(request), settings.snapshot())
+        if isinstance(patch.get('cloud_pipeline'),dict):
+            patch['cloud_pipeline'].update(enabled=True,audit_mode='wechat_auto')
+        patch['cloud_mode_revision']=1
         if "community" in patch:
             raise HTTPException(status_code=400, detail="社区帖子请在侧边栏「社区管理」中操作")
         try:
@@ -471,9 +474,11 @@ def make_admin_router(*, settings: SettingsStore,
         if users.get_user(openid) is None:
             raise HTTPException(status_code=404, detail="用户不存在")
         body = await _json_body(request)
-        banned = bool(body.get("banned"))
-        users.set_banned(openid, banned)
-        users.audit(openid, "banned_by_admin" if banned else "unbanned_by_admin")
+        if type(body.get('banned')) is not bool or type(body.get('reset_count',False)) is not bool:
+            raise HTTPException(400,detail='封禁与重置参数必须为布尔值')
+        banned = body['banned'];reset_count=body.get('reset_count',False)
+        users.set_banned(openid, banned,reset_count=reset_count)
+        users.audit(openid, "banned_by_admin" if banned else "unbanned_by_admin",'reset_count='+str(reset_count and not banned))
         return {"ok": True, "banned": banned}
 
     @router.get("/audit")

@@ -3,17 +3,17 @@
   <view class="retention-header">
     <text class="header-eyebrow">PHOTO RETENTION · 留存规范</text>
     <text class="header-headline">照片不会无限期保存</text>
-    <text class="header-desc">原图仅为本次生成短暂保留，结果图留出充裕的下载装裱时间，到期后由后台清理本地与 COS 文件。</text>
+    <text class="header-desc">原图、对比图与成品统一保留 30 天，到期自动清理；主动删除会立即清理本地与 COS 文件。</text>
   </view>
 
   <!-- 两个保存期限核心指标卡片 -->
   <view class="retention-card gallery-card">
     <text class="card-caption">上传原图</text>
     <view class="time-row">
-      <text class="time-num">24</text>
-      <text class="time-unit">小时内</text>
+      <text class="time-num">30</text>
+      <text class="time-unit">天</text>
     </view>
-    <text class="card-desc">完整上传原图从提交起保留 24 小时；新作品另存压缩对比原图，与成品从完成起保留 30 天，支持后续查看前后对比。</text>
+    <text class="card-desc">完整原图、对比图与成品从生成完成起统一保留 30 天，支持查看前后对比。主动删除不等待到期。</text>
   </view>
 
   <view class="retention-card gallery-card">

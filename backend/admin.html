@@ -464,12 +464,9 @@
             <div class="field"><label>轻量档价格（光子/张）</label><input type="number" id="price-light" min="0" max="9999"></div>
             <div class="field"><label>精细档价格（光子/张）</label><input type="number" id="price-fine" min="0" max="9999"></div>
             <div class="field"><label>归一化长边<small>0 = 关闭缩放；改小可省网关费用</small></label><input type="number" id="normalize" min="0" max="8192"></div>
-            <div class="field"><label><input type="checkbox" id="ci-enabled">传统模式：云端缩放、裁剪、转码</label><small>仅控制基础图片处理，不控制审核。开启云端异步模式后，这些操作始终由 CI 完成。</small></div>
-            <div class="field"><label><input type="checkbox" id="cloud-enabled" onchange="updateProcessingHint()">云端异步生成</label><small>COS 直传 → 原图审核 → CI 处理 → 供应商异步生成 → COS 镜像导入 → CI 成品处理与审核；图片不经过本机解码、下载或上传。新审核模式需配置微信推送、腾讯云专用前缀和回调；不自动降级为本机图片处理。</small></div>
+            <div class="field"><label>固定云端流程</label><small>COS 直传 → 微信原图审核 → CI 处理 → 供应商生成 → CI 成品处理 → 微信成品审核。大图或微信故障转腾讯云专用目录；自动审核只匹配 audit-tencent/input/、audit-tencent/output/，完整回调至 /api/callbacks/cos-audit。</small></div>
             <div class="field"><label>供应商生成并发</label><input id="cloud-concurrency" type="number" min="1" max="64"><small>默认 16；独立于 4 个元数据工作线程。供应商实际额度仍需核对。</small></div>
             <div class="field"><label>等待队列上限</label><input id="cloud-queued" type="number" min="0" max="1000"></div>
-            <div class="field"><label>云端图片审核模式</label><select id="cloud-audit-mode"><option value="wechat_auto">微信优先 + 腾讯云自动审核兜底</option><option value="ci_sync">旧版 CI 主动审核</option></select><small>微信直接读取 COS 签名链接，不下载图片或占线程等结果。超过 10MB 或微信服务故障时复制至 audit-tencent/input/ 或 audit-tencent/output/；腾讯云自动审核仅配置这两个前缀，完整回调至 /api/callbacks/cos-audit。复制触发需上线验证。</small></div>
-            <div class="field"><label>旧版 CI 图片审核策略 biz-type（可选）</label><input id="cloud-biz-type" placeholder="留空使用腾讯云默认审核策略"><small>仅旧版主动审核使用；自动审核策略在腾讯云控制台配置。审核服务异常停止并退回光子，不自动放行。</small></div>
           </div>
         </div>
         <div class="card">
@@ -543,9 +540,8 @@
         <div class="card">
           <div class="card-head"><h2>内容安全审核</h2></div>
           <label class="check"><span class="switch"><input type="checkbox" id="mod-enabled"><span class="knob"></span></span>
-            启用图片机审（上传与结果各查一道：≤10M 走微信免费接口，超限/不可用走腾讯云 ≈¥0.0015/张）</label><br>
-          <label class="check"><span class="switch"><input type="checkbox" id="mod-strict"><span class="knob"></span></span>
-            审核服务异常时也拦截（建议提审时务必开启！防止因网络超时放行违规图导致提审被打回）</label>
+            启用内容审核（图片＋文字；图片原图与成品各查一道，微信优先，腾讯云兜底）</label><br>
+          <p class="muted">审核服务异常或超时会停止任务，原图及文字审核违规会拦截；成品审核不通过会退回光子。</p>
           <div class="form-grid" style="margin-top:10px">
             <div class="field"><label>微信消息推送 Token <small>公众平台「开发管理」-「消息推送」里的 Token（明文模式+JSON），免费审核必填</small></label><input type="text" id="mod-wx-token" placeholder="如 myPushToken123"></div>
           </div>
@@ -879,12 +875,8 @@ function renderConf() {
   $("reward-seventh").value = SETTINGS.rewards?.checkin_seventh_bonus ?? 30;
   $("reward-featured").value = SETTINGS.rewards?.community_featured ?? 50;
   $("normalize").value = SETTINGS.normalize_long_side ?? 1536;
-    $("ci-enabled").checked = SETTINGS.processing?.ci_enabled !== false;
-    $("cloud-enabled").checked = SETTINGS.cloud_pipeline?.enabled === true;
     $("cloud-concurrency").value = SETTINGS.cloud_pipeline?.generation_concurrency ?? 16;
     $("cloud-queued").value = SETTINGS.cloud_pipeline?.max_queued ?? 256;
-    $("cloud-biz-type").value = SETTINGS.cloud_pipeline?.ci_biz_type || '';
-    $("cloud-audit-mode").value = SETTINGS.cloud_pipeline?.audit_mode || 'wechat_auto';
   $("mt-message").value = SETTINGS.maintenance?.message || "";
   $("mt-enabled").checked = SETTINGS.maintenance?.enabled || false;
   $("free-mode").checked = SETTINGS.free_mode || false;
@@ -895,14 +887,7 @@ function renderConf() {
   updateProcessingHint();
 }
 function updateProcessingHint(){
-  const cloud=$('cloud-enabled').checked;
-  $('ci-enabled').disabled=cloud;
-  $('cloud-biz-type').disabled=!cloud;
-  const savedCloud=SETTINGS.cloud_pipeline?.enabled===true;
-  const savedMode=savedCloud?'云端异步模式':'传统模式';
-  const audit=SETTINGS.moderation?.enabled?(savedCloud?(SETTINGS.cloud_pipeline?.audit_mode==='ci_sync'?'CI 图片审核':'微信链接审核优先，腾讯云自动审核兜底'):'微信图片审核优先，按配置使用备用审核'):'图片审核关闭';
-  $('processing-mode-summary').textContent='已保存：'+savedMode+' · '+audit+
-    (savedCloud!==cloud?'；当前草稿已切换为'+(cloud?'云端异步模式':'传统模式')+'，点击「保存修改」后生效。':'；更改配置需点击「保存修改」。');
+  $('processing-mode-summary').textContent='当前固定使用云端异步生成 · '+(SETTINGS.moderation?.enabled?'微信链接审核优先，大图与服务故障转腾讯云自动审核':'内容审核关闭')+' · 原图与成品保存 30 天；主动删除立即清理。';
 }
 window.saveConf = async () => saveSettingsPatch({
       prices: { light: parseInt($("price-light").value, 10) || 0,
@@ -912,10 +897,10 @@ window.saveConf = async () => saveSettingsPatch({
                  checkin_seventh_bonus: parseInt($("reward-seventh").value, 10) || 0,
                  community_featured: parseInt($("reward-featured").value, 10) || 0 },
       normalize_long_side: parseInt($("normalize").value, 10) || 0,
-      processing: {ci_enabled:$("ci-enabled").checked},
-      cloud_pipeline: {enabled:$("cloud-enabled").checked,
+      processing: {ci_enabled:true},
+      cloud_pipeline: {enabled:true,audit_mode:"wechat_auto",
         generation_concurrency:parseInt($("cloud-concurrency").value,10),
-        max_queued:parseInt($("cloud-queued").value,10),ci_biz_type:$("cloud-biz-type").value.trim(),audit_mode:$("cloud-audit-mode").value},
+        max_queued:parseInt($("cloud-queued").value,10)},
       maintenance: { enabled: $("mt-enabled").checked,
                      message: $("mt-message").value },
       free_mode: $("free-mode").checked,
@@ -939,7 +924,6 @@ function renderSec() {
   $("tc-region").value = SETTINGS.tencent?.cos_region || "";
   $("tc-domain").value = SETTINGS.tencent?.cos_custom_domain || "";
   $("mod-enabled").checked = SETTINGS.moderation?.enabled || false;
-  $("mod-strict").checked = SETTINGS.moderation?.block_on_error || false;
   $("mod-wx-token").value = SETTINGS.moderation?.wechat_push_token || "";
   $("quota-daily").value = SETTINGS.quota?.daily ?? 20;
   $("quota-minute").value = SETTINGS.quota?.per_minute ?? 3;
@@ -962,7 +946,7 @@ function renderSec() {
     html += `<div style="color:var(--text-sub, #666);margin-top:4px">⚠️ 机审总开关已关闭，任何上传图片均直接放行（提审必被驳回）。</div>`;
   } else {
     if(SETTINGS.cloud_pipeline?.enabled){
-      html+='<div style="margin-top:4px;color:#4f46e5"><b>当前云端图片审核：'+(SETTINGS.cloud_pipeline?.audit_mode==='ci_sync'?'旧版腾讯云 CI 主动审核':'微信 COS 链接审核优先；大图及微信故障转腾讯云自动审核')+'</b>。异常停止，不自动跳过。自动审核只匹配 audit-tencent/input/、audit-tencent/output/；回调 URL：'+location.origin+'/api/callbacks/cos-audit。控制台配置和复制触发需单独验证。</div>';
+      html+='<div style="margin-top:4px;color:#4f46e5"><b>当前云端图片审核：'+('微信 COS 链接审核优先；大图及微信故障转腾讯云自动审核')+'</b>。异常停止，不自动跳过。自动审核只匹配 audit-tencent/input/、audit-tencent/output/；回调 URL：'+location.origin+'/api/callbacks/cos-audit。控制台配置和复制触发需单独验证。</div>';
     }
     if (wxReady) {
       html += `<div style="color:#10b981;margin-top:4px">✅ <b>微信审核配置已就绪</b>（mediaCheckAsync 异步推送；云端新模式提交已有 COS 链接）</div>`;
@@ -970,12 +954,12 @@ function renderSec() {
       html += `<div style="color:#ef4444;margin-top:4px">❌ <b>微信免费审核未就绪</b>：缺少 ${missing.join("、")}</div>`;
     }
     if (tcReady) {
-      html += `<div style="color:#10b981;margin-top:4px">✅ <b>腾讯云 IMS 备用审核已配置</b></div>`;
+      html += `<div style="color:#10b981;margin-top:4px">✅ <b>腾讯云备用服务密钥已配置（文字走 TMS；云端图片走专用目录自动审核）</b></div>`;
     } else {
-      html += `<div style="color:var(--text-sub, #666);margin-top:4px">⚪ 腾讯云 IMS 备用审核未配置（可选）</div>`;
+      html += `<div style="color:var(--text-sub, #666);margin-top:4px">⚪ 腾讯云备用服务密钥未配置</div>`;
     }
     if(SETTINGS.cloud_pipeline?.enabled){
-      html+='<div style="margin-top:4px;color:#4f46e5">云端图片审核异常始终停止；上方异常策略开关保留给传统图片链路及文字审核。</div>';
+      html+='<div style="margin-top:4px;color:#4f46e5">图片及文字审核服务异常始终停止，不按异常放行。</div>';
     } else if (SETTINGS.moderation?.block_on_error) {
       html += `<div style="color:#10b981;margin-top:4px">🛡️ <b>严格模式已开启</b>：审核异常或超时坚决拦截，保证微信审核团队无法上传敏感图。</div>`;
     } else {
@@ -1012,7 +996,7 @@ window.saveSec = async () => saveSettingsPatch({
       tencent: { secret_id: $("tc-id").value.trim(), secret_key: $("tc-key").value.trim(),
                  cos_bucket: $("tc-bucket").value.trim(), cos_region: $("tc-region").value.trim(),
                  cos_custom_domain: $("tc-domain").value.trim() },
-      moderation: { enabled: $("mod-enabled").checked, block_on_error: $("mod-strict").checked,
+      moderation: { enabled: $("mod-enabled").checked, block_on_error: true,
                     wechat_push_token: $("mod-wx-token").value.trim() },
       quota: { daily: parseInt($("quota-daily").value, 10) || 0,
                per_minute: parseInt($("quota-minute").value, 10) || 0 } }, renderSec);
@@ -1645,7 +1629,8 @@ $("users-table").addEventListener("click", async (e) => {
     const banned = btn.dataset.banned === "1";
     if (!confirm((banned ? "解封" : "封禁") + "用户 " + oid.slice(0, 8) + "…？封禁后该用户将无法提交任务。")) return;
     try {
-      await api("/users/" + encodeURIComponent(oid) + "/ban", { method: "PUT", body: { banned: !banned } });
+      const resetCount=banned&&confirm('同时重置本轮封禁计数？\n审核测试建议选择“确定”；保留历史违规记录，不自动退款。选择“取消”则仅解封。');
+      await api("/users/" + encodeURIComponent(oid) + "/ban", { method: "PUT", body: { banned: !banned,reset_count:resetCount } });
       loadUsers();
     } catch (err) { alert("失败: " + err.message); }
   }

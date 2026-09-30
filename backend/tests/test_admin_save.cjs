@@ -81,12 +81,10 @@ const rows=[];async function test(name,fn){try{await fn();rows.push({case:name,p
   t.ctx.openAnnModal(null);const bar=t.get('page-save-bar');assert.equal(bar.parentNode.id,'slot');
   await t.ctx.saveCurrentPage();assert(saved);t.ctx.closeModal();assert.equal(bar.parentNode.id,'page-save-home');assert(bar.hidden);
  });
- await test('cloud_mode_disables_only_irrelevant_traditional_processing_setting',()=>{
-  const t=setup();t.ctx.showPage('conf');assert(t.get('ci-enabled').disabled);assert(!t.get('cloud-biz-type').disabled);
-  t.get('cloud-enabled').checked=false;t.ctx.updateProcessingHint();assert(!t.get('ci-enabled').disabled);assert(t.get('cloud-biz-type').disabled);
-  assert(t.get('ci-enabled').checked);
-  assert(t.get('processing-mode-summary').textContent.includes('已保存：云端异步模式'));
-  assert(t.get('processing-mode-summary').textContent.includes('当前草稿已切换为传统模式'));
+ await test('latest_mode_is_fixed_and_legacy_controls_removed',()=>{
+  const t=setup();t.ctx.showPage('conf');
+  for(const id of ['ci-enabled','cloud-enabled','cloud-biz-type','cloud-audit-mode'])assert(!html.includes('id="'+id+'"'));
+  assert(t.get('processing-mode-summary').textContent.includes('固定使用云端异步生成'));
  });
  await test('general_page_save_includes_rewards_ads_and_cloud_settings_once',async()=>{
   const t=setup();t.ctx.showPage('conf');await t.ctx.saveCurrentPage();assert.equal(t.calls.length,1);
@@ -99,8 +97,7 @@ const rows=[];async function test(name,fn){try{await fn();rows.push({case:name,p
   for(const k of ['wechat','payment','tencent','moderation','quota'])assert(k in t.calls[0].body,k);
  });
  await test('audit_help_explains_strategy_default_and_actual_picture_engine',()=>{
-  assert(html.includes('留空使用腾讯云默认审核策略'));
-  assert(html.includes('微信 COS 链接审核优先'));assert(html.includes('仅控制基础图片处理，不控制审核'));
+  assert(html.includes('微信 COS 链接审核优先'));assert(html.includes('启用内容审核（图片＋文字'));
   assert(html.includes('audit-tencent/input/'));assert(html.includes('/api/callbacks/cos-audit'));
  });
  fs.writeFileSync(path.join(output,'admin_save_results.json'),JSON.stringify({cases:rows},null,2));

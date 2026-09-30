@@ -96,48 +96,35 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]['openid'], 'o-wechat-user')
 
-    def test_browser_identity_survives_ip_change_and_refresh(self):
-        first = self.client.post('/api/auth/web').json()
-        openid = m.verify_user_token(first['token'])
-        m.users.set_balance(openid, 143)
-        self.address.ip = '198.51.100.80'
-        second = self.client.post('/api/auth/web').json()
+    def test_wechat_web_refresh_preserves_account_and_expiry_requires_scan(self):
+        m.users.ensure_user('o-browser-wechat');m.users.set_balance('o-browser-wechat',143)
+        headers={'Authorization':'Bearer '+m.user_token('o-browser-wechat')}
+        first=self.client.post('/api/auth/web',headers=headers)
+        self.address.ip='198.51.100.80'
+        second=self.client.post('/api/auth/web',headers=headers)
+        self.assertEqual(first.status_code,200);self.assertEqual(second.status_code,200)
+        self.assertEqual(second.json()['balance'],143)
+        self.assertEqual(m.verify_user_token(second.json()['token']),'o-browser-wechat')
         import time
-        future = time.time() + 13 * 3600
-        with patch.object(m.time, 'time', return_value=future):
-            refreshed = self.client.post('/api/auth/web').json()
-        rows = m.users._conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
-        self.log({'rows':rows, 'same_account':m.verify_user_token(second['token']) == openid, 'balance':second['balance']})
-        self.assertEqual(m.verify_user_token(second['token']), openid)
-        self.assertEqual(rows, 1)
-        self.assertEqual(second['balance'], 143)
-        self.assertEqual(first.get('user_id'), second.get('user_id'))
-        self.assertEqual(m.verify_user_token(refreshed['token']), openid)
-        self.assertEqual(refreshed['balance'], 143)
+        with patch.object(m.time,'time',return_value=time.time()+13*3600):
+            self.assertEqual(self.client.post('/api/auth/web',headers=headers).status_code,401)
+        self.assertEqual(m.users._conn.execute('SELECT COUNT(*) FROM users').fetchone()[0],1)
+        self.log({'same_wechat_account':True,'guest_created':False})
 
-    def test_separate_browsers_on_same_ip_are_not_shared_accounts(self):
-        first = self.client.post('/api/auth/web').json()
-        other = TestClient(self.address, raise_server_exceptions=False)
-        second = other.post('/api/auth/web').json()
-        other.close()
-        identities = {m.verify_user_token(r['token']) for r in (first, second)}
-        self.log({'separate_browser_accounts':len(identities)})
-        self.assertEqual(len(identities), 2)
-        self.assertEqual(m.users.stats().get('web_users_total'), 2)
-        self.assertEqual(m.users.stats()['users_total'], 0)
+    def test_unauthenticated_browsers_do_not_create_accounts(self):
+        first=self.client.post('/api/auth/web')
+        other=TestClient(self.address,raise_server_exceptions=False)
+        second=other.post('/api/auth/web');other.close()
+        self.assertEqual(first.status_code,401);self.assertEqual(second.status_code,401)
+        self.assertEqual(m.users._conn.execute('SELECT COUNT(*) FROM users').fetchone()[0],0)
+        self.log({'guest_created':False})
 
-    def test_authenticated_legacy_web_account_keeps_balance(self):
-        legacy = 'web-0123456789ab'
-        m.users.ensure_user(legacy)
-        m.users.set_balance(legacy, 245)
-        response = self.client.post('/api/auth/web', headers={'Authorization':'Bearer ' + m.user_token(legacy)}).json()
-        self.log({'preserved_legacy':m.verify_user_token(response['token']) == legacy, 'balance':response['balance']})
-        self.assertEqual(m.verify_user_token(response['token']), legacy)
-        self.assertEqual(response['balance'], 245)
-        self.address.ip = '192.0.2.66'
-        renewed = self.client.post('/api/auth/web').json()
-        self.assertEqual(m.verify_user_token(renewed['token']), legacy)
-        self.assertEqual(renewed['balance'], 245)
+    def test_legacy_web_account_is_disabled_but_money_is_preserved(self):
+        legacy='web-0123456789ab';m.users.ensure_user(legacy);m.users.set_balance(legacy,245)
+        response=self.client.post('/api/auth/web',headers={'Authorization':'Bearer '+m.user_token(legacy)})
+        self.assertEqual(response.status_code,401);self.assertEqual(m.users.get_balance(legacy),245)
+        self.assertEqual(m.users._conn.execute('SELECT COUNT(*) FROM users').fetchone()[0],1)
+        self.log({'disabled':True,'preserved_balance':245})
 
     def test_appid_mismatch_does_not_create_accounts(self):
         m.settings.update({'wechat':{'app_id':'wx_test_a','app_secret':'fixture'}})
@@ -180,18 +167,12 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(invalid.status_code,400)
 
     def test_forged_cookie_cannot_select_someone_elses_identity(self):
-        response = self.client.post('/api/auth/web').json()
-        victim = m.verify_user_token(response['token'])
-        m.users.set_balance(victim,245)
-        other = TestClient(self.address, raise_server_exceptions=False)
-        other.cookies.set('rescue_web_identity',victim + '.9999999999.' + '0'*64)
-        selected = other.post('/api/auth/web').json()
-        other.close()
-        actual = m.verify_user_token(selected['token'])
-        self.log({'victim_preserved':actual!=victim,'victim_balance':m.users.get_balance(victim)})
-        self.assertNotEqual(actual,victim)
-        self.assertEqual(m.users.get_balance(victim),245)
-
+        victim='o-victim';m.users.ensure_user(victim);m.users.set_balance(victim,245)
+        other=TestClient(self.address,raise_server_exceptions=False)
+        other.cookies.set('rescue_web_identity',victim+'.9999999999.'+'0'*64)
+        selected=other.post('/api/auth/web');other.close()
+        self.assertEqual(selected.status_code,401);self.assertEqual(m.users.get_balance(victim),245)
+        self.log({'victim_preserved':True,'victim_balance':245})
 
 if __name__ == '__main__':
     suite=unittest.defaultTestLoader.loadTestsFromTestCase(IdentityTests)

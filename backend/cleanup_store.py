@@ -101,5 +101,16 @@ class CleanupStore:
                         removed += 1
         return removed
 
+    def retain_until(self, kind: str, target: str, due: float) -> None:
+        """Set expiry for a known live job object, migrating old 24h records."""
+        if not target:return
+        with self._lock:
+            existing=self._conn.execute('SELECT due FROM cleanup WHERE kind=? AND target=?',(kind,target)).fetchone()
+            if existing and existing[0]==due:return  # No repeated retention writes every GC cycle.
+        self.schedule(kind,target,due)
+        with self._lock, self._conn:
+            self._conn.execute('UPDATE cleanup SET due=?,next_try=?,attempts=0 WHERE kind=? AND target=?',
+                               (due,due,kind,target))
+
     def close(self) -> None:
         self._conn.close()

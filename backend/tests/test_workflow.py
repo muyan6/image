@@ -255,7 +255,7 @@ class WorkflowTests(unittest.TestCase):
         m.jobs.update(jid,status='succeeded',completed_at=time.time()-m.JOB_TTL_SECONDS-1)
         self.assertIsNone(self.client.get(url,headers=self.headers).json()['result_url'])
     def test_original_expiry_remains_explicit(self):
-        jid=self.job(original_age=m.ORIGINAL_TTL_SECONDS+1)
+        jid=self.job(original_age=m.ORIGINAL_TTL_SECONDS+1,age=m.JOB_TTL_SECONDS+1)
         self.assertEqual(self.client.get('/api/jobs/'+jid,headers=self.headers).json()['orig_url'],None)
     def test_admin_delete_only_removes_management_entry(self):
         jid=self.job();before=m.users.get_user('sample_user');m.users.add_balance('sample_user',7)

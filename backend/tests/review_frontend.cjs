@@ -262,12 +262,12 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     const elements={};
     const el=id=>elements[id]||= {style:{},classList:{add(){},remove(){}},files:[],click(){}};
     let nowCall=0;let alerts=[];
-    const sandbox={document:{getElementById:el},window:{},console:silent,
+    const sandbox={document:{getElementById:el,createElement:()=>el("login-modal"),body:{appendChild(){}}},window:{},console:silent,
       localStorage:{getItem:()=> 'valid-token'},URL:{createObjectURL:()=> 'blob:fixture'},
       FormData:class{append(){}},Date:{now:()=>nowCall++===0?0:180001},
-      setTimeout:fn=>queueMicrotask(fn),alert:message=>alerts.push(message),
+      setTimeout:fn=>queueMicrotask(fn),clearInterval(){},setInterval(){},alert:message=>alerts.push(message),
       fetch:async url=>({ok:true,status:200,json:async()=>url==='/api/auth/web'?{token:'valid-token'}:
-        url==='/api/rescue'?{code:0,job_id:'abcdef123456'}:{status:'processing'}})};
+        url==='/api/uploads'?{upload_id:'fixture',url:'https://cos.invalid/photo'}:url==='/api/rescue/by-upload'?{code:0,job_id:'abcdef123456'}:{status:'processing'}})};
     vm.runInNewContext(script,sandbox);
     el('fileInput').files=[{name:'fixture.jpg',size:700}];
     el('fileInput').onchange();
@@ -648,14 +648,14 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     return [payload.app_id==='wx_real_app'&&app.globalData.userId==='WX-0123456789ABCDEF',{app_id:payload.app_id,user_id:app.globalData.userId}];
   });
 
-  await test('web_bootstrap_preserves_legacy_auth_token_for_cookie',async()=>{
+  await test('web_bootstrap_refreshes_existing_wechat_token',async()=>{
     const html=fs.readFileSync(path.join(ROOT,'backend/index.html'),'utf8');
     const script=[...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)][0][1];
     const elements={};const el=id=>elements[id]||= {style:{},classList:{add(){},remove(){}},files:[],click(){}};
     let options;
-    const sandbox={document:{getElementById:el},window:{},console:silent,
+    const sandbox={document:{getElementById:el,createElement:()=>el("login-modal"),body:{appendChild(){}}},window:{},console:silent,
       localStorage:{getItem:()=> 'old-valid-token',setItem(){}},URL:{createObjectURL:()=> 'blob:fixture'},
-      FormData:class{append(){}},Date,setTimeout,
+      FormData:class{append(){}},Date,setTimeout,clearInterval(){},setInterval(){},
       fetch:async(url,opts)=>{options=opts;return {ok:true,status:200,json:async()=>({token:'renewed',balance:245})};}};
     vm.runInNewContext(script,sandbox);await sandbox.ensureWebToken();
     return [options.headers.Authorization==='Bearer old-valid-token'&&options.credentials==='same-origin',

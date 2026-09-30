@@ -477,7 +477,7 @@
   const stage = document.getElementById('stage');
   const balanceBadge = document.getElementById('balanceBadge');
 
-  // ---- 网页访客：签名浏览器Cookie保留身份；IP不参与身份生成 ----
+  // ---- 微信扫码登录：与小程序共用账户，不自动创建访客 ----
   let webToken = '';
   try { webToken = localStorage.getItem('pr_web_token') || ''; } catch (e) {}
   let webLoginPromise = null;
@@ -493,7 +493,11 @@
   async function refreshWebToken() {
     const r = await fetch('/api/auth/web', { method: 'POST', credentials: 'same-origin', headers: authHeaders() });
     const d = await r.json().catch(() => ({}));
-    if (!r.ok || !d.token) throw new Error(d.detail || '访客登录失败');
+    if (!r.ok || !d.token) {
+      webToken='';try{localStorage.removeItem('pr_web_token');}catch(e){}
+      openWechatLogin();
+      throw new Error('请先使用微信扫码并确认登录');
+    }
     webToken = d.token;
     try { localStorage.setItem('pr_web_token', webToken); } catch (e) {}
     if (typeof d.balance === 'number') setBalance(d.balance);
@@ -509,8 +513,42 @@
     if (balanceBadge) balanceBadge.textContent = '✦ ' + n + ' 光子';
   }
 
-  // Establish the browser cookie while a cached legacy token is still valid.
-  ensureWebToken(true).catch(err => console.warn('访客登录失败:', err.message));
+  let loginTimer=null,loginBlob=null,loginBusy=false;
+  const loginPanel=document.createElement('div');
+  loginPanel.id='wechatLoginPanel';
+  loginPanel.style.cssText='display:none;position:fixed;inset:0;background:#0008;z-index:100;align-items:center;justify-content:center';
+  loginPanel.innerHTML='<div style="background:#fff;border-radius:20px;padding:28px;text-align:center;max-width:360px"><h2>微信登录</h2><p>微信扫码，在小程序内确认登录。<br>与小程序共用光子余额和作品。</p><img id="wechatLoginQr" width="240" height="240" alt="微信登录码"><p id="wechatLoginMessage"></p><button id="wechatLoginRefresh" type="button">刷新登录码</button></div>';
+  document.body.appendChild(loginPanel);
+  document.getElementById('wechatLoginRefresh').onclick=()=>openWechatLogin(true);
+  async function openWechatLogin(refresh){
+    if(loginBusy||(!refresh&&loginPanel.style.display==='flex'))return;
+    loginBusy=true;loginPanel.style.display='flex';clearInterval(loginTimer);
+    const message=document.getElementById('wechatLoginMessage');message.textContent='正在获取登录码…';
+    try{
+      const r=await fetch('/api/auth/wechat-web/start',{method:'POST',credentials:'same-origin',headers:{'X-Web-Login':'1'}});
+      const d=await r.json();if(!r.ok)throw new Error(d.detail||'登录码获取失败');
+      const q=await fetch(d.qr_url,{credentials:'same-origin'});
+      if(!q.ok){const e=await q.json();throw new Error(e.detail||'登录码获取失败');}
+      if(loginBlob)URL.revokeObjectURL(loginBlob);
+      loginBlob=URL.createObjectURL(await q.blob());document.getElementById('wechatLoginQr').src=loginBlob;
+      message.textContent='请用微信扫一扫，登录码 5 分钟内有效。';
+      let checking=false;
+      loginTimer=setInterval(async()=>{
+        if(checking)return;checking=true;
+        try{
+          const s=await fetch('/api/auth/wechat-web/'+d.id+'/status',{credentials:'same-origin',headers:{'X-Web-Login':'1'}});
+          const v=await s.json();if(!s.ok)throw new Error(v.detail||'登录码已失效');
+          if(v.state==='approved'){
+            webToken=v.token;try{localStorage.setItem('pr_web_token',webToken);}catch(e){}
+            setBalance(v.balance);clearInterval(loginTimer);loginPanel.style.display='none';
+          }else if(v.state==='denied'){clearInterval(loginTimer);message.textContent='已取消登录，请刷新登录码。';}
+        }catch(e){clearInterval(loginTimer);message.textContent=e.message;}
+        finally{checking=false;}
+      },2000);
+    }catch(e){message.textContent=e.message;}
+    finally{loginBusy=false;}
+  }
+  ensureWebToken(true).catch(()=>{});
   const btnDownload = document.getElementById('btnDownload');
 
   portalCard.onclick = () => fileInput.click();
@@ -574,16 +612,12 @@
     processingText.textContent = '正在提交照片…';
     readyControls.style.display = 'none';
 
-    const formData = new FormData();
-    formData.append('image', selectedFile);
-    formData.append('quality', currentQuality);
-
     try {
       await ensureWebToken();
-      let res = await fetch('/api/rescue', { method: 'POST', body: formData, headers: authHeaders() });
+      let res = await submitWebPicture(selectedFile,currentQuality);
       if (res.status === 401) {
         await ensureWebToken(true);
-        res = await fetch('/api/rescue', { method: 'POST', body: formData, headers: authHeaders() });
+        res = await submitWebPicture(selectedFile,currentQuality);
       }
       const data = await res.json();
       if (!res.ok || data.code !== 0) throw new Error(data.detail || '提交失败');
@@ -646,6 +680,17 @@
     const rect = stage.getBoundingClientRect();
     const pct = ((e.clientX - rect.left) / rect.width) * 100;
     setSplit(pct);
+  }
+
+  async function submitWebPicture(file,quality){
+    const headers=authHeaders({'Content-Type':'application/json'});
+    const r=await fetch('/api/uploads',{method:'POST',headers,body:JSON.stringify({filename:file.name,byte_size:file.size})});
+    if(!r.ok)return r;const u=await r.json();
+    const put=await fetch(u.url,{method:'PUT',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});
+    if(!put.ok)throw new Error('COS 上传失败，请检查存储桶跨域配置');
+    const c=await fetch('/api/uploads/'+encodeURIComponent(u.upload_id)+'/complete',{method:'POST',headers});
+    if(!c.ok)return c;
+    return fetch('/api/rescue/by-upload',{method:'POST',headers,body:JSON.stringify({upload_id:u.upload_id,quality})});
   }
 </script>
 </body>

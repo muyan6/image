@@ -1,0 +1,8 @@
+<view class="login-card">
+  <text class="title">确认登录网页端</text>
+  <text class="message">{{message}}</text>
+  <view wx:if="{{!done}}">
+    <button type="primary" loading="{{busy}}" disabled="{{busy}}" bindtap="onApprove">确认登录</button>
+    <button disabled="{{busy}}" bindtap="onDeny">取消</button>
+  </view>
+</view>

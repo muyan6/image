@@ -38,6 +38,13 @@ class CloudAudit:
     def close(self):
         self.db.close()
 
+    def cancel(self,jid):
+        with self.lock:
+            rows=self.db.execute('SELECT capability FROM audits WHERE jid=?',(jid,)).fetchall()
+            self.db.execute("UPDATE audits SET state='done',result=-1 WHERE jid=? AND state!='done'",(jid,))
+            self.db.commit()
+            return [r[0] for r in rows if r[0]]
+
     def row(self, jid, stage):
         with self.lock:
             row = self.db.execute('SELECT * FROM audits WHERE jid=? AND stage=?', (jid, stage)).fetchone()
@@ -64,6 +71,9 @@ class CloudAudit:
         if row['source'] != key or row['size'] != size:
             raise RuntimeError('审核对象发生变化，本次停止')
         if row['state'] == 'done':
+            current=m.jobs.get(job['id']);timings=dict(current.get('timings') or {})
+            timings[stage+'_audit_ms']=round((time.time()-row['created'])*1000)
+            m.jobs.update(job['id'],timings=timings)
             if row['result'] == 0:
                 if row['capability']:
                     m.cleanup.schedule('cos', row['capability'], time.time())

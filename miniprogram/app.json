@@ -13,7 +13,8 @@
     "pages/privacy/privacy",
     "pages/retention/retention",
     "pages/works/works",
-    "pages/compare/compare"
+    "pages/compare/compare",
+    "pages/web-login/web-login"
   ],
   "window": {
     "backgroundTextStyle": "dark",

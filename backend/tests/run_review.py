@@ -64,6 +64,8 @@ executions = []
 if not args.legacy:
     commands.extend([['python','-u',Path(__file__).with_name('test_cloud_pipeline.py').as_posix()],
                      ['python','-u',Path(__file__).with_name('test_cloud_audit.py').as_posix()],
+                     ['python','-u',Path(__file__).with_name('test_platform.py').as_posix()],
+                     ['node',Path(__file__).with_name('test_web_login_frontend.cjs').as_posix()],
                      ['python','-u',Path(__file__).with_name('test_cloud_origin.py').as_posix()],
                      ['node',Path(__file__).with_name('test_cloud_frontend.cjs').as_posix()],
                      ['python','-u',Path(__file__).with_name('test_gateway_profiles.py').as_posix()],
@@ -103,7 +105,7 @@ if not args.legacy and tier_test.exists():
     rows.extend(json.loads((output / 'template_tiers_results.json').read_text(encoding='utf-8'))['cases'])
 errors = [r for r in rows if 'harness_error' in r]
 if not args.legacy:
-    for name in ('cloud_audit_results.json','cloud_pipeline_results.json','cloud_origin_results.json','cloud_frontend_results.json',
+    for name in ('platform_frontend_results.json','platform_results.json','cloud_audit_results.json','cloud_pipeline_results.json','cloud_origin_results.json','cloud_frontend_results.json',
                  'gateway_profiles_results.json','admin_save_results.json','virtual_payment_results.json','payment_frontend_results.json'):
         rows.extend(json.loads((output/name).read_text(encoding='utf-8'))['cases'])
 failed = sum(not r['passed'] for r in rows)
