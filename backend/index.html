@@ -450,6 +450,10 @@
 
 <script>
   let selectedFile = null;
+  let selectedFileUrl = null;
+  let webSubmitting = false;
+  let pendingWebJob = null;
+  let webSubmissionUncertain = false;
   let currentQuality = 'fine';
   let splitPercent = 50;
   let isDragging = false;
@@ -565,8 +569,12 @@
   };
 
   function handleFile(file) {
+    if (webSubmitting) return;
     selectedFile = file;
+    pendingWebJob = null;
+    if (selectedFileUrl && URL.revokeObjectURL) URL.revokeObjectURL(selectedFileUrl);
     const url = URL.createObjectURL(file);
+    selectedFileUrl = url;
     origImg.src = url;
     resImg.src = url;
     clipLayer.style.clipPath = 'none';
@@ -587,7 +595,11 @@
   btnChange.onclick = resetToEmpty;
 
   function resetToEmpty() {
+    if (webSubmitting) return;
     selectedFile = null;
+    pendingWebJob = null;
+    if (selectedFileUrl && URL.revokeObjectURL) URL.revokeObjectURL(selectedFileUrl);
+    selectedFileUrl = null;
     stateEmpty.style.display = 'flex';
     workspace.style.display = 'none';
     fileInput.value = '';
@@ -606,7 +618,13 @@
   };
 
   btnRescue.onclick = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile || webSubmitting) return;
+    if (webSubmissionUncertain) {
+      alert('上次提交状态待确认，请先在小程序作品中核对，避免重复生成与扣费。');
+      return;
+    }
+    webSubmitting = true;
+    btnRescue.disabled = true;
 
     processingMask.style.display = 'flex';
     processingText.textContent = '正在提交照片…';
@@ -614,41 +632,62 @@
 
     try {
       await ensureWebToken();
-      let res = await submitWebPicture(selectedFile,currentQuality);
-      if (res.status === 401) {
-        await ensureWebToken(true);
-        res = await submitWebPicture(selectedFile,currentQuality);
+      if (!pendingWebJob) {
+        let res = await submitWebPicture(selectedFile,currentQuality);
+        if (res.status === 401) {
+          await ensureWebToken(true);
+          res = await submitWebPicture(selectedFile,currentQuality);
+        }
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || data.code !== 0 || !data.job_id) {
+          const e = new Error((data && data.detail) || '提交响应异常');
+          e.jobSubmissionAttempted = !!res.jobSubmissionAttempted;
+          throw e;
+        }
+        if (typeof data.balance === 'number') setBalance(data.balance);
+        pendingWebJob = data.job_id;
       }
-      const data = await res.json();
-      if (!res.ok || data.code !== 0) throw new Error(data.detail || '提交失败');
-      if (typeof data.balance === 'number') setBalance(data.balance);
-
-      const jobId = data.job_id;
+      const jobId = pendingWebJob;
       processingText.textContent = 'AI 正在深度重构光影细节…';
 
       let finished = false;
       const start = Date.now();
       while (Date.now() - start < 180000) {
-        await new Promise(r => setTimeout(r, 1500));
-        const q = await fetch('/api/jobs/' + jobId, { headers: authHeaders() });
-        if (q.status === 401) {
-          await ensureWebToken(true);
-          continue;
+        try {
+          const q = await fetch('/api/jobs/' + encodeURIComponent(jobId), { headers: authHeaders() });
+          if (q.status === 401) {
+            await ensureWebToken(true);
+            continue;
+          }
+          const job = await q.json();
+          if (!q.ok) {
+            const e = new Error(job.detail || '任务查询失败'); e.status = q.status; throw e;
+          }
+          if (job.status === 'succeeded') {
+            if (!job.result_url) throw Object.assign(new Error('作品图片已到保存期限'), {status:410});
+            finished = true;
+            pendingWebJob = null;
+            showResult(job.orig_url || job.result_url, job.result_url);
+            break;
+          } else if (job.status === 'failed') {
+            pendingWebJob = null;
+            throw Object.assign(new Error(job.error || '增强失败'), {terminal:true});
+          }
+        } catch (e) {
+          if (e.status === 404 || e.status === 410) pendingWebJob = null;
+          if (e.terminal || (e.status && e.status < 500 && e.status !== 429)) throw e;
         }
-        const job = await q.json();
-        if (job.status === 'succeeded') {
-          finished = true;
-          showResult(job.orig_url || job.result_url, job.result_url);
-          break;
-        } else if (job.status === 'failed') {
-          throw new Error(job.error || '增强失败');
-        }
+        await new Promise(r => setTimeout(r, Math.min(1500, Math.max(0, 180000 - (Date.now() - start)))));
       }
       if (!finished) throw new Error('等待超时，任务仍在云端处理，请稍后在作品中查看。任务编号：' + jobId);
     } catch (e) {
+      if (e.jobSubmissionAttempted) webSubmissionUncertain = true;
       alert('拯救失败: ' + e.message);
       processingMask.style.display = 'none';
       readyControls.style.display = 'flex';
+    } finally {
+      webSubmitting = false;
+      btnRescue.disabled = false;
     }
   };
 
@@ -690,7 +729,14 @@
     if(!put.ok)throw new Error('COS 上传失败，请检查存储桶跨域配置');
     const c=await fetch('/api/uploads/'+encodeURIComponent(u.upload_id)+'/complete',{method:'POST',headers});
     if(!c.ok)return c;
-    return fetch('/api/rescue/by-upload',{method:'POST',headers,body:JSON.stringify({upload_id:u.upload_id,quality})});
+    try {
+      const submitted = await fetch('/api/rescue/by-upload',{method:'POST',headers,body:JSON.stringify({upload_id:u.upload_id,quality})});
+      submitted.jobSubmissionAttempted = submitted.ok || submitted.status >= 500;
+      return submitted;
+    } catch (e) {
+      e.jobSubmissionAttempted = true;
+      throw e;
+    }
   }
 </script>
 </body>

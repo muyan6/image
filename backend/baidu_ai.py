@@ -55,10 +55,11 @@ class BaiduError(RuntimeError):
     """百度接口调用失败。code 供上层决定是否降级到本地引擎。"""
 
     def __init__(self, message: str, *, code: str = "BAIDU_ERROR",
-                 status: Optional[int] = None):
+                 status: Optional[int] = None, uncertain: bool = False):
         super().__init__(message)
         self.code = code
         self.status = status
+        self.uncertain = uncertain
 
 
 class BaiduImageEnhance:
@@ -112,21 +113,24 @@ class BaiduImageEnhance:
             raise BaiduError("token 响应不是 JSON：%s" % (resp.text or "")[:200],
                              code="BAD_RESPONSE") from exc
 
+        if not isinstance(data,dict):raise BaiduError('token 响应结构无效',code='BAD_RESPONSE')
         token = data.get("access_token")
         if not token:
             raise BaiduError("百度未返回 access_token：%s" % str(data)[:200],
                              code="AUTH")
 
         # 提前 1 小时判过期，避开边界
-        expires_in = int(data.get("expires_in", 2592000))
+        try:expires_in = int(data.get("expires_in", 2592000))
+        except (ValueError,TypeError):raise BaiduError('token 有效期无效',code='BAD_RESPONSE')
+        if expires_in<=0:raise BaiduError('token 有效期无效',code='BAD_RESPONSE')
         self._token = token
-        self._token_expires_at = time.time() + max(60, expires_in - 3600)
+        self._token_expires_at = time.time() + max(.1, expires_in - min(3600, max(1, expires_in//10)))
         log.debug("百度 access_token 已刷新，%d 秒后过期", expires_in)
         return token
 
     # --------------------------------------------------------------- enhance
     def enhance(self, input_path: str, output_path: str,
-                quality: str = "fine") -> str:
+                quality: str = "fine", style: Optional[str] = None) -> str:
         """执行增强。返回输出路径。
 
         quality == 'fine'  -> image_quality_enhance（超分，约 2K）
@@ -168,14 +172,10 @@ class BaiduImageEnhance:
                     params={"access_token": token},
                     data=payload,
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
-                    timeout=ENHANCE_TIMEOUT,
+                    timeout=ENHANCE_TIMEOUT,allow_redirects=False,
                 )
             except requests.RequestException as exc:
-                last_error = BaiduError("百度接口网络错误：%s" % exc, code="NETWORK")
-                if attempt < RETRIES:
-                    time.sleep(1.5 * (2 ** attempt))
-                    continue
-                raise last_error
+                raise BaiduError("百度接口请求结果待核对",code="NETWORK",uncertain=True) from exc
 
             # token 失效：刷新一次再重试
             if resp.status_code == 401:
@@ -185,7 +185,7 @@ class BaiduImageEnhance:
                 last_error = BaiduError("access_token 失效，已刷新", code="AUTH")
                 continue
 
-            if resp.status_code in RETRY_STATUS and attempt < RETRIES:
+            if resp.status_code == 429 and attempt < RETRIES:
                 last_error = BaiduError(
                     "百度接口 HTTP %d" % resp.status_code,
                     code="HTTP_%d" % resp.status_code, status=resp.status_code,
@@ -193,32 +193,39 @@ class BaiduImageEnhance:
                 time.sleep(1.5 * (2 ** attempt))
                 continue
 
+            if 300<=resp.status_code<400:
+                raise BaiduError('百度生成接口发生重定向',code='REDIRECT',uncertain=True)
             if resp.status_code >= 400:
                 raise BaiduError(
                     "百度接口 HTTP %d：%s"
                     % (resp.status_code, (resp.text or "")[:200]),
                     code="HTTP_%d" % resp.status_code, status=resp.status_code,
+                    uncertain=resp.status_code>=500 or resp.status_code==408,
                 )
 
             try:
                 result = resp.json()
             except ValueError as exc:
                 raise BaiduError("百度返回不是 JSON：%s" % (resp.text or "")[:200],
-                                 code="BAD_RESPONSE") from exc
+                                 code="BAD_RESPONSE",uncertain=True) from exc
+
+            if not isinstance(result,dict):
+                raise BaiduError('百度结果元数据无效',code='BAD_RESPONSE',uncertain=True)
 
             if result.get("image"):
                 try:
-                    out_bytes = base64.b64decode(result["image"])
+                    out_bytes = base64.b64decode(result["image"],validate=True)
                 except Exception as exc:  # noqa: BLE001
                     raise BaiduError("结果图 base64 解码失败：%s" % exc,
-                                     code="BAD_RESPONSE") from exc
+                                     code="BAD_RESPONSE",uncertain=True) from exc
                 if not out_bytes:
-                    raise BaiduError("百度返回空图片", code="EMPTY_RESULT")
+                    raise BaiduError("百度返回空图片", code="EMPTY_RESULT",uncertain=True)
 
-                os.makedirs(os.path.dirname(os.path.abspath(output_path)),
-                            exist_ok=True)
-                with open(output_path, "wb") as fh:
-                    fh.write(out_bytes)
+                try:
+                    os.makedirs(os.path.dirname(os.path.abspath(output_path)),exist_ok=True)
+                    with open(output_path, "wb") as fh:fh.write(out_bytes)
+                except OSError as exc:
+                    raise BaiduError('百度结果写入未完成',code='OUTPUT_WRITE',uncertain=True) from exc
                 return output_path
 
             if result.get("error_msg"):
@@ -229,7 +236,7 @@ class BaiduImageEnhance:
                 )
 
             raise BaiduError("未识别的百度响应：%s" % str(result)[:200],
-                             code="BAD_RESPONSE")
+                             code="BAD_RESPONSE",uncertain=True)
 
         raise BaiduError("百度接口重试耗尽：%s" % last_error,
                          code="RETRY_EXHAUSTED")

@@ -732,7 +732,14 @@ class JobStore:
         self._max = max_entries
         self._on_evict = on_evict
         self._startup_evicted: List[Dict[str, Any]] = []
-        self._db_path = db_path or os.path.join(BASE_DIR, "data", "jobs.db")
+        self._db_path = db_path or os.path.join(DATA_DIR, "jobs.db")
+        legacy_path = os.path.join(BASE_DIR, "data", "jobs.db")
+        if (db_path is None and os.path.abspath(self._db_path) != os.path.abspath(legacy_path)
+                and not os.path.isfile(self._db_path) and os.path.isfile(legacy_path)):
+            # Existing installations wrote outside DATA_DIR. Keep their history
+            # and in-flight paid tasks rather than silently opening an empty DB.
+            self._db_path = legacy_path
+            log.info("沿用已有任务库；新安装的任务库遵从 DATA_DIR")
         self._init_db()
 
     # ---------------------------------------------------------------- #
@@ -1316,6 +1323,7 @@ def _run_pipeline(job_id: str, quality: str, style: str,
             if client is None or not client.configured:
                 log.info("[%s] %s 未配置，跳过", job_id, name)
                 continue
+            provider_returned = False
             try:
                 if name == "worldcodes":
                     # 网关是提示词驱动的编辑模型，提示词从后台设置现读；
@@ -1328,6 +1336,7 @@ def _run_pipeline(job_id: str, quality: str, style: str,
                                    image_url=gateway_url)
                 else:
                     client.enhance(norm, tmp, quality=quality, style=style)
+                provider_returned = True
                 _validate_output(tmp)
                 enhanced = True
                 provider_used = name
@@ -1348,6 +1357,10 @@ def _run_pipeline(job_id: str, quality: str, style: str,
             except Exception as exc:  # noqa: BLE001
                 code = getattr(exc, "code", exc.__class__.__name__)
                 log.warning("[%s] %s 失败(%s)：%s", job_id, name, code, exc)
+                if provider_returned or getattr(exc, "uncertain", False):
+                    # A paid request may already have been accepted. Switching
+                    # providers here would charge for a second generation.
+                    raise
 
         # --- 3. 本地兜底：链路全挂（或全部被停用）时强制跑一次 ---
         if not enhanced:
@@ -1466,6 +1479,12 @@ def _run_pipeline(job_id: str, quality: str, style: str,
         log.info("[%s] 任务完成 -> %s", job_id, os.path.basename(out))
 
     except Exception as exc:  # noqa: BLE001
+        published = jobs.get(job_id)
+        if published and published.get("status") == "succeeded":
+            # Delivery is durable. A later ledger/retention/statistics failure
+            # must not withdraw the image or refund an already published job.
+            log.exception("[%s] 作品已交付，后续记账或保留期维护待恢复", job_id)
+            return
         log.exception("[%s] 处理失败（stage=%s）", job_id, stage)
         try:
             timings['processing_ms']=round((time.monotonic()-clock_started)*1000)

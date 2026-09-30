@@ -442,11 +442,21 @@ class SettingsStore:
     # ------------------------------------------------------------------ #
     # 常用读取便捷方法(全部现读,保证后台改动立即生效)
     # ------------------------------------------------------------------ #
+    def _section(self, key: str) -> Any:
+        """Copy only the requested section, under the same lock as updates.
+
+        Hot-path reads must not clone unrelated community posts or catalogs.
+        Returned containers remain detached from the stored configuration.
+        """
+        with self._lock:
+            return copy.deepcopy(self._data[key])
+
     def chain(self) -> List[str]:
-        return list(self.snapshot()["chain"])
+        return self._section("chain")
 
     def provider(self, name: str) -> Dict[str, Any]:
-        return copy.deepcopy(self.snapshot()["providers"].get(name, {}))
+        with self._lock:
+            return copy.deepcopy(self._data["providers"].get(name, {}))
 
     def provider_enabled(self, name: str) -> bool:
         conf = self.provider(name)
@@ -456,30 +466,34 @@ class SettingsStore:
         return gateway_profile(self.provider('worldcodes'),quality)
 
     def prompt_for(self, quality: str) -> str:
-        prompts = self.snapshot()["prompts"]
+        prompts = self._section("prompts")
         return prompts.get(quality) or prompts.get("fine") or DEFAULT_FINE_PROMPT
 
     def prices(self) -> Dict[str, int]:
-        return copy.deepcopy(self.snapshot()["prices"])
+        return self._section("prices")
 
     def rewards(self) -> Dict[str, int]:
-        return copy.deepcopy(self.snapshot()["rewards"])
+        return self._section("rewards")
 
     def free_mode(self) -> bool:
         """调试模式：小程序读到 true 就跳过小鱼干扣减，次数不限。"""
-        return bool(self.snapshot().get("free_mode"))
+        with self._lock:
+            return bool(self._data.get("free_mode"))
 
     def wechat(self) -> Dict[str, str]:
-        return copy.deepcopy(self.snapshot()["wechat"])
+        return self._section("wechat")
 
     def tencent(self) -> Dict[str, str]:
-        return copy.deepcopy(self.snapshot()["tencent"])
+        return self._section("tencent")
 
     def moderation(self) -> Dict[str, Any]:
-        return copy.deepcopy(self.snapshot()["moderation"])
+        return self._section("moderation")
 
     def quota(self) -> Dict[str, int]:
-        return copy.deepcopy(self.snapshot()["quota"])
+        return self._section("quota")
+
+    def cloud_pipeline(self) -> Dict[str, Any]:
+        return self._section("cloud_pipeline")
 
     def cos_ready(self) -> bool:
         """COS 直传是否可用：密钥与桶信息齐全。"""
@@ -493,32 +507,33 @@ class SettingsStore:
         return bool(mod.get("enabled") and tc.get("secret_id") and tc.get("secret_key"))
 
     def maintenance(self) -> Dict[str, Any]:
-        return copy.deepcopy(self.snapshot()["maintenance"])
+        return self._section("maintenance")
 
     def normalize_long_side(self) -> int:
-        return int(self.snapshot()["normalize_long_side"])
+        with self._lock:
+            return int(self._data["normalize_long_side"])
 
     def styles(self) -> List[Dict[str, Any]]:
-        return copy.deepcopy(self.snapshot()["styles"])
+        return self._section("styles")
 
     def quality_to_style(self) -> Dict[str, str]:
-        return copy.deepcopy(self.snapshot()["quality_to_style"])
+        return self._section("quality_to_style")
 
     def community(self) -> Dict[str, Any]:
         """灵感沙龙配置：{enabled: bool, items: [...]}。默认关闭且为空。"""
-        conf = self.snapshot().get("community") or {}
+        conf = self._section("community") or {}
         if not isinstance(conf, dict):
             return {"enabled": False, "items": []}
         items = conf.get("items")
         return {
             "enabled": bool(conf.get("enabled")),
-            "items": [copy.deepcopy(item) for item in items[:200] if isinstance(item, dict)]
+            "items": [item for item in items[:200] if isinstance(item, dict)]
             if isinstance(items, list) else [],
         }
 
     def ads(self) -> Dict[str, Any]:
         """激励视频广告配置。enabled 且 unit_id 非空才算真的开通。"""
-        conf = self.snapshot().get("ads") or {}
+        conf = self._section("ads") or {}
         if not isinstance(conf, dict):
             conf = {}
         unit_id = str(conf.get("rewarded_video_unit_id") or "").strip()
@@ -608,27 +623,33 @@ class AnnouncementStore:
 
     def update(self, item_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            for item in self._items:
+            for index, item in enumerate(self._items):
                 if item["id"] == item_id:
+                    candidate = copy.deepcopy(item)
                     if "title" in patch:
                         title = (patch["title"] or "").strip()
                         if not title or len(title) > 60:
                             raise ValueError("标题必填且不超过 60 字")
-                        item["title"] = title
+                        candidate["title"] = title
                     if "body" in patch:
                         body = (patch["body"] or "").strip()
                         if not body or len(body) > 2000:
                             raise ValueError("正文必填且不超过 2000 字")
-                        item["body"] = body
+                        candidate["body"] = body
                     if "level" in patch:
                         if patch["level"] not in self.LEVELS:
                             raise ValueError("level 非法")
-                        item["level"] = patch["level"]
+                        candidate["level"] = patch["level"]
                     if "enabled" in patch:
-                        item["enabled"] = bool(patch["enabled"])
-                    item["updated_at"] = time.time()
-                    self._save_locked()
-                    return copy.deepcopy(item)
+                        candidate["enabled"] = bool(patch["enabled"])
+                    candidate["updated_at"] = time.time()
+                    self._items[index] = candidate
+                    try:
+                        self._save_locked()
+                    except OSError:
+                        self._items[index] = item
+                        raise
+                    return copy.deepcopy(candidate)
         raise KeyError("公告不存在")
 
     def delete(self, item_id: str) -> None:

@@ -123,10 +123,11 @@ class FalError(RuntimeError):
     """fal.ai 调用失败。code 用于上层决定是否降级。"""
 
     def __init__(self, message: str, *, status: Optional[int] = None,
-                 code: str = "FAL_ERROR"):
+                 code: str = "FAL_ERROR", uncertain: bool = False):
         super().__init__(message)
         self.status = status
         self.code = code
+        self.uncertain = uncertain
 
 
 # --------------------------------------------------------------------------- #
@@ -359,18 +360,24 @@ class FalImageEnhance:
 
     def _request(self, method: str, url: str, *, what: str,
                  timeout: int, retries: int = 2, **kwargs) -> requests.Response:
-        """带指数退避的请求。只对 5xx / 429 / 网络错误重试。"""
+        """Retry idempotent GETs only; ambiguous paid POSTs are never replayed."""
+        paid=method.upper()=='POST'
+        if paid:retries=0
         last: Optional[Exception] = None
         for attempt in range(retries + 1):
             try:
                 resp = self.session.request(method, url, timeout=timeout,
-                                            headers=self._headers(), **kwargs)
+                                            headers=self._headers(), allow_redirects=False, **kwargs)
+                if 300<=resp.status_code<400:
+                    raise FalError(what+' 接口发生重定向',code='REDIRECT',uncertain=paid)
                 if resp.status_code in (429, 500, 502, 503, 504) and attempt < retries:
                     time.sleep(1.5 * (2 ** attempt))
                     continue
                 self._raise_for_status(resp, what)
                 return resp
             except FalError as exc:
+                if paid and (exc.status is not None and (exc.status>=500 or exc.status==408)):
+                    exc.uncertain=True
                 if exc.code in ("RATE_LIMIT",) or (
                         exc.status is not None and exc.status >= 500):
                     last = exc
@@ -383,7 +390,7 @@ class FalImageEnhance:
                 if attempt < retries:
                     time.sleep(1.5 * (2 ** attempt))
                     continue
-                raise FalError("%s 网络错误：%s" % (what, exc), code="NETWORK")
+                raise FalError("%s 网络错误：%s" % (what, exc.__class__.__name__), code="NETWORK",uncertain=paid) from exc
         raise FalError("%s 重试耗尽：%s" % (what, last), code="RETRY_EXHAUSTED")
 
     # ---------------------------------------------------------------- 队列
@@ -393,12 +400,15 @@ class FalImageEnhance:
             "POST", "%s/%s" % (_QUEUE_BASE, model),
             what="提交任务", timeout=DEFAULT_SUBMIT_TIMEOUT, json=arguments,
         )
-        data = resp.json()
-        status_url = data.get("status_url")
-        response_url = data.get("response_url")
+        try:
+            data = resp.json()
+            status_url = data.get("status_url")
+            response_url = data.get("response_url")
+        except (ValueError,AttributeError) as exc:
+            raise FalError('fal 任务提交元数据无效',code='BAD_RESPONSE',uncertain=True) from exc
         if not status_url or not response_url:
             raise FalError("fal 未返回 status_url/response_url：%s" % str(data)[:200],
-                           code="BAD_RESPONSE")
+                           code="BAD_RESPONSE",uncertain=True)
         return status_url, response_url
 
     def _wait(self, status_url: str, response_url: str,
@@ -411,7 +421,7 @@ class FalImageEnhance:
         while True:
             if time.time() > deadline:
                 raise FalError("等待 fal 结果超时（%ds）。" % self.max_wait,
-                               code="TIMEOUT")
+                               code="TIMEOUT",uncertain=True)
             resp = self._request("GET", status_url, what="查询状态",
                                  timeout=DEFAULT_POLL_TIMEOUT)
             body = resp.json() or {}
@@ -423,7 +433,8 @@ class FalImageEnhance:
                     self.last_metrics = metrics
                 break
             if state not in ("IN_QUEUE", "IN_PROGRESS", ""):
-                raise FalError("fal 任务状态异常：%s" % state, code="JOB_" + str(state))
+                terminal=state in ('FAILED','ERROR','CANCELLED','CANCELED')
+                raise FalError("fal 任务状态异常：%s" % state, code="JOB_" + str(state),uncertain=not terminal)
             time.sleep(DEFAULT_POLL_INTERVAL)
 
         resp = self._request("GET", response_url, what="读取结果",
@@ -435,15 +446,17 @@ class FalImageEnhance:
         try:
             resp = self.session.get(url, timeout=DEFAULT_DOWNLOAD_TIMEOUT)
         except requests.RequestException as exc:
-            raise FalError("下载结果图失败：%s" % exc, code="NETWORK")
+            raise FalError("下载结果图失败：%s" % exc.__class__.__name__, code="NETWORK",uncertain=True) from exc
         if resp.status_code >= 400:
             raise FalError("下载结果图失败 (HTTP %d)" % resp.status_code,
-                           status=resp.status_code)
+                           status=resp.status_code,uncertain=True)
         if not resp.content:
-            raise FalError("下载到的结果图为空。", code="EMPTY_RESULT")
-        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-        with open(output_path, "wb") as fh:
-            fh.write(resp.content)
+            raise FalError("下载到的结果图为空。", code="EMPTY_RESULT",uncertain=True)
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+            with open(output_path, "wb") as fh:fh.write(resp.content)
+        except OSError as exc:
+            raise FalError('fal 结果写入未完成',code='OUTPUT_WRITE',uncertain=True) from exc
         return output_path
 
     # ---------------------------------------------------------------- 业务
@@ -452,11 +465,17 @@ class FalImageEnhance:
         started = time.time()
         deadline = started + self.max_wait
         status_url, response_url = self._submit(model, arguments)
-        payload = self._wait(status_url, response_url, deadline)
+        try:payload = self._wait(status_url, response_url, deadline)
+        except FalError as exc:
+            # An accepted remote task can still finish after a failed status GET.
+            # Only an explicit terminal task failure permits a fallback generation.
+            if exc.code not in ('JOB_FAILED','JOB_ERROR','JOB_CANCELLED','JOB_CANCELED'):exc.uncertain=True
+            raise
+        except (ValueError,TypeError,AttributeError) as exc:
+            raise FalError('fal 任务状态元数据无效',code='BAD_RESPONSE',uncertain=True) from exc
         url = self._extract_image_url(payload)
         if not url:
-            raise FalError("fal 返回里没有图片地址：%s" % str(payload)[:200],
-                           code="NO_IMAGE")
+            raise FalError("fal 返回里没有图片地址",code="NO_IMAGE",uncertain=True)
         self._download(url, output_path)
         return output_path
 
@@ -564,7 +583,7 @@ class FalImageEnhance:
             try:
                 return self.enhance_fine(input_path, output_path, style=style)
             except FalError as exc:
-                if exc.code in ("NOT_CONFIGURED", "AUTH"):
+                if exc.uncertain or exc.code in ("NOT_CONFIGURED", "AUTH"):
                     raise
                 self.last_notice = "精细档失败(%s)，已退回轻量超分。" % exc.code
                 return self.enhance_light(input_path, output_path,

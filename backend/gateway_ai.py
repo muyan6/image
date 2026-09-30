@@ -38,10 +38,11 @@ class GatewayError(RuntimeError):
     """错误码与 FalError 对齐,方便上层统一处理。"""
 
     def __init__(self, message: str, *, status: Optional[int] = None,
-                 code: str = "GATEWAY_ERROR") -> None:
+                 code: str = "GATEWAY_ERROR", uncertain: bool = False) -> None:
         super().__init__(message)
         self.status = status
         self.code = code
+        self.uncertain = uncertain
 
 
 class OpenAIImagesEnhance:
@@ -127,55 +128,32 @@ class OpenAIImagesEnhance:
         model = (model or "").strip() or self._model_for(quality)
         text = (prompt or "").strip() or (
             "修复并增强这张照片，提升清晰度与质感，保持画面内容与构图不变。")
-        image_bytes = self._maybe_compress(input_path)
+        image_bytes = None
+        def upload_bytes():
+            nonlocal image_bytes
+            if image_bytes is None:image_bytes = self._maybe_compress(input_path)
+            return image_bytes
         use_size = (size or "").strip() or None
-
-        last_error: Optional[GatewayError] = None
-        for attempt in range(3):
-            try:
+        try:
+            if image_url:
                 try:
-                    if image_url:
-                        try:
-                            payload = self._request_image_by_url(
-                                model, text, image_url, size=use_size)
-                        except GatewayError as url_error:
-                            if url_error.status not in (400, 404, 415, 422):
-                                raise
-                            # URL transport and size compatibility are independent.
-                            self.last_notice = "网关不支持 URL 输入，已切换文件上传"
-                            image_url = None
-                            payload = self._request_image(model, text, image_bytes, size=use_size)
-                    else:
-                        payload = self._request_image(model, text, image_bytes,
-                                                      size=use_size)
-                except GatewayError as exc:
-                    # 网关不认识 size 参数:去掉再试一次,不算这家失败
-                    if (use_size and exc.status in (400, 404, 415, 422)
-                            and exc.code not in ("NETWORK", "TIMEOUT", "RATE_LIMIT")):
-                        self.last_notice = (
-                            "网关不支持 size=%s，已按默认尺寸生成" % use_size)
-                        log.warning("网关拒绝 size 参数(%s)，去掉后重试", exc.status)
-                        use_size = None
-                        payload = self._request_image(model, text, image_bytes,
-                                                      size=None)
-                    else:
-                        raise
-                break
-            except GatewayError as exc:
-                last_error = exc
-                if exc.code not in ("NETWORK", "RATE_LIMIT", "TIMEOUT") \
-                        and not (exc.status in RETRYABLE_STATUS):
-                    raise
-                if attempt == 2:
-                    raise
-                wait = 2 ** attempt * 1.5
-                log.warning("网关第 %d 次尝试失败(%s),%.1fs 后重试",
-                            attempt + 1, exc.code, wait)
-                time.sleep(wait)
+                    payload = self._request_image_by_url(model, text, image_url, size=use_size)
+                except GatewayError as url_error:
+                    if url_error.uncertain or url_error.status not in (400, 404, 415, 422):raise
+                    self.last_notice = "网关不支持 URL 输入，已切换文件上传"
+                    payload = self._request_image(model, text, upload_bytes(), size=use_size)
+            else:payload = self._request_image(model, text, upload_bytes(), size=use_size)
+        except GatewayError as exc:
+            # Only an explicit validation rejection is eligible for compatibility fallback.
+            # A timeout, 5xx or failed result download must never create another paid image.
+            if not exc.uncertain and use_size and exc.status in (400, 404, 415, 422):
+                self.last_notice = "网关不支持 size=%s，已按默认尺寸生成" % use_size
+                payload = self._request_image(model, text, upload_bytes(), size=None)
+            else:raise
 
         self.last_model = model
         self.last_cost_cny = self._price_for(quality)
-        self._write_output(payload, output_path)
+        self._write_generated_output(payload, output_path)
         return output_path
 
     # ------------------------------------------------------------------ #
@@ -187,10 +165,10 @@ class OpenAIImagesEnhance:
         try:
             response=self._session.post(self.base_url+endpoint,
                 headers={'Authorization':'Bearer '+self.api_key,'Content-Type':'application/json'},
-                json={'model':model,'prompt':prompt,'size':size,'n':1},timeout=(10,self.timeout))
-        except requests.RequestException as exc:raise GatewayError('文生图请求未完成，请稍后查看作品状态',code='NETWORK') from exc
+                json={'model':model,'prompt':prompt,'size':size,'n':1},timeout=(10,self.timeout),allow_redirects=False)
+        except requests.RequestException as exc:raise GatewayError('文生图请求未完成，请稍后查看作品状态',code='NETWORK',uncertain=True) from exc
         self._raise_for_status(response)
-        self._write_output(self._extract_image(response),output_path)
+        self._write_generated_output(self._extract_image(response),output_path)
         self.last_model=model
         return output_path
 
@@ -235,13 +213,13 @@ class OpenAIImagesEnhance:
             resp = self._session.post(url,
                 headers={"Authorization": "Bearer %s" % self.api_key,
                          "Content-Type": "application/json"},
-                json=body, timeout=(15, self.timeout))
+                json=body, timeout=(15, self.timeout), allow_redirects=False)
         except requests.Timeout as exc:
             raise GatewayError("网关请求超时(%ds)" % self.timeout,
-                               code="TIMEOUT") from exc
+                               code="TIMEOUT", uncertain=True) from exc
         except requests.RequestException as exc:
             raise GatewayError("网络错误: %s" % exc.__class__.__name__,
-                               code="NETWORK") from exc
+                               code="NETWORK", uncertain=True) from exc
         self._raise_for_status(resp)
         return self._extract_image(resp)
 
@@ -258,13 +236,13 @@ class OpenAIImagesEnhance:
                 url, headers=headers,
                 files={"image": ("image.jpg", image_bytes, mime)},
                 data={"model": model, "prompt": prompt, "n": "1", **extra},
-                timeout=(15, self.timeout))
+                timeout=(15, self.timeout), allow_redirects=False)
         except requests.Timeout as exc:
             raise GatewayError("网关请求超时(%ds)" % self.timeout,
-                               code="TIMEOUT") from exc
+                               code="TIMEOUT", uncertain=True) from exc
         except requests.RequestException as exc:
             raise GatewayError("网络错误: %s" % exc.__class__.__name__,
-                               code="NETWORK") from exc
+                               code="NETWORK", uncertain=True) from exc
 
         if resp.status_code in (404, 405, 415, 422):
             return self._request_image_json(
@@ -286,26 +264,28 @@ class OpenAIImagesEnhance:
             resp = self._session.post(
                 url, headers={**headers, "Content-Type": "application/json"},
                 json=body,
-                timeout=(15, self.timeout))
+                timeout=(15, self.timeout), allow_redirects=False)
         except requests.Timeout as exc:
             raise GatewayError("网关请求超时(%ds)" % self.timeout,
-                               code="TIMEOUT") from exc
+                               code="TIMEOUT", uncertain=True) from exc
         except requests.RequestException as exc:
             raise GatewayError("网络错误: %s" % exc.__class__.__name__,
-                               code="NETWORK") from exc
+                               code="NETWORK", uncertain=True) from exc
         self._raise_for_status(resp)
         return self._extract_image(resp)
 
     @staticmethod
     def _raise_for_status(resp: requests.Response) -> None:
+        if 300 <= resp.status_code < 400:
+            raise GatewayError('网关生成接口发生重定向',status=resp.status_code,code='SUBMIT_REDIRECT',uncertain=True)
         if resp.status_code < 400:
             return
         detail = ""
         try:
             body = resp.json()
-            err = body.get("error")
+            err = body.get("error") if isinstance(body,dict) else None
             detail = (err.get("message") if isinstance(err, dict) else err) \
-                or body.get("message") or str(body)[:200]
+                or (body.get("message") if isinstance(body,dict) else '') or str(body)[:200]
         except ValueError:
             detail = resp.text[:200]
         if resp.status_code in (401, 403):
@@ -316,9 +296,17 @@ class OpenAIImagesEnhance:
                                status=429, code="RATE_LIMIT")
         raise GatewayError("网关 HTTP %s: %s" % (resp.status_code, detail),
                            status=resp.status_code,
-                           code="HTTP_%s" % resp.status_code)
+                           code="HTTP_%s" % resp.status_code, uncertain=resp.status_code >= 500 or resp.status_code == 408)
 
     def _extract_image(self, resp: requests.Response) -> bytes:
+        try:return self._extract_image_payload(resp)
+        except GatewayError as exc:
+            # A successful generation followed by malformed data/download errors
+            # is still a paid result, not permission to regenerate it.
+            exc.uncertain=True
+            raise
+
+    def _extract_image_payload(self, resp: requests.Response) -> bytes:
         # 部分网关成功时直接回二进制图片,不走 JSON
         ctype = (resp.headers.get("content-type") or "").lower()
         if ctype.startswith("image/"):
@@ -343,15 +331,20 @@ class OpenAIImagesEnhance:
         item = items[0] if isinstance(items[0], dict) else {}
         if item.get("b64_json"):
             try:
-                return base64.b64decode(item["b64_json"])
+                data=base64.b64decode(item["b64_json"],validate=True)
+                if not data:raise ValueError('empty result')
+                return data
             except Exception as exc:  # noqa: BLE001
                 raise GatewayError("b64_json 解码失败", code="BAD_RESPONSE") from exc
 
         url = item.get("url") or ""
+        if not isinstance(url,str):raise GatewayError('网关结果图地址类型无效',code='BAD_RESPONSE')
         if url.startswith("data:"):
             _, _, b64 = url.partition("base64,")
             try:
-                return base64.b64decode(b64)
+                data=base64.b64decode(b64,validate=True)
+                if not data:raise ValueError('empty result')
+                return data
             except Exception as exc:  # noqa: BLE001
                 raise GatewayError("data URI 解码失败", code="BAD_RESPONSE") from exc
         if url:
@@ -397,3 +390,8 @@ class OpenAIImagesEnhance:
     def _write_output(payload: bytes, output_path: str) -> None:
         with open(output_path, "wb") as fh:
             fh.write(payload)
+
+    def _write_generated_output(self,payload: bytes,output_path: str) -> None:
+        try:self._write_output(payload,output_path)
+        except OSError as exc:
+            raise GatewayError('生成结果写入未完成',code='OUTPUT_WRITE',uncertain=True) from exc

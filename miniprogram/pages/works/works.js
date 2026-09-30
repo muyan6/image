@@ -38,6 +38,8 @@ Page({
 
   onHide() {
     this._visible = false;
+    this._loadVersion = (this._loadVersion || 0) + 1;
+    this.setData({loading:false});
     this.clearPendingRefresh();
   },
 
@@ -57,9 +59,10 @@ Page({
     this._pendingTimer = setTimeout(async () => {
       this._pendingTimer = null;
       if (!this._visible) return;
-      await this.refreshPendingWorks();
+      // 一次列表请求同时更新所有任务，避免 N 个任务串行请求拖长完成展示。
+      await this.loadWorks(true);
       this.schedulePendingRefresh();
-    }, Date.now() - this._pollStartedAt > 60000 ? 10000 : 3000);
+    }, Date.now() - this._pollStartedAt > 60000 ? 5000 : api.POLL_INTERVAL || 1500);
   },
 
   async onPullDownRefresh() {
@@ -130,7 +133,6 @@ Page({
       if(this._loadVersion===version)this.setData({loadError:'作品加载失败，请检查网络后重试'});
     }
     if(this._loadVersion===version)this.setData({loading:false,loaded:true});
-    if (this._loadVersion === version) await this.refreshPendingWorks();
   },
 
   safePreview(work) {
@@ -346,7 +348,15 @@ Page({
           this._deletedIds = this._deletedIds || new Set();
           if (item.jobId) this._deletedIds.add(item.jobId);
           if (item.jobId && app.globalData.mediaCache) delete app.globalData.mediaCache[item.jobId];
-          app.globalData.historyList = (app.globalData.historyList || []).filter(w => w !== item && w.jobId !== item.jobId);
+          const history = app.globalData.historyList || [];
+          if (item.jobId) app.globalData.historyList = history.filter(w => w.jobId !== item.jobId);
+          else {
+            let localIndex = history.indexOf(item);
+            if (localIndex < 0) localIndex = history.findIndex(w => !w.jobId &&
+              w.result === item.result && w.original === item.original && w.time === item.time &&
+              w.timestamp === item.timestamp);
+            app.globalData.historyList = history.filter((w, i) => i !== localIndex);
+          }
           app.persist();
           this.setWorks(app.globalData.historyList);
           await this.loadWorks();
@@ -366,6 +376,7 @@ Page({
         try {
           await api.deleteAllJobs();
           app.clearHistory();
+          app.globalData.mediaCache = {};
           this.setWorks([]);
           await this.loadWorks();
           wx.showToast({title: '作品集已清空', icon: 'success'});

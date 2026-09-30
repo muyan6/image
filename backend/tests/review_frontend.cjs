@@ -394,7 +394,7 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     let done=false,nextId=1;const timers=new Map();
     const clock={setTimeout(fn){const id=nextId++;timers.set(id,fn);return id;},clearTimeout(id){timers.delete(id);}};
     const job={id:'id1',status:'processing',quality:'light'};
-    const api={myJobs:async()=>({jobs:[job]}),absolute:x=>x,
+    const api={myJobs:async()=>({jobs:[{...job,status:done?'succeeded':'processing',result_url:done?'cos-result':''}]}),absolute:x=>x,
       request:async()=>({...job,status:done?'succeeded':'processing',result_url:done?'cos-result':''})};
     const {page}=loadPage('works',api,appFixture(),{},clock);
     page.onShow();await tick();await tick();

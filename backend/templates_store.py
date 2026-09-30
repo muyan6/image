@@ -403,8 +403,9 @@ class TemplateStore:
                 need_make = False
                 if not cover:
                     need_make = True
-                elif cover.startswith("local:") and not os.path.isfile(local_path):
-                    need_make = True
+                elif cover.startswith("local:"):
+                    referenced_path = os.path.join(out_dir, os.path.basename(cover[6:]))
+                    need_make = not os.path.isfile(referenced_path)
 
                 if need_make:
                     try:
@@ -415,6 +416,10 @@ class TemplateStore:
                             with open(local_path, "wb") as fh:
                                 fh.write(data)
                             t["cover"] = "local:%s" % filename
+                            if t.get("covers"):
+                                # The public projection prefers covers[0] over cover.
+                                # Replace only a missing primary example; retain the others.
+                                t["covers"][0] = t["cover"]
                             t["cover_v"] = max(int(t.get("cover_v", 0)), 1)
                             migrated = True
                     except Exception as exc:
@@ -516,19 +521,25 @@ class TemplateStore:
 
     def update_group(self, group_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            for g in self._groups:
+            for index, g in enumerate(self._groups):
                 if g["id"] == group_id:
+                    candidate = copy.deepcopy(g)
                     if "name" in patch:
                         name = str(patch["name"] or "").strip()
                         if not name or len(name) > 20:
                             raise ValueError("分组名必填且不超过 20 字")
-                        g["name"] = name
+                        candidate["name"] = name
                     if "sort" in patch:
-                        g["sort"] = int(patch["sort"])
+                        candidate["sort"] = int(patch["sort"])
                     if "enabled" in patch:
-                        g["enabled"] = bool(patch["enabled"])
-                    self._save_locked()
-                    return copy.deepcopy(g)
+                        candidate["enabled"] = bool(patch["enabled"])
+                    self._groups[index] = candidate
+                    try:
+                        self._save_locked()
+                    except OSError:
+                        self._groups[index] = g
+                        raise
+                    return copy.deepcopy(candidate)
         raise KeyError("分组不存在")
 
     def delete_group(self, group_id: str) -> None:
@@ -903,14 +914,10 @@ def resolve_covers(t: Dict[str, Any], settings) -> List[str]:
     return [c] if c else []
 
 
-_COVERS_DIR_CACHE: Dict[str, str] = {}
-
-
 def _covers_dir() -> str:
-    if "dir" not in _COVERS_DIR_CACHE:
-        _COVERS_DIR_CACHE["dir"] = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "data", "covers")
-    return _COVERS_DIR_CACHE["dir"]
+    data_dir = os.environ.get("DATA_DIR") or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "data")
+    return os.path.join(data_dir, "covers")
 
 
 def covers_dir() -> str:

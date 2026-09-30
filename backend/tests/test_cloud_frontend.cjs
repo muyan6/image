@@ -20,9 +20,14 @@ async function test(name,fn){try{await fn();rows.push({case:name,passed:true});}
     o.success({statusCode:200,data:o.url.endsWith('/api/config')?{cloud_pipeline:{enabled:true},cos_ready:true}:{upload_id:'fixture',url:'https://cos.invalid/incoming/fixture'}});},uploadFile:()=>uploads++});
   await assert.rejects(a.submitJob('photo.jpg',{}));assert.equal(puts,1);assert.equal(uploads,0);
  });
- await test('cloud_submit_response_exposes_slow_poll_flag_without_source_key',()=>{
-  const text=fs.readFileSync(path.join(root,'miniprogram/utils/api.js'),'utf8');
-  assert(text.includes('job.cloud_pipeline'));assert(text.includes('Math.max(5000, interval)'));
+ await test('cloud_job_polling_has_no_extra_completion_display_delay',async()=>{
+  let now=0;
+  const module={exports:{}};
+  vm.runInNewContext(fs.readFileSync(path.join(root,'miniprogram/utils/api.js'),'utf8'),
+   {module,wx:{getStorageSync:()=> 'fixture',request:o=>o.success({statusCode:200,data:{cloud_pipeline:true,
+     stage:'enhance',status:now>0?'succeeded':'processing'}})},getApp:()=>({globalData:{apiBase:'https://server.invalid'}}),
+    console,Date:{now:()=>now},setTimeout:(fn,ms)=>{now+=ms;queueMicrotask(fn);}});
+  await module.exports.waitForJob('fixture');assert.equal(now,1500);
   const main=fs.readFileSync(path.join(root,'backend/main.py'),'utf8');assert(main.includes('"cloud_pipeline":bool(job.get(\'cloud_pipeline\'))'));
  });
  fs.writeFileSync(path.join(out,'cloud_frontend_results.json'),JSON.stringify({cases:rows},null,2));

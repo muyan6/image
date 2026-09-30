@@ -83,7 +83,7 @@ Page({
 
   onShow() {
     this._foreground = true;
-    this.setData({ lightPoints: app.globalData.lightPoints });
+    this.setData({ lightPoints: app.globalData.lightPoints, processing: !!this._submissionPending });
   },
 
   onHide() {
@@ -332,7 +332,7 @@ Page({
   },
 
   async onStartGenerate() {
-    if (this.data.processing) return;
+    if (this.data.processing || this._submissionPending || this._unloaded) return;
     if(this.data.selectedTemplate&&!this.data.templateTiersAvailable){
       wx.showToast({title:'模板双档需更新后端后启用',icon:'none'});return;
     }
@@ -371,6 +371,7 @@ Page({
       return;
     }
 
+    this._submissionPending = true;
     this.setData({
       processing: true,
       processingText: '正在提交照片…'
@@ -415,6 +416,10 @@ Page({
   },
 
   async executeUpload(path) {
+    if (this._unloaded) { this._submissionPending = false; return; }
+    this._submissionPending = true;
+    const submissionToken = {};
+    this._submissionToken = submissionToken;
     const tpl = this.data.selectedTemplate;
     const generation = (this._generation || 0) + 1;
     this._generation = generation;
@@ -448,7 +453,9 @@ Page({
       // 1. COS 直传优先，失败自动回退 multipart（耗时仅 1~2 秒）
       const created = await api.submitJob(path, formData);
       if (!created || created.code !== 0 || !created.job_id) {
-        throw new Error((created && created.detail) || '服务响应异常');
+        const err = new Error((created && created.detail) || '服务响应异常');
+        err.jobSubmissionAttempted = true;
+        throw err;
       }
       if (typeof created.balance === 'number') app.setBalance(created.balance);
 
@@ -475,6 +482,8 @@ Page({
       }
       if (app.globalData.historyList.length > 50) app.globalData.historyList.length = 50;
       app.persist();
+      this._submissionPending = false;
+      this._submissionToken = null;
 
       if (this._foreground === false || this._unloaded || this._generation !== generation) return;
       this.setData({
@@ -538,6 +547,8 @@ Page({
       });
 
     } catch (err) {
+      // 即使请求结束时页面在后台，也要保留待核对标记，返回后不重复提交。
+      if (err && err.jobSubmissionAttempted) this._submissionUncertain = true;
       if (this._foreground === false || this._unloaded || this._generation !== generation) return;
       console.error('生成失败', err);
       this.setData({ processing: false });
@@ -601,6 +612,11 @@ Page({
         showCancel: false,
         confirmText: '确定'
       });
+    } finally {
+      if (this._submissionToken === submissionToken) {
+        this._submissionPending = false;
+        this._submissionToken = null;
+      }
     }
   },
 

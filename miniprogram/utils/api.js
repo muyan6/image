@@ -282,7 +282,9 @@ function rawUpload(filePath, formData, options) {
         try {
           data = JSON.parse(res.data);
         } catch (e) {
-          reject(new Error('服务器返回格式错误'));
+          const err = new Error('服务器返回格式错误');
+          err.jobSubmissionAttempted = res.statusCode >= 200 && res.statusCode < 300 || res.statusCode >= 500;
+          reject(err);
           return;
         }
         if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -291,10 +293,15 @@ function rawUpload(filePath, formData, options) {
         } else {
           const err = makeError({data, statusCode: res.statusCode});
           if (res.statusCode === 401) err.code = 'UNAUTHORIZED';
+          if (res.statusCode >= 500) err.jobSubmissionAttempted = true;
           reject(err);
         }
       },
-      fail: (err) => reject(networkError(err)),
+      fail: (err) => {
+        const error = networkError(err);
+        error.jobSubmissionAttempted = true;
+        reject(error);
+      },
     });
   });
 }
@@ -325,7 +332,8 @@ async function waitForJob(jobId, options) {
     }
     try {
       const job = await request('/api/jobs/' + jobId);
-      delay = (job.stage === 'queued' || job.cloud_pipeline) ? Math.max(5000, interval) : interval;
+      // 云端任务也按前台轮询周期显示进度，不再因部署方式额外等待 5 秒。
+      delay = interval;
       if (opts.isCanceled && opts.isCanceled()) {
         const err = new Error('任务已转入后台'); err.code = 'USER_BACKGROUND'; throw err;
       }
@@ -355,7 +363,7 @@ async function waitForJob(jobId, options) {
         throw err;
       }
     }
-    await sleep(delay);
+    await sleep(Math.min(delay, Math.max(0, deadline - Date.now())));
   }
 
   const err = new Error('处理超时，请稍后在历史记录中查看');
@@ -374,8 +382,12 @@ function health() {
 }
 
 /** 价格 / 维护状态 / 风格表 / 直传开关（后台可改，启动时拉一次即可） */
+let configPromise = null;
 function config() {
-  return request('/api/config', { timeout: 5000 });
+  // 仅合并正在飞行的请求，不缓存已完成配置；后台改价/维护开关仍及时生效。
+  if (!configPromise) configPromise = request('/api/config', { timeout: 5000 })
+    .finally(() => { configPromise = null; });
+  return configPromise;
 }
 
 /** 公告列表（只含启用的，最新在前） */
@@ -472,14 +484,14 @@ async function _submitViaCos(filePath, formData) {
   const extMatch = /\.(\w+)$/.exec(filePath || '');
   const ext = extMatch ? '.' + extMatch[1].toLowerCase() : '.jpg';
 
-  const up = await createUpload('photo' + ext, stat.size || 0);
-  const buf = await new Promise((resolve, reject) => {
+  const read = new Promise((resolve, reject) => {
     fs.readFile({
       filePath: filePath,
       success: (r) => resolve(r.data),
       fail: (e) => reject(networkError(e))
     });
   });
+  const [up, buf] = await Promise.all([createUpload('photo' + ext, stat.size || 0), read]);
   await putToCos(up.url, buf);
   await completeUpload(up.upload_id);
 
@@ -494,7 +506,7 @@ async function _submitViaCos(filePath, formData) {
     return await rescueByUpload(body);
   } catch (err) {
     // The server may already have accepted a timed-out request; don't submit twice.
-    err.jobSubmissionAttempted = true;
+    if (!err.status || err.status >= 500) err.jobSubmissionAttempted = true;
     throw err;
   }
 }
@@ -505,11 +517,9 @@ async function _submitViaCos(filePath, formData) {
  * 成功时响应里的 balance 已同步进 app.globalData。
  */
 async function submitJob(filePath, formData) {
-  await ensureLogin();
   const form = _stringifyFormData(formData);
-  let cfg = null;
-    // Unknown deployment state must not cause an image upload through the VM.
-    cfg = await config();
+  // 登录与公开配置互不依赖，并行准备；任一失败都不开始上传。
+  const [, cfg] = await Promise.all([ensureLogin(), config()]);
   if(form.template_id&&(!cfg||!Array.isArray(cfg.template_quality_options)||!cfg.template_quality_options.includes('light')||!cfg.template_quality_options.includes('fine'))){
     const e=new Error('模板双档需更新后端后启用');e.status=503;throw e;
   }

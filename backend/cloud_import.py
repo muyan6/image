@@ -53,5 +53,12 @@ def import_result(pipeline,job):
         if time.time()>=deadline or (attempts>=TRIGGER_LIMIT and not m.jobs.get(jid).get('cloud_import_triggered')):
             raise RuntimeError('COS 成品导入失败；'+str(exc)) from exc
         pipeline.require_live(jid)
+        if exc.status==404 and m.jobs.get(jid).get('cloud_import_triggered'):
+            # Accepted backfills often finish in < 1 s. Probe quickly first,
+            # then back off without retriggering the mirror or the paid AI POST.
+            probes=job.get('import_probe_attempts',0)+1
+            delay=min(5,.5*2**min(probes-1,4))
+            m.jobs.update(jid,import_probe_attempts=probes)
+        else:delay=min(15,2**min(attempts+1,4))
         m.jobs.update(jid,cloud_phase='import',stage='store_cos',
-                      cloud_next_at=min(deadline,time.time()+min(15,2**min(attempts+1,4))))
+                      cloud_next_at=min(deadline,time.time()+delay))

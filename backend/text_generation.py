@@ -41,9 +41,16 @@ def run_text_job(m,jid,conf,provider,prompt,size):
         if not current or current.get('deleted_at'):raise RuntimeError('作品已删除，停止交付')
         timings.update(storage_ms=round((time.monotonic()-phase)*1000),processing_ms=round((time.monotonic()-started)*1000))
         m.jobs.update(jid,status='succeeded',stage='done',provider='worldcodes',width=width,height=height,completed_at=time.time(),timings=timings)
+        current=m.jobs.get(jid)
+        if not current or current.get('deleted_at') or current['status']!='succeeded':
+            raise RuntimeError('作品已删除，停止交付')
         m.users.complete_charge(jid)
         for kind,target in [('cos',job['result_cos']),('local',job['result_file'])]:m.cleanup.schedule(kind,target,time.time()+m.JOB_TTL_SECONDS)
     except Exception as exc:
+        current=m.jobs.get(jid)
+        if current and current.get('status')=='succeeded':
+            m.log.exception('文字作品已完成，后续维护异常；保留成品：%s',jid)
+            return
         m.jobs.update(jid,status='failed',error=str(exc)[:500],timings=timings)
         m.users.refund_job(job['openid'],jid)
         m._safe_remove(out);m.cleanup.schedule('cos',job['result_cos'],time.time())

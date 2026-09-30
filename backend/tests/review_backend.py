@@ -337,14 +337,23 @@ def bad_result():
     m.settings.update({'chain':['worldcodes']})
     class BadProvider:
         configured=True
+        calls=0
         def enhance(self, inp, out, **kwargs):
+            self.calls+=1
             Path(out).write_bytes(b'<html>upstream error</html>')
-    with patch.object(m,'_get_client',return_value=BadProvider()):
+    provider=BadProvider()
+    with patch.object(m,'_get_client',return_value=provider), patch.object(m.engine,'process') as local:
         m._run_pipeline(created['job_id'],'fine','clear')
     job=m.jobs.get(created['job_id'])
     out=Path(m.UPLOAD_DIR)/job['result_file']
-    decodable=cv2.imread(str(out)) is not None
-    return decodable and job.get('provider') != 'worldcodes', {'job_status':job['status'],'provider':job.get('provider'),'balance':m.users.get_balance('sample_user'),'opencv_decodable':decodable}
+    # The paid provider already returned. Reject its invalid image and refund;
+    # do not mask the failure with another paid generation or a local substitute.
+    balance=m.users.get_balance('sample_user')
+    okay=(job['status']=='failed' and balance==90 and not out.exists()
+          and m._job_media_url(job,'result') is None and provider.calls==1 and not local.called)
+    return okay, {'job_status':job['status'],'provider':job.get('provider'),'balance':balance,
+                  'invalid_result_delivered':out.exists(),'paid_provider_calls':provider.calls,
+                  'local_fallback_calls':local.call_count}
 
 
 case('invalid_provider_output_rejected', bad_result)

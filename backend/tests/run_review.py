@@ -61,6 +61,7 @@ tier_test = Path(__file__).with_name('test_template_tiers.py')
 if not args.legacy and tier_test.exists():
     commands.append(['python', '-u', tier_test.as_posix()])
 executions = []
+additional_reports = []
 if not args.legacy:
     commands.extend([['python','-u',Path(__file__).with_name('test_cloud_pipeline.py').as_posix()],
                      ['python','-u',Path(__file__).with_name('test_cloud_audit.py').as_posix()],
@@ -79,6 +80,18 @@ if not args.legacy:
                      ['node',Path(__file__).with_name('test_compare_typography.cjs').as_posix()],
                      ['python','-u',Path(__file__).with_name('test_commerce.py').as_posix()],
                      ['node',Path(__file__).with_name('test_commerce_admin.cjs').as_posix()]])
+    for script, report in (
+        ('test_drawing_flow.py', 'drawing_flow_results.json'),
+        ('test_frontend_polish.cjs', 'frontend_polish_results.json'),
+        ('test_review_main_integrity.py', 'review_main_integrity_results.json'),
+        ('test_review_pipeline_latency.py', 'review_pipeline_latency_results.json'),
+        ('test_review_frontend_latency.cjs', 'review_frontend_latency_results.json'),
+        ('test_review_backend_integrity.py', 'review_backend_integrity_results.json'),
+    ):
+        path = Path(__file__).with_name(script)
+        if path.is_file():
+            commands.append(['python', '-u', path.as_posix()] if path.suffix == '.py' else ['node', path.as_posix()])
+            additional_reports.append(report)
 for command in commands:
     result = subprocess.run(command, cwd=source, env=environment, capture_output=True, text=True, encoding='utf-8')
     executions.append({'command': command, 'source_root': source.as_posix(), 'exit_status': result.returncode,
@@ -110,14 +123,22 @@ if not args.legacy and text_test.exists():
     rows.extend(json.loads((output / 'text_generation_results.json').read_text(encoding='utf-8'))['cases'])
 if not args.legacy and tier_test.exists():
     rows.extend(json.loads((output / 'template_tiers_results.json').read_text(encoding='utf-8'))['cases'])
-errors = [r for r in rows if 'harness_error' in r]
 if not args.legacy:
     for name in ('cloud_import_results.json','job_diagnostics_results.json','web_origin_results.json','platform_frontend_results.json','platform_results.json','cloud_audit_results.json','cloud_pipeline_results.json','cloud_origin_results.json','cloud_frontend_results.json',
                  'gateway_profiles_results.json','admin_save_results.json','virtual_payment_results.json','payment_frontend_results.json',
                  'backend_fixes_results.json','compare_typography_results.json','commerce_results.json','commerce_admin_results.json'):
         rows.extend(json.loads((output/name).read_text(encoding='utf-8'))['cases'])
+    for name in additional_reports:
+        path = output / name
+        if path.is_file():
+            rows.extend(json.loads(path.read_text(encoding='utf-8'))['cases'])
+        else:
+            rows.append({'case': name, 'passed': False, 'harness_error': 'missing test report'})
+errors = [r for r in rows if 'harness_error' in r]
+process_failures = sum(execution['exit_status'] != 0 for execution in executions)
 failed = sum(not r['passed'] for r in rows)
-summary = {'total': len(rows), 'passed': len(rows) - failed, 'failed': failed, 'harness_errors': len(errors)}
+summary = {'total': len(rows), 'passed': len(rows) - failed, 'failed': failed, 'harness_errors': len(errors),
+           'process_failures': process_failures}
 (output / 'run_record.json').write_text(json.dumps({'summary': summary, 'executions': executions}, ensure_ascii=False, indent=2), encoding='utf-8')
 print('REVIEW_SUMMARY total=%d passed=%d failed=%d' % (summary['total'], summary['passed'], failed), flush=True)
-sys.exit(2 if errors else 1 if failed else 0)
+sys.exit(2 if errors else 1 if failed or process_failures else 0)

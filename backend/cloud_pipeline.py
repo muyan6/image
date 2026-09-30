@@ -27,6 +27,7 @@ class CloudPipeline:
         self.lock = threading.RLock()
         self.busy = set()
         self.stop_event = threading.Event()
+        self.wake_event = threading.Event()
         self.executor = None
         self.thread = None
         self.ready_cache = (None, 0, False)
@@ -44,7 +45,7 @@ class CloudPipeline:
                 self._audit_db_path = path
             return self._audits
 
-    def config(self): return self.runtime().settings.snapshot()['cloud_pipeline']
+    def config(self): return self.runtime().settings.cloud_pipeline()
     def enabled(self): return self.config()['enabled']
     def pending(self):
         return self.runtime().jobs.pending_cloud()
@@ -82,13 +83,16 @@ class CloudPipeline:
 
     def stop(self):
         self.stop_event.set()
+        self.wake_event.set()
         if self.thread: self.thread.join(timeout=2)
         if self.executor: self.executor.shutdown(wait=True, cancel_futures=True)
 
     def loop(self):
-        while not self.stop_event.wait(.25):
+        while not self.stop_event.is_set():
+            self.wake_event.clear()
             try:self.tick()
             except Exception:self.runtime().log.exception('云端任务调度异常')
+            self.wake_event.wait(.25)
 
     def admit(self, openid, quality='light', style='', source=None, template=None,
               text_values=None, aspect_ratio='', custom_prompt='', text=None):
@@ -132,6 +136,7 @@ class CloudPipeline:
                 m.users.refund_job(openid,jid,cancel=True)
                 if m.jobs.get(jid):m.jobs.update(jid,status='failed',error='云端任务登记失败')
                 raise
+        self.wake_event.set()
         return {'code':0,'job_id':jid,'status':'processing','quality':quality,'balance':balance,
                 'price':price,'free_mode':free,'input_mode':'text' if text else 'photo','orig_url':None,'result_url':None}
 
@@ -148,8 +153,25 @@ class CloudPipeline:
                     m.jobs.update(job['id'],cloud_phase='prepare',stage='normalize',started_at=time.time())
                     active+=1
                 self.busy.add(job['id'])
-                try:self.executor.submit(self.step,job['id'])
+                try:self.executor.submit(self.run_ready_steps,job['id'])
                 except Exception:self.busy.discard(job['id']);raise
+
+    def run_ready_steps(self,jid):
+        """Keep ownership across immediate metadata phases; never sleep for remote work."""
+        try:
+            for _ in range(8):
+                job=self.runtime().jobs.get(jid)
+                if (not job or job.get('deleted_at') or job['status']!='processing'
+                        or time.time()<job.get('cloud_next_at',0)):
+                    break
+                phase=job['cloud_phase']
+                self.step(jid,release=False)
+                current=self.runtime().jobs.get(jid)
+                # Unchanged phases are asynchronous waits, not a reason to poll again.
+                if not current or current.get('cloud_phase')==phase:break
+        finally:
+            with self.lock:self.busy.discard(jid)
+            self.wake_event.set()
 
     def require_live(self,jid):
         job=self.runtime().jobs.get(jid)
@@ -179,6 +201,8 @@ class CloudPipeline:
             cached=job.get('cloud_input_info')
             meta=cached['meta'] if cached else cos.object_metadata(m.settings,job['orig_cos'])
             if not 0<meta['size']<=m.MAX_UPLOAD_BYTES:raise ValueError('图片超过上传大小上限或为空')
+            if source.get('byte_size',0)>0 and meta['size']!=source['byte_size']:
+                raise ValueError('上传图片大小与登记信息不一致，请重新上传')
             info=cached['info'] if cached else cos.image_info(m.settings,job['orig_cos']);w,h=info['width'],info['height']
             if not cached:m.jobs.update(jid,cloud_input_info={'meta':meta,'info':info})
             if w*h>m.MAX_PIXELS:raise ValueError('图片像素过大，请先缩小')
@@ -272,8 +296,8 @@ class CloudPipeline:
             final=cos.image_info(m.settings,job['result_cos'])
             m.jobs.update(job['id'],cloud_output_prepared=True,cloud_output_info=final,cloud_output_meta=prepared_meta)
         else:final=job.get('cloud_output_info') or cos.image_info(m.settings,job['result_cos'])
-        meta=(prepared_meta if not job.get('cloud_output_prepared') and isinstance(prepared_meta,dict)
-              else cos.object_metadata(m.settings,job['result_cos']))
+        meta=job.get('cloud_output_meta') if job.get('cloud_output_prepared') else prepared_meta
+        if not isinstance(meta,dict):meta=cos.object_metadata(m.settings,job['result_cos'])
         if meta['size']<=0:raise ValueError('云端成品为空')
         if job.get('cloud_audit_mode',self.config().get('audit_mode')) == 'wechat_auto':
             if not self.audits.gate(job,job['result_cos'],meta['size'],'output'):return
@@ -313,7 +337,7 @@ class CloudPipeline:
     def wait_audit(self,job):
         self.audits.wait(job)
 
-    def step(self,jid):
+    def step(self,jid,*,release=True):
         m=self.runtime();job=m.jobs.get(jid);phase=(job or {}).get('cloud_phase','unknown');started=time.monotonic()
         try:
             job=self.require_live(jid)
@@ -349,4 +373,5 @@ class CloudPipeline:
                 timings=dict(current.get('timings') or {})
                 name=phase+'_ms';timings[name]=timings.get(name,0)+round((time.monotonic()-started)*1000)
                 m.jobs.update(jid,timings=timings)
-            with self.lock:self.busy.discard(jid)
+            if release:
+                with self.lock:self.busy.discard(jid)
