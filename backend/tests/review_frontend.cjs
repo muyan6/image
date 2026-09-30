@@ -223,6 +223,17 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}) {
       adjustXml.includes('open-type="contact"'),{claims,days:page.data.checkinDays.length,contact:true}];
   });
 
+  await test('profile_contact_button_aligns_with_other_menu_rows',()=>{
+    const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/my/my.wxml'),'utf8');
+    const css=fs.readFileSync(path.join(ROOT,'miniprogram/pages/my/my.wxss'),'utf8');
+    const wrapped=/<view class="menu-item">\s*<button class="menu-contact-action" open-type="contact"[^>]*>/.test(xml);
+    const rule=/\.menu-contact-action\s*\{([^}]*)\}/.exec(css)?.[1]||'';
+    const aligned=wrapped&&/flex:\s*1\s*;/.test(rule)&&/margin:\s*0\s*;/.test(rule)&&
+      /padding:\s*0\s*;/.test(rule)&&/text-align:\s*left\s*;/.test(rule)&&
+      !/\.menu-contact\s*\{[^}]*width:\s*100%/.test(css);
+    return [aligned,{wrapped,button_style:rule.trim().slice(0,120)}];
+  });
+
   await test('downloaded_result_is_reused_in_session_media_cache',async()=>{
     const app=appFixture();
     const api=apiModule({downloadFile:o=>o.success({statusCode:200,tempFilePath:'wxfile://cached-result.jpg'}),

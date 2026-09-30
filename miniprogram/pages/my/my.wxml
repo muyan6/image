@@ -136,10 +136,10 @@
     </view>
     <view class="menu-divider"></view>
 
-    <button class="menu-item menu-contact" open-type="contact" session-from="profile-feedback">
-      <text class="menu-label">联系客服与反馈</text>
+    <view class="menu-item">
+      <button class="menu-contact-action" open-type="contact" session-from="profile-feedback">联系客服与反馈</button>
       <text class="menu-arrow">›</text>
-    </button>
+    </view>
     <view class="menu-divider"></view>
 
     <view class="menu-item menu-item-danger" bindtap="onClearStorage">

@@ -374,9 +374,24 @@
   background: rgba(0, 0, 0, 0.02);
 }
 
-.menu-contact { width: 100%; margin: 0; border: 0; border-radius: 0; background: transparent;
-  text-align: left; line-height: normal; font-weight: normal; }
-.menu-contact::after { border: none; }
+.menu-contact-action {
+  box-sizing: border-box;
+  display: block;
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-body);
+  font-size: 26rpx;
+  font-weight: normal;
+  line-height: 1.4;
+  text-align: left;
+}
+.menu-contact-action::after { border: none; }
 
 .menu-label {
   font-size: 26rpx;
