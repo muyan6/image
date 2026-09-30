@@ -75,9 +75,9 @@
       hidden="{{ isPressingOriginal }}"
     >
       <view class="wire-seal">
-        <text class="seal-arrow">‹</text>
+        <view class="seal-chevron seal-chevron-left"></view>
         <view class="seal-dot"></view>
-        <text class="seal-arrow">›</text>
+        <view class="seal-chevron seal-chevron-right"></view>
       </view>
     </view>
 

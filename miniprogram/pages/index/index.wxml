@@ -86,14 +86,14 @@
             <text class="showcase-desc">{{ item.subtitle }}</text>
             <view class="showcase-foot">
               <text class="showcase-cost">{{ item.costText || (item.price > 0 ? '✦ ' + item.price + ' 光子' : '✦ 40 光子') }}</text>
-              <text class="showcase-action">使用风格 ›</text>
+              <text class="showcase-action">使用 ›</text>
             </view>
           </view>
         </view>
       </scroll-view>
     </view>
     <view class="text-generation-entry" bindtap="onOpenTextGeneration">
-      <view><text class="entry-label">文字生图</text><text class="entry-note">从一句描述开始创作</text></view>
+      <view class="entry-copy"><text class="entry-label">文字生图</text><text class="entry-note">从一句描述开始创作</text></view>
       <text class="entry-arrow">→</text>
     </view>
     <!-- 历史记录置于所有创作入口之后 -->
@@ -102,7 +102,7 @@
       wx:if="{{ historyCount > 0 }}"
       bindtap="onOpenHistory"
     >
-      <text>查看过往修复记录 ({{ historyCount }}) ›</text>
+      <text>查看过往修复记录 ({{ historyCount }})</text>
     </view>
   </view>
 </view>
