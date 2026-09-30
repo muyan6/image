@@ -48,6 +48,59 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
 }
 
 (async()=>{
+  await test('template_search_combines_category_and_keyword_and_clears',()=>{
+    const {page}=loadPage('templates',{absolute:x=>x});
+    page._renderData([{id:'art',name:'艺术'},{id:'portrait',name:'人像'}],
+      [{id:'a',name:'水彩山川',subtitle:'旅行海报',group_id:'art'},
+       {id:'b',name:'WATERCOLOR 肖像',group_id:'portrait'},
+       {id:'c',name:'胶片',group_id:'art',tags:['复古']}]);
+    if(!page.onSearchInput)return [false,{searchHandler:'missing'}];
+    page.onSearchInput({detail:{value:'  WATERCOLOR  '}});
+    const english=page.data.filteredTemplates.map(t=>t.id).join();
+    page.onSearchInput({detail:{value:'复古'}});
+    const tags=page.data.filteredTemplates.map(t=>t.id).join();
+    page.onSelectCategory({currentTarget:{dataset:{id:'portrait'}}});
+    const empty=page.data.filteredTemplates.length;
+    page.onClearSearch();
+    return [english==='b'&&tags==='c'&&empty===0&&page.data.filteredTemplates[0].id==='b',
+      {english,tags,empty,afterClear:page.data.filteredTemplates.map(t=>t.id)}];
+  });
+  await test('optional_prompt_collapsed_and_disabled_draft_not_submitted',async()=>{
+    let sent;
+    const {page}=loadPage('adjust',{submitJob:async(p,f)=>{sent=f;throw new Error('stop before real upload');}});
+    const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/adjust/adjust.wxml'),'utf8');
+    const collapsed=page.data.showCustomPrompt===false;
+    page.setData({customPrompt:'remove everything',showCustomPrompt:false});
+    await page.executeUpload('/isolated.jpg');
+    return [collapsed&&!sent.custom_prompt&&xml.includes('可选')&&xml.includes('不用填写'),
+      {collapsed,submittedPrompt:sent.custom_prompt||'',optionalLabel:xml.includes('可选')}];
+  });
+  await test('template_single_output_sets_mode_without_text_overlay_or_crop',async()=>{
+    let sent;
+    const {page}=loadPage('adjust',{submitJob:async(p,f)=>{sent=f;throw new Error('stop before real upload');}});
+    if(!page.onSelectTemplateOutput)return [false,{outputHandler:'missing'}];
+    page.setData({selectedTemplate:{id:'poster',engine:'fine',text_fields:[{key:'title'}]},singleOutputAvailable:true,
+      textValues:{title:'template text'},currentRatioKey:'1:1'});
+    page.onSelectTemplateOutput({currentTarget:{dataset:{mode:'single'}}});
+    await page.executeUpload('/isolated.jpg');
+    const single=sent.template_output_mode==='single'&&!sent.text_fields&&!sent.aspect_ratio;
+    page.onSelectTemplate({currentTarget:{dataset:{template:{id:'next',text_fields:[]}}}});
+    return [single&&page.data.templateOutputMode==='template',{single,modeAfterSwitch:page.data.templateOutputMode}];
+  });
+  await test('cos_submission_forwards_template_output_mode',async()=>{
+    let body;
+    const wx={getStorageSync:()=> 'fixture-token',
+      getFileSystemManager:()=>({statSync:()=>({size:4}),readFile:o=>o.success({data:new ArrayBuffer(4)})}),
+      request:o=>{
+        let data={};
+        if(o.url.endsWith('/api/config'))data={cos_ready:true};
+        else if(o.url.endsWith('/api/uploads'))data={url:'https://cos.invalid/upload.jpg',upload_id:'fixture'};
+        else if(o.url.endsWith('/api/rescue/by-upload')){body=o.data;data={code:0,job_id:'fixture_job'};}
+        o.success({statusCode:200,data});
+      }};
+    await apiModule(wx,appFixture()).submitJob('/local.jpg',{quality:'fine',template_id:'poster',template_output_mode:'single'});
+    return [body?.template_output_mode==='single',{mode:body?.template_output_mode,uploadId:body?.upload_id}];
+  });
   await test('community_empty_category_keeps_filter_navigation',()=>{
     const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/community/community.wxml'),'utf8');
     const empty=xml.match(/<scroll-view\s+wx:if="([^"]+)"\s+class="salon-filter-bar"/);

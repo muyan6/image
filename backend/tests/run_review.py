@@ -48,6 +48,9 @@ if not args.legacy and workflow_test.exists():
 deployment_test = Path(__file__).with_name('test_deployment.py')
 if not args.legacy and deployment_test.exists():
     commands.append(['python', '-u', deployment_test.as_posix()])
+template_output_test = Path(__file__).with_name('test_template_output.py')
+if not args.legacy and template_output_test.exists():
+    commands.append(['python', '-u', template_output_test.as_posix()])
 executions = []
 for command in commands:
     result = subprocess.run(command, cwd=source, env=environment, capture_output=True, text=True, encoding='utf-8')
@@ -72,6 +75,8 @@ if not args.legacy and workflow_test.exists():
         rows.extend(json.loads((output / name).read_text(encoding='utf-8'))['cases'])
 if not args.legacy and deployment_test.exists():
     rows.extend(json.loads((output / 'deployment_results.json').read_text(encoding='utf-8'))['cases'])
+if not args.legacy and template_output_test.exists():
+    rows.extend(json.loads((output / 'template_output_results.json').read_text(encoding='utf-8'))['cases'])
 errors = [r for r in rows if 'harness_error' in r]
 failed = sum(not r['passed'] for r in rows)
 summary = {'total': len(rows), 'passed': len(rows) - failed, 'failed': failed, 'harness_errors': len(errors)}

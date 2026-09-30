@@ -77,6 +77,26 @@
       </scroll-view>
     </view>
 
+    <view class="card-section" wx:if="{{ selectedTemplate }}">
+      <view class="section-header">
+        <text class="section-title">成品形式</text>
+        <text class="section-headline">保留模板排版，或只要一张成品</text>
+      </view>
+      <view class="tier-grid">
+        <view class="tier-card {{ templateOutputMode === 'template' ? 'tier-card-active' : '' }}"
+          bindtap="onSelectTemplateOutput" data-mode="template">
+          <text class="tier-name">模板原版</text>
+          <text class="tier-desc">按示例构图，拼图模板保留上下排版</text>
+        </view>
+        <view class="tier-card {{ templateOutputMode === 'single' ? 'tier-card-active' : '' }} {{ !singleOutputAvailable ? 'output-unavailable' : '' }}"
+          bindtap="onSelectTemplateOutput" data-mode="single">
+          <text class="tier-name">单独生成图</text>
+          <text class="tier-desc">{{ singleOutputAvailable ? '保留风格，仅输出一张图，不拼图、不加题字' : '后端更新后启用' }}</text>
+        </view>
+      </view>
+      <text class="section-hint">画幅由模型与风格决定，单图模式不是裁掉拼图的一半；光子费用不变。</text>
+    </view>
+
     <!-- 卡片 3：生成档位 / 选择这次的生成方式 -->
     <view class="card-section">
       <view class="section-header section-header-split">
@@ -132,20 +152,23 @@
 
     <!-- 原片修复自定义需求 -->
     <view class="card-section" wx:if="{{ !selectedTemplate }}">
-      <view class="section-header">
-        <text class="section-title">修复需求</text>
-        <text class="section-headline">告诉 AI 你想怎样调整</text>
+      <view class="section-header prompt-toggle" bindtap="onToggleCustomPrompt">
+        <text class="section-title">补充要求 · 可选</text>
+        <text class="section-headline">{{ showCustomPrompt ? '收起补充要求 ∧' : '有明确修改需求再展开 ›' }}</text>
       </view>
-      <textarea class="custom-prompt-input" value="{{ customPrompt }}" maxlength="500"
-        placeholder="例如：移除背景中的人群，保留主体；自然美化皮肤，不改变五官。"
-        bindinput="onCustomPromptInput" />
-      <text class="prompt-hint">需求越多，废片概率可能越高；描述越具体，效果通常越稳定。自定义需求仅在支持提示词的生成引擎生效。</text>
+      <text class="section-hint">不用填写，直接生成即可自动优化清晰度、曝光与色彩。</text>
+      <block wx:if="{{ showCustomPrompt }}">
+        <textarea class="custom-prompt-input" value="{{ customPrompt }}" maxlength="500"
+          placeholder="仅补充一项明确需求，例如：移除背景中的路人。"
+          bindinput="onCustomPromptInput" />
+        <text class="prompt-hint">不确定怎么写就留空。过多或相互冲突的要求可能降低效果；收起后不提交补充文字。</text>
+      </block>
     </view>
 
     <!-- 卡片 4：模板自定义文字（代码叠加中文，保证文字正确） -->
     <view
       class="card-section"
-      wx:if="{{ selectedTemplate && selectedTemplate.text_fields && selectedTemplate.text_fields.length > 0 }}"
+      wx:if="{{ selectedTemplate && templateOutputMode !== 'single' && selectedTemplate.text_fields && selectedTemplate.text_fields.length > 0 }}"
     >
       <view class="section-header section-header-split">
         <view class="header-left">

@@ -761,3 +761,5 @@ page {
 }
 .violation-secondary { background: #fff; color: #1a1917; border: 1rpx solid #d7cec2; }
 .violation-primary { background: #1a1917; color: #fff; border: 1rpx solid #1a1917; }
+.prompt-toggle { padding-bottom:12rpx; }
+.output-unavailable { opacity:0.55; }

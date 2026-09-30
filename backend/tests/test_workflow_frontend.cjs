@@ -143,7 +143,7 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
   await test('plain_restore_sends_custom_requirement',async()=>{
     let sent;
     const p=page('adjust',{submitJob:async(_,form)=>{sent=form;throw new Error('fixture');}});
-    p._foreground=true;p.data.customPrompt='移除背景人群，保留主体';
+    p._foreground=true;p.data.customPrompt='移除背景人群，保留主体';p.onToggleCustomPrompt();
     await p.executeUpload('photo.jpg');assert.equal(sent.custom_prompt,p.data.customPrompt);
   });
   await test('violation_dialog_routes_feedback_to_wechat_service',async()=>{

@@ -32,6 +32,9 @@ Page({
     // 模板文字排版字段（模板非空时展示，值随任务提交给后端排版引擎）
     textValues: {},
     customPrompt: '',
+    showCustomPrompt: false,
+    templateOutputMode: 'template',
+    singleOutputAvailable: false,
     showViolationNotice: false,
     violationDetail: {},
     violationId: '',
@@ -111,6 +114,7 @@ Page({
         freeMode: free,
         costLight: pLight,
         costFine: pFine,
+        singleOutputAvailable: Array.isArray(c.template_output_modes) && c.template_output_modes.includes('single'),
         priceRangeText: pLight === pFine ? `${pLight} 光子` : `${pLight}~${pFine} 光子`
       });
       this.refreshCurrentCost();
@@ -144,7 +148,8 @@ Page({
       this.setData({
         allTemplates: fullList,
         selectedTemplate: current || null,
-        templateId: current ? current.id : ''
+        templateId: current ? current.id : '',
+        templateOutputMode: 'template'
       });
       if (current) this.applyTemplateTextDefaults(current);
       if (current) this.resetTemplateRatio();
@@ -243,6 +248,7 @@ Page({
       this.setData({
         selectedTemplate: null,
         templateId: '',
+        templateOutputMode: 'template',
         textValues: {}
       });
       this.refreshCurrentCost();
@@ -252,7 +258,8 @@ Page({
 
     this.setData({
       selectedTemplate: tpl,
-      templateId: tpl.id
+      templateId: tpl.id,
+      templateOutputMode: 'template'
     });
     this.resetTemplateRatio();
     this.applyTemplateTextDefaults(tpl);
@@ -303,6 +310,21 @@ Page({
   /** 点击【开始生成】 */
   onCustomPromptInput(e) {
     this.setData({ customPrompt: e.detail.value || '' });
+  },
+
+  onToggleCustomPrompt() {
+    this.setData({showCustomPrompt: !this.data.showCustomPrompt});
+  },
+
+  onSelectTemplateOutput(e) {
+    if (!this.data.selectedTemplate || this.data.processing) return;
+    const mode = e.currentTarget.dataset.mode;
+    if (mode !== 'template' && mode !== 'single') return;
+    if (mode === 'single' && !this.data.singleOutputAvailable) {
+      wx.showToast({title:'单图模式需后端更新后启用',icon:'none'});
+      return;
+    }
+    this.setData({templateOutputMode: mode});
   },
 
   onAcknowledgeViolation() {
@@ -401,13 +423,17 @@ Page({
       };
       if (tpl && tpl.id) {
         formData.template_id = tpl.id;
+        if (this.data.templateOutputMode === 'single') {
+          if (!this.data.singleOutputAvailable) throw new Error('单图模式需后端更新后启用');
+          formData.template_output_mode = 'single';
+        }
         // 模板文字排版字段：后端做长度截断与默认值补齐
-        if ((tpl.text_fields || []).length) {
+        if (this.data.templateOutputMode !== 'single' && (tpl.text_fields || []).length) {
           formData.text_fields = JSON.stringify(this.data.textValues);
         }
       } else {
         formData.aspect_ratio = this.data.currentRatioKey;
-        if (this.data.customPrompt.trim()) formData.custom_prompt = this.data.customPrompt.trim();
+        if (this.data.showCustomPrompt && this.data.customPrompt.trim()) formData.custom_prompt = this.data.customPrompt.trim();
       }
 
       this.setData({

@@ -46,6 +46,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from admin_api import ensure_admin_password, make_admin_router
 from cleanup_store import CleanupStore
 from community_store import CommunityStore
+from template_output import select_template_output
 from credit_packages import GENERATION_COST, POINTS_PER_YUAN, public_packages
 from cos_store import (CosError, get_object as cos_get,
                        head_exists as cos_head, presign as cos_presign,
@@ -541,10 +542,10 @@ def _register_job(openid: str, quality: str, style: str,
     # 模板构图由模板/模型决定，旧客户端传来的比例也不能裁掉原始素材。
     if template:
         aspect_ratio = ""
-    if custom_prompt and not template:
+    if (custom_prompt and not template) or (template or {}).get("requires_prompt"):
         prompt_client = _get_client("worldcodes")
         if not settings.provider_enabled("worldcodes") or prompt_client is None or not prompt_client.configured:
-            raise HTTPException(status_code=503, detail="自定义修复需求当前不可用，请稍后重试")
+            raise HTTPException(status_code=503, detail="指定成品形式或补充要求的生成引擎当前不可用，请稍后重试")
     price = _effective_price(quality, template)
     job_id = uuid.uuid4().hex[:12]
     free = settings.free_mode()
@@ -601,6 +602,7 @@ def _register_job(openid: str, quality: str, style: str,
             style=style,
             template_id=(template or {}).get("id", ""),
             template_name=(template or {}).get("name", ""),
+            template_output_mode=(template or {}).get("output_mode", "template" if template else ""),
             price=price,
             charged_amount=charged,
             aspect_ratio=aspect_ratio,
@@ -642,6 +644,7 @@ def _register_job(openid: str, quality: str, style: str,
         "quality": quality,
         "template_id": (template or {}).get("id", ""),
         "template_name": (template or {}).get("name", ""),
+        "template_output_mode": (template or {}).get("output_mode", "template" if template else ""),
         "aspect_ratio": aspect_ratio,
         "price": price,
         "balance": balance,
@@ -663,6 +666,13 @@ def _effective_price(quality: str,
 def copy_template(template: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """任务管线用的是提交那一刻的模板快照（后台随后改配置不影响在途任务）。"""
     return dict(template) if template else None
+
+
+def _apply_template_output(template, mode):
+    try:
+        return select_template_output(template, mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # --------------------------------------------------------------------------- #
@@ -1177,7 +1187,8 @@ def _run_pipeline(job_id: str, quality: str, style: str,
             tier_prompt += "\n用户修复需求：" + custom_prompt
 
         # 自定义要求必须由支持提示词的编辑引擎处理，不能静默退化为忽略要求的超分/本地引擎。
-        chain = ["worldcodes"] if custom_prompt and not template else settings.chain()
+        requires_prompt = bool((custom_prompt and not template) or template.get("requires_prompt"))
+        chain = ["worldcodes"] if requires_prompt else settings.chain()
         for name in chain:
             if enhanced:
                 break
@@ -1225,8 +1236,8 @@ def _run_pipeline(job_id: str, quality: str, style: str,
 
         # --- 3. 本地兜底：链路全挂（或全部被停用）时强制跑一次 ---
         if not enhanced:
-            if custom_prompt and not template:
-                raise RuntimeError("自定义修复引擎本次未完成，请重试；本次光子将退回")
+            if requires_prompt:
+                raise RuntimeError("指定成品形式或补充要求的生成引擎本次未完成，请重试；本次光子将退回")
             log.info("[%s] 外部链路全部失败，走本地引擎（quality=%s, style=%s）",
                      job_id, quality, style)
             # 前面已经归一化过，这里关掉 2K 上采样，避免把 1536 插值回 2000
@@ -1493,6 +1504,7 @@ def public_config() -> Dict[str, Any]:
         "rewards": settings.rewards(),
         "free_mode": settings.free_mode(),
         "cos_ready": settings.cos_ready(),
+        "template_output_modes": ["template", "single"],
         "maintenance": settings.maintenance(),
         "styles": settings.styles(),
         # 社区（灵感沙龙）：enabled=False 时小程序端隐藏 tab 与入口
@@ -1777,6 +1789,7 @@ class _RescueByUploadBody(BaseModel):
     text_fields: str = ""
     aspect_ratio: str = ""
     custom_prompt: str = ""
+    template_output_mode: str = "template"
 
 
 class _ViolationFeedbackBody(BaseModel):
@@ -2027,6 +2040,7 @@ def create_rescue_job(
     text_fields: str = Form(""),
     aspect_ratio: str = Form(""),
     custom_prompt: str = Form(""),
+    template_output_mode: str = Form("template"),
 ):
     """提交修图任务（multipart 路径；启用 COS 直传后小程序走 /by-upload）。
 
@@ -2039,6 +2053,9 @@ def create_rescue_job(
     """
     user = _rescue_guard(request)
     tpl, tpl_quality, text_values = _resolve_template(template_id, text_fields)
+    tpl = _apply_template_output(tpl, template_output_mode)
+    if tpl and tpl.get("output_mode") == "single":
+        text_values = {}
     quality, style = _validate_quality_style(
         _chosen_quality((quality or "").strip().lower(), tpl_quality), style)
     custom_prompt, combined_text = _user_text(custom_prompt, text_values, tpl)
@@ -2111,6 +2128,9 @@ def create_rescue_job_by_upload(payload: _RescueByUploadBody,
     upload_id = (payload.upload_id or "").strip()
     tpl, tpl_quality, text_values = _resolve_template(
         payload.template_id, payload.text_fields)
+    tpl = _apply_template_output(tpl, payload.template_output_mode)
+    if tpl and tpl.get("output_mode") == "single":
+        text_values = {}
     quality, style = _validate_quality_style(
         _chosen_quality((payload.quality or "").strip().lower(), tpl_quality),
         payload.style)
@@ -2179,6 +2199,7 @@ def query_job_status(job_id: str, request: Request):
         "aspect_ratio": job.get("aspect_ratio", ""),
         "template_id": job.get("template_id", ""),
         "template_name": job.get("template_name", ""),
+        "template_output_mode": job.get("template_output_mode", "template" if job.get("template_id") else ""),
         "price": job.get("price"),
         "provider": job.get("provider"),
         "width": job.get("width"),

@@ -8,6 +8,7 @@ Page({
       { id: 'all', name: '全部风格', count: 0 }
     ],
     activeCategory: 'all',
+    searchQuery: '',
     freeMode: false,
     priceLight: 40,
     priceFine: 40,
@@ -137,13 +138,24 @@ Page({
   },
 
   filterByCategory(cid) {
-    const list = this.data.allTemplates;
-    if (cid === 'all') {
-      this.setData({ filteredTemplates: list });
-    } else {
-      const filtered = list.filter((x) => x.group_id === cid);
-      this.setData({ filteredTemplates: filtered });
-    }
+    const words = this.data.searchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const list = this.data.allTemplates.filter(item => {
+      if (cid !== 'all' && item.group_id !== cid) return false;
+      const text = [item.name, item.subtitle, item.group_name, item.id,
+        Array.isArray(item.tags) ? item.tags.join(' ') : item.tags || ''].join(' ').toLowerCase();
+      return words.every(word => text.includes(word));
+    });
+    this.setData({ filteredTemplates: list });
+  },
+
+  onSearchInput(e) {
+    this.setData({searchQuery: (e.detail.value || '').slice(0, 40)});
+    this.filterByCategory(this.data.activeCategory);
+  },
+
+  onClearSearch() {
+    this.setData({searchQuery: ''});
+    this.filterByCategory(this.data.activeCategory);
   },
 
   onOpenDetail(e) {

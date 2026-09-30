@@ -115,7 +115,7 @@ Page({
   onSelectPackage() {
     wx.showModal({
       title: '光子补给',
-      content: '套餐价格已确定。请先在微信虚拟支付后台上架对应商品并配置发货推送；支付验单功能上线前不会扣款或发放光子。',
+      content: '商品发布不等于充值开通：当前版本还未接入支付下单、微信收银台和服务端验单发货。暂不发起付款，也不会发放充值光子。',
       showCancel: false,
       confirmText: '我知道了'
     });

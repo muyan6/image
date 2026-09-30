@@ -25,7 +25,7 @@
   <view class="section-box">
     <view class="section-head">
       <text class="section-title">充值光子</text>
-      <text class="section-tip">{{ paymentReady ? '选择套餐充值' : '商品上架与支付配置中' }}</text>
+      <text class="section-tip">{{ paymentReady ? '选择套餐充值' : '充值接入尚未完成' }}</text>
     </view>
 
     <view class="package-list gallery-card">

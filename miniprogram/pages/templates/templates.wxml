@@ -6,6 +6,13 @@
     <text class="catalog-desc">从微米级画质超分，到跨越时空的画风重构</text>
   </view>
 
+  <view class="template-search">
+    <text class="search-icon">⌕</text>
+    <input class="search-input" value="{{ searchQuery }}" maxlength="40" confirm-type="search"
+      placeholder="搜索模板名称、风格或关键词" bindinput="onSearchInput" />
+    <view class="search-clear" wx:if="{{ searchQuery }}" bindtap="onClearSearch">清除</view>
+  </view>
+
   <!-- 分类筛选项 (艺术纸本印泥胶囊) -->
   <scroll-view class="category-bar" scroll-x enable-flex show-scrollbar="{{ false }}">
     <view
@@ -65,8 +72,8 @@
   <!-- 空状态 (当分类下无模板时) -->
   <view wx:if="{{ filteredTemplates.length === 0 && !loading }}" class="empty-state">
     <text class="empty-icon">◌</text>
-    <text class="empty-title">该展区暂无风格</text>
-    <text class="empty-sub">策展人正在调制全新的光影配方…</text>
+    <text class="empty-title">{{ searchQuery ? '没有找到匹配模板' : '该展区暂无风格' }}</text>
+    <text class="empty-sub">{{ searchQuery ? '试试更短的关键词，或切换到全部风格' : '策展人正在调制全新的光影配方…' }}</text>
   </view>
 
   <!-- 底部风格说明注记 -->

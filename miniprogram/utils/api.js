@@ -482,7 +482,7 @@ async function _submitViaCos(filePath, formData) {
   await completeUpload(up.upload_id);
 
   const body = {};
-  ['quality', 'style', 'template_id', 'text_fields', 'aspect_ratio', 'custom_prompt'].forEach((k) => {
+  ['quality', 'style', 'template_id', 'text_fields', 'aspect_ratio', 'custom_prompt', 'template_output_mode'].forEach((k) => {
     if (formData && formData[k] !== undefined && formData[k] !== '') {
       body[k] = formData[k];
     }
