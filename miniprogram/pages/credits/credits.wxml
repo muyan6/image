@@ -28,7 +28,6 @@
       <text class="section-tip">{{ paymentBusy ? '订单处理中…' : (paymentReady ? '选择套餐充值' : '充值暂未启用') }}</text>
     </view>
 
-    <view class="menu-item gallery-card" bindtap="onGoOrders"><text>充值订单 / 核对到账</text><text> ›</text></view>
     <view class="package-list gallery-card">
       <block wx:for="{{ packages }}" wx:key="id">
       <view class="package-item" bindtap="onSelectPackage" data-id="{{ item.id }}">
@@ -43,6 +42,17 @@
       </view>
       <view class="item-divider" wx:if="{{ index < packages.length - 1 }}"></view>
       </block>
+      <view class="orders-entry" hover-class="orders-entry-pressed" hover-stay-time="120" bindtap="onGoOrders">
+        <view class="orders-icon" aria-hidden="true">
+          <view class="orders-icon-line"></view>
+          <view class="orders-icon-line orders-icon-line-short"></view>
+        </view>
+        <view class="orders-entry-content">
+          <text class="orders-entry-title">充值订单</text>
+          <text class="orders-entry-desc">查看充值记录 · 核对到账</text>
+        </view>
+        <text class="orders-entry-arrow">›</text>
+      </view>
     </view>
   </view>
 

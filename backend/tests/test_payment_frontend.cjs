@@ -44,6 +44,25 @@ async function test(name,f){try{await f();rows.push({case:name,passed:true});}ca
   for(const ext of ['js','json','wxml','wxss'])assert(fs.existsSync(path.join(root,'miniprogram/pages/orders/orders.'+ext)));
   assert(fs.readFileSync(path.join(root,'miniprogram/pages/credits/credits.wxml'),'utf8').includes('onGoOrders'));
  });
+ await test('pay_order_entry_is_styled_package_footer_not_unstyled_menu',()=>{
+  const xml=fs.readFileSync(path.join(root,'miniprogram/pages/credits/credits.wxml'),'utf8');
+  const css=fs.readFileSync(path.join(root,'miniprogram/pages/credits/credits.wxss'),'utf8');
+  assert.equal((xml.match(/bindtap="onGoOrders"/g)||[]).length,1);
+  assert(xml.indexOf('class="orders-entry"')>xml.indexOf('</block>'));
+  assert(xml.indexOf('class="orders-entry"')<xml.indexOf('<!-- 3.'));
+  assert(!xml.includes('menu-item'));assert(xml.includes('查看充值记录 · 核对到账'));
+  for(const name of ['orders-entry','orders-entry-content','orders-entry-title','orders-entry-desc','orders-entry-arrow','orders-icon'])
+   assert(new RegExp('\\.'+name+'\\s*\\{').test(css),name);
+  assert(xml.includes('hover-class="orders-entry-pressed"'));
+  assert(/\.orders-entry\s*\{[^}]*min-height:\s*112rpx/.test(css));
+ });
+ await test('pay_order_entry_navigation_does_not_trigger_purchase',()=>{
+  let page,navigated,requests=0;
+  vm.runInNewContext(fs.readFileSync(path.join(root,'miniprogram/pages/credits/credits.js'),'utf8'),{
+   getApp:()=>({globalData:{lightPoints:120},setBalance(){}}),Page:p=>page=p,
+   require:()=>({buy:()=>{requests++;},request:()=>{requests++;}}),wx:{navigateTo:o=>navigated=o.url},console});
+  page.onGoOrders();assert.equal(navigated,'/pages/orders/orders');assert.equal(requests,0);
+ });
  await test('pay_credits_has_busy_guard_and_no_optimistic_balance_increment',()=>{
   const s=fs.readFileSync(path.join(root,'miniprogram/pages/credits/credits.js'),'utf8');assert(s.includes('if(this.data.paymentBusy)return'));
   const handler=s.slice(s.indexOf('async onSelectPackage'),s.indexOf('onGoOrders'));assert(!handler.includes('app.setBalance'));

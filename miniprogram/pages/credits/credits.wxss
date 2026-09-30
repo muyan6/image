@@ -141,6 +141,73 @@
   background: rgba(0, 0, 0, 0.02);
 }
 
+/* 订单入口作为套餐卡片的纸质页脚，与购买操作分开。 */
+.orders-entry {
+  display: flex;
+  align-items: center;
+  gap: 22rpx;
+  padding: 26rpx 30rpx;
+  min-height: 112rpx;
+  border-top: 1rpx dashed var(--paper-border-dark);
+  background: var(--paper-card-subtle);
+}
+
+.orders-entry-pressed {
+  background: var(--paper-bg);
+}
+
+.orders-icon {
+  width: 38rpx;
+  height: 46rpx;
+  flex-shrink: 0;
+  border: 2rpx solid var(--accent-gold);
+  padding: 12rpx 7rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 7rpx;
+}
+
+.orders-icon-line {
+  height: 2rpx;
+  width: 100%;
+  flex-shrink: 0;
+  background: var(--accent-gold);
+}
+
+.orders-icon-line-short {
+  width: 65%;
+}
+
+.orders-entry-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.orders-entry-title {
+  font-family: var(--font-serif);
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--ink-title);
+  line-height: 1.4;
+}
+
+.orders-entry-desc {
+  font-size: 20rpx;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+.orders-entry-arrow {
+  flex-shrink: 0;
+  font-size: 36rpx;
+  line-height: 1;
+  color: var(--ink-faint);
+  padding-left: 8rpx;
+}
+
 .pkg-title-row {
   display: flex;
   align-items: center;
