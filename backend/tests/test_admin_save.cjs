@@ -92,14 +92,16 @@ const rows=[];async function test(name,fn){try{await fn();rows.push({case:name,p
   const t=setup();t.ctx.showPage('conf');await t.ctx.saveCurrentPage();assert.equal(t.calls.length,1);
   const b=t.calls[0].body;for(const k of ['prices','rewards','processing','cloud_pipeline','maintenance','free_mode','ads'])assert(k in b,k);
   assert.equal(b.cloud_pipeline.generation_concurrency,32);
+  assert.equal(b.cloud_pipeline.audit_mode,'wechat_auto');
  });
  await test('security_page_save_includes_all_platform_credentials_once',async()=>{
   const t=setup();t.ctx.showPage('sec');await t.ctx.saveCurrentPage();assert.equal(t.calls.length,1);
   for(const k of ['wechat','payment','tencent','moderation','quota'])assert(k in t.calls[0].body,k);
  });
  await test('audit_help_explains_strategy_default_and_actual_picture_engine',()=>{
-  assert(html.includes('留空使用腾讯云默认审核策略'));assert(html.includes('不是 API Key，也不是模型名'));
-  assert(html.includes('当前图片审核：腾讯云 CI'));assert(html.includes('仅控制基础图片处理，不控制审核'));
+  assert(html.includes('留空使用腾讯云默认审核策略'));
+  assert(html.includes('微信 COS 链接审核优先'));assert(html.includes('仅控制基础图片处理，不控制审核'));
+  assert(html.includes('audit-tencent/input/'));assert(html.includes('/api/callbacks/cos-audit'));
  });
  fs.writeFileSync(path.join(output,'admin_save_results.json'),JSON.stringify({cases:rows},null,2));
  const failed=rows.filter(x=>!x.passed).length;console.log(`ADMIN_SAVE_SUMMARY total=${rows.length} passed=${rows.length-failed} failed=${failed}`);process.exitCode=failed?1:0;

@@ -1716,10 +1716,33 @@ def wxpush_message(body: _WxPushBody, request: Request):
                  str(body)[:150])
     else:
         trace_id, suggest, label, score = parsed
+        cloud.audits.wechat_callback(trace_id, suggest)
         hit = wechat_sec.resolve_pending(trace_id, suggest, label, score)
         log.info("微信审核推送: trace=%s suggest=%s label=%s 命中=%s",
                  trace_id, suggest, label, hit)
     return PlainTextResponse("success")
+
+
+@app.post("/api/callbacks/cos-audit")
+async def cos_audit_callback(request: Request):
+    """Only private outstanding capability objects can affect cloud audits."""
+    length=request.headers.get('content-length') or '0'
+    if not length.isdigit():
+        raise HTTPException(400, detail='回调长度无效')
+    if int(length) > 262144:
+        raise HTTPException(413, detail='回调内容过大')
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw.extend(chunk)
+        if len(raw) > 262144:
+            raise HTTPException(413, detail='回调内容过大')
+    try:
+        body = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(400, detail='回调 JSON 无效')
+    # Console probes/unknown notifications are acknowledged without mutating jobs.
+    cloud.audits.cos_callback(body)
+    return PlainTextResponse('success')
 
 
 @app.get("/")

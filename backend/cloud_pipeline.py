@@ -18,6 +18,7 @@ from cloud_layout import text_rule
 from gateway_async import AsyncImages, GatewayAsyncError, key_fingerprint
 from gateway_profiles import text_gateway
 from image_processing import normalization_rule
+from cloud_audit import CloudAudit
 
 
 class CloudPipeline:
@@ -29,6 +30,19 @@ class CloudPipeline:
         self.executor = None
         self.thread = None
         self.ready_cache = (None, 0, False)
+        self._audits = None
+        self._audit_db_path = None
+
+    @property
+    def audits(self):
+        with self.lock:
+            path = self.runtime().jobs._db_path
+            if self._audits is None or self._audit_db_path != path:
+                if self._audits is not None:
+                    self._audits.close()
+                self._audits = CloudAudit(self.runtime)
+                self._audit_db_path = path
+            return self._audits
 
     def config(self): return self.runtime().settings.snapshot()['cloud_pipeline']
     def enabled(self): return self.config()['enabled']
@@ -111,7 +125,8 @@ class CloudPipeline:
                     input_mode='text' if text else 'photo',orig_file='',result_file='',
                     orig_cos=('origins/'+prefix+source['ext']) if source else None,
                     result_cos='results/'+prefix+'.jpg',norm_cos=('norms/'+prefix+'.jpg') if source else None,
-                    deadline=time.time()+cfg['timeout_seconds'],cloud_next_at=0)
+                    deadline=time.time()+cfg['timeout_seconds'],cloud_next_at=0,
+                    cloud_audit_mode=cfg.get('audit_mode','wechat_auto'))
                 m.users.confirm_job(jid,'云端异步生成 '+model)
             except Exception:
                 m.users.refund_job(openid,jid,cancel=True)
@@ -124,7 +139,7 @@ class CloudPipeline:
         m=self.runtime()
         with self.lock:
             pending=sorted(self.pending(),key=lambda j:j['created_at'])
-            active=sum(j.get('cloud_phase') in ('prepare','submit','submitting','unknown','generating') for j in pending)
+            active=sum(j.get('cloud_phase') in ('prepare','submit','submitting','unknown','generating','wait_audit') for j in pending)
             for job in pending:
                 if len(self.busy)>=4:break
                 if job['id'] in self.busy or time.time()<job.get('cloud_next_at',0):continue
@@ -153,11 +168,22 @@ class CloudPipeline:
     def prepare(self,job):
         m=self.runtime();p=job['cloud_request'];source=p['source'];jid=job['id']
         if source:
-            meta=cos.object_metadata(m.settings,source['key'])
+            # Freeze an immutable server-owned snapshot before any asynchronous
+            # audit: the client's signed upload URL can overwrite uploads/.
+            if not job.get('cloud_input_frozen'):
+                meta=cos.object_metadata(m.settings,source['key'])
+                if not 0<meta['size']<=m.MAX_UPLOAD_BYTES:raise ValueError('图片超过上传大小上限或为空')
+                m.cleanup.schedule('cos',job['orig_cos'],job['created_at']+m.ORIGINAL_TTL_SECONDS)
+                cos.copy_object(m.settings,source['key'],job['orig_cos'])
+                m.jobs.update(jid,cloud_input_frozen=True)
+            meta=cos.object_metadata(m.settings,job['orig_cos'])
             if not 0<meta['size']<=m.MAX_UPLOAD_BYTES:raise ValueError('图片超过上传大小上限或为空')
-            info=cos.image_info(m.settings,source['key']);w,h=info['width'],info['height']
+            info=cos.image_info(m.settings,job['orig_cos']);w,h=info['width'],info['height']
             if w*h>m.MAX_PIXELS:raise ValueError('图片像素过大，请先缩小')
-            reject=self.audit(source['key'])
+            if job.get('cloud_audit_mode',self.config().get('audit_mode')) == 'wechat_auto':
+                if not self.audits.gate(job,job['orig_cos'],meta['size'],'input'):return
+                reject=None
+            else:reject=self.audit(job['orig_cos'])
             if reject:
                 # Refund the reservation first; only confirmed user-input violations are penalized.
                 m.users.refund_job(job['openid'],jid)
@@ -166,7 +192,6 @@ class CloudPipeline:
             self.require_live(jid)
             due=job['created_at']+m.ORIGINAL_TTL_SECONDS
             m.cleanup.schedule('cos',job['orig_cos'],due)
-            cos.copy_object(m.settings,source['key'],job['orig_cos'])
             try: orientation=int(info.get('Orientation',info.get('orientation',1)))
             except (ValueError,TypeError):orientation=1
             if orientation in (5,6,7,8):w,h=h,w
@@ -234,11 +259,16 @@ class CloudPipeline:
             if overlay:rule+='|'+overlay
         self.require_live(job['id'])
         m.cleanup.schedule('cos',job['result_cos'],time.time()+2*m.JOB_TTL_SECONDS)
-        cos.process_image(m.settings,key,job['result_cos'],rule)
+        if not job.get('cloud_output_prepared'):
+            cos.process_image(m.settings,key,job['result_cos'],rule)
+            m.jobs.update(job['id'],cloud_output_prepared=True)
         final=cos.image_info(m.settings,job['result_cos'])
         meta=cos.object_metadata(m.settings,job['result_cos'])
         if meta['size']<=0:raise ValueError('云端成品为空')
-        reject=self.audit(job['result_cos'])
+        if job.get('cloud_audit_mode',self.config().get('audit_mode')) == 'wechat_auto':
+            if not self.audits.gate(job,job['result_cos'],meta['size'],'output'):return
+            reject=None
+        else:reject=self.audit(job['result_cos'])
         if reject:raise ValueError(reject)  # Output violations refund; no user strikes.
         self.require_live(job['id']);now=time.time()
         timings={'queue_ms':round((job.get('started_at',now)-job['created_at'])*1000),
@@ -262,6 +292,9 @@ class CloudPipeline:
         for key in (job.get('result_cos'),job.get('norm_cos'),job.get('orig_cos'),job['cloud_request']['source'].get('key')):
             if key:m.cleanup.schedule('cos',key,time.time())
 
+    def wait_audit(self,job):
+        self.audits.wait(job)
+
     def step(self,jid):
         m=self.runtime();job=m.jobs.get(jid)
         try:
@@ -270,7 +303,7 @@ class CloudPipeline:
             phase=job['cloud_phase']
             if phase in ('submitting','unknown'):
                 m.jobs.update(jid,cloud_phase='unknown',stage='submission_unknown',cloud_next_at=time.time()+30)
-            else:getattr(self,{'prepare':'prepare','submit':'submit','generating':'poll','import':'import_result','finalize':'finalize'}[phase])(job)
+            else:getattr(self,{'prepare':'prepare','submit':'submit','generating':'poll','import':'import_result','finalize':'finalize','wait_audit':'wait_audit'}[phase])(job)
         except GatewayAsyncError as exc:
             if job and exc.uncertain:
                 m.jobs.update(jid,cloud_phase='unknown',stage='submission_unknown',cloud_next_at=time.time()+30)

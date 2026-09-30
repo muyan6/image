@@ -11,7 +11,7 @@ from cloud_layout import text_rule
 class CloudTests(WorkflowTests):
     def setUp(self):
         super().setUp()
-        m.settings.update({'cloud_pipeline':{'enabled':True},'quota':{'daily':1000,'per_minute':1000},
+        m.settings.update({'cloud_pipeline':{'enabled':True,'audit_mode':'ci_sync'},'quota':{'daily':1000,'per_minute':1000},
                            'tencent':{'secret_id':'fixture','secret_key':'fixture','cos_bucket':'fixture-123456','cos_region':'ap-guangzhou'},
                            'providers':{'worldcodes':{'enabled':True,'base_url':'https://fixture.invalid','api_key':'fixture'}}})
         self.cloud=m.cloud;self.cloud.busy.clear()

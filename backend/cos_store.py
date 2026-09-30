@@ -151,10 +151,12 @@ def image_info(settings,key):
     return {**result,'width':width,'height':height}
 
 
-def copy_object(settings,source,target):
+def copy_object(settings,source,target,*,private=False):
     if source==target:return
     conf=_conf(settings);origin='%s.cos.%s.myqcloud.com/%s'%(conf['cos_bucket'],conf['cos_region'],quote(source,safe='/'))
-    response=control_request(settings,'PUT',target,headers={'x-cos-copy-source':origin},data=b'')
+    headers={'x-cos-copy-source':origin}
+    if private:headers['x-cos-acl']='private'
+    response=control_request(settings,'PUT',target,headers=headers,data=b'')
     if response.status_code!=200 or b'<Error>' in response.content:raise CosError('COS 云端复制失败',code='COPY_FAILED')
 
 

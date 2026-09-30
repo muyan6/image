@@ -126,6 +126,22 @@ def get_access_token(settings: SettingsStore, force_refresh: bool = False) -> st
         return token
 
 
+def submit_image_url(settings: SettingsStore, media_url: str, openid: str) -> str:
+    """Submit an existing COS signed URL; do not upload bytes or wait for callback."""
+    token = get_access_token(settings)
+    try:
+        response = requests.post(_CHECK_URL, params={"access_token": token}, json={
+            "media_url": media_url, "media_type": 2, "version": 2,
+            "scene": 3, "openid": openid}, timeout=(10, 15))
+        response.raise_for_status()
+        data = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise WechatSecError("微信链接审核请求失败", code="NETWORK") from exc
+    if not isinstance(data, dict) or data.get('errcode') or not data.get('trace_id'):
+        raise WechatSecError("微信链接审核未返回任务标识", code="API_ERROR")
+    return str(data['trace_id'])
+
+
 def check_image(settings: SettingsStore, image_bytes: bytes, openid: str, cleanup_store=None
                 ) -> Tuple[str, str, int]:
     """送审一张 ≤10M 的图片（异步接口同步等待）。
@@ -261,7 +277,11 @@ def parse_push_body(body: Dict[str, Any]) -> Optional[Tuple[str, str, str, int]]
     if not trace_id:
         return None
     result = body.get("result") or {}
-    suggest = str(result.get("suggest") or "pass").lower()
+    if not isinstance(result, dict):
+        result = {}
+    suggest = str(result.get("suggest") or "error").lower()
+    if body.get('errcode'):
+        suggest = 'error'
     label = str(result.get("label") or 100)
     try:
         label_num = int(label)

@@ -77,7 +77,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "free_mode": False,
     "processing": {"ci_enabled": True},
     "cloud_pipeline": {"enabled": False, "generation_concurrency": 16, "max_queued": 256,
-                       "poll_interval": 5, "timeout_seconds": 1800, "ci_biz_type": ""},
+                       "poll_interval": 5, "timeout_seconds": 1800, "ci_biz_type": "", "audit_mode": "wechat_auto"},
     "text_generation": {"enabled":False,"model":"","endpoint":"/v1/images/generations","price":40},
     "wechat": {"app_id": "", "app_secret": ""},
     "payment": {"offer_id": "", "sandbox_app_key": "", "production_app_key": ""},
@@ -204,6 +204,8 @@ def _validate(doc: Dict[str, Any]) -> None:
             raise ValueError('cloud_pipeline.' + field + ' 超出范围')
     if not isinstance(cloud.get('ci_biz_type'), str) or len(cloud['ci_biz_type']) > 100:
         raise ValueError('CI 审核策略无效')
+    if cloud.get('audit_mode') not in ('wechat_auto','ci_sync'):
+        raise ValueError('云端审核模式无效')
     tg=doc.get('text_generation',{})
     if type(tg.get('enabled')) is not bool:raise ValueError('text_generation.enabled 必须是布尔值')
     if not isinstance(tg.get('model'),str) or len(tg['model'])>200:raise ValueError('文生图模型名无效')

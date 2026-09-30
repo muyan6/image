@@ -465,10 +465,11 @@
             <div class="field"><label>精细档价格（光子/张）</label><input type="number" id="price-fine" min="0" max="9999"></div>
             <div class="field"><label>归一化长边<small>0 = 关闭缩放；改小可省网关费用</small></label><input type="number" id="normalize" min="0" max="8192"></div>
             <div class="field"><label><input type="checkbox" id="ci-enabled">传统模式：云端缩放、裁剪、转码</label><small>仅控制基础图片处理，不控制审核。开启云端异步模式后，这些操作始终由 CI 完成。</small></div>
-            <div class="field"><label><input type="checkbox" id="cloud-enabled" onchange="updateProcessingHint()">云端异步生成</label><small>COS 直传 → CI → 供应商异步生成 → COS HTTPS 镜像导入 → CI 成品与审核；图片不经过本机解码、下载或上传。首次升级默认保留旧链路；确认 CI 审核权限与供应商异步接口后启用。不自动降级为本机图片处理。</small></div>
+            <div class="field"><label><input type="checkbox" id="cloud-enabled" onchange="updateProcessingHint()">云端异步生成</label><small>COS 直传 → 原图审核 → CI 处理 → 供应商异步生成 → COS 镜像导入 → CI 成品处理与审核；图片不经过本机解码、下载或上传。新审核模式需配置微信推送、腾讯云专用前缀和回调；不自动降级为本机图片处理。</small></div>
             <div class="field"><label>供应商生成并发</label><input id="cloud-concurrency" type="number" min="1" max="64"><small>默认 16；独立于 4 个元数据工作线程。供应商实际额度仍需核对。</small></div>
             <div class="field"><label>等待队列上限</label><input id="cloud-queued" type="number" min="0" max="1000"></div>
-            <div class="field"><label>CI 图片审核策略 biz-type（可选）</label><input id="cloud-biz-type" placeholder="留空使用腾讯云默认审核策略"><small>不是 API Key，也不是模型名。没有自定义审核策略就留空；有策略时填写腾讯云「数据万象 → 内容审核 → 审核策略」中的 biz-type。云端图片使用 CI 审核，审核异常停止；微信登录和文字审核配置仍保留。</small></div>
+            <div class="field"><label>云端图片审核模式</label><select id="cloud-audit-mode"><option value="wechat_auto">微信优先 + 腾讯云自动审核兜底</option><option value="ci_sync">旧版 CI 主动审核</option></select><small>微信直接读取 COS 签名链接，不下载图片或占线程等结果。超过 10MB 或微信服务故障时复制至 audit-tencent/input/ 或 audit-tencent/output/；腾讯云自动审核仅配置这两个前缀，完整回调至 /api/callbacks/cos-audit。复制触发需上线验证。</small></div>
+            <div class="field"><label>旧版 CI 图片审核策略 biz-type（可选）</label><input id="cloud-biz-type" placeholder="留空使用腾讯云默认审核策略"><small>仅旧版主动审核使用；自动审核策略在腾讯云控制台配置。审核服务异常停止并退回光子，不自动放行。</small></div>
           </div>
         </div>
         <div class="card">
@@ -881,6 +882,7 @@ function renderConf() {
     $("cloud-concurrency").value = SETTINGS.cloud_pipeline?.generation_concurrency ?? 16;
     $("cloud-queued").value = SETTINGS.cloud_pipeline?.max_queued ?? 256;
     $("cloud-biz-type").value = SETTINGS.cloud_pipeline?.ci_biz_type || '';
+    $("cloud-audit-mode").value = SETTINGS.cloud_pipeline?.audit_mode || 'wechat_auto';
   $("mt-message").value = SETTINGS.maintenance?.message || "";
   $("mt-enabled").checked = SETTINGS.maintenance?.enabled || false;
   $("free-mode").checked = SETTINGS.free_mode || false;
@@ -896,7 +898,7 @@ function updateProcessingHint(){
   $('cloud-biz-type').disabled=!cloud;
   const savedCloud=SETTINGS.cloud_pipeline?.enabled===true;
   const savedMode=savedCloud?'云端异步模式':'传统模式';
-  const audit=SETTINGS.moderation?.enabled?(savedCloud?'CI 图片审核':'微信图片审核优先，按配置使用备用审核'):'图片审核关闭';
+  const audit=SETTINGS.moderation?.enabled?(savedCloud?(SETTINGS.cloud_pipeline?.audit_mode==='ci_sync'?'CI 图片审核':'微信链接审核优先，腾讯云自动审核兜底'):'微信图片审核优先，按配置使用备用审核'):'图片审核关闭';
   $('processing-mode-summary').textContent='已保存：'+savedMode+' · '+audit+
     (savedCloud!==cloud?'；当前草稿已切换为'+(cloud?'云端异步模式':'传统模式')+'，点击「保存修改」后生效。':'；更改配置需点击「保存修改」。');
 }
@@ -911,7 +913,7 @@ window.saveConf = async () => saveSettingsPatch({
       processing: {ci_enabled:$("ci-enabled").checked},
       cloud_pipeline: {enabled:$("cloud-enabled").checked,
         generation_concurrency:parseInt($("cloud-concurrency").value,10),
-        max_queued:parseInt($("cloud-queued").value,10),ci_biz_type:$("cloud-biz-type").value.trim()},
+        max_queued:parseInt($("cloud-queued").value,10),ci_biz_type:$("cloud-biz-type").value.trim(),audit_mode:$("cloud-audit-mode").value},
       maintenance: { enabled: $("mt-enabled").checked,
                      message: $("mt-message").value },
       free_mode: $("free-mode").checked,
@@ -956,10 +958,10 @@ function renderSec() {
     html += `<div style="color:var(--text-sub, #666);margin-top:4px">⚠️ 机审总开关已关闭，任何上传图片均直接放行（提审必被驳回）。</div>`;
   } else {
     if(SETTINGS.cloud_pipeline?.enabled){
-      html+='<div style="margin-top:4px;color:#4f46e5"><b>当前图片审核：腾讯云 CI（云端对象审核）</b>。微信图片审核用于传统模式；微信登录、文字审核、消息推送配置继续保留。CI 审核异常时云端任务停止，不自动跳过。</div>';
+      html+='<div style="margin-top:4px;color:#4f46e5"><b>当前云端图片审核：'+(SETTINGS.cloud_pipeline?.audit_mode==='ci_sync'?'旧版腾讯云 CI 主动审核':'微信 COS 链接审核优先；大图及微信故障转腾讯云自动审核')+'</b>。异常停止，不自动跳过。自动审核只匹配 audit-tencent/input/、audit-tencent/output/；回调 URL：'+location.origin+'/api/callbacks/cos-audit。控制台配置和复制触发需单独验证。</div>';
     }
     if (wxReady) {
-      html += `<div style="color:#10b981;margin-top:4px">✅ <b>${SETTINGS.cloud_pipeline?.enabled?'传统模式微信图片审核配置已就绪（当前图片使用 CI）':'微信官方免费审核已就绪'}</b>（mediaCheckAsync 异步推送）</div>`;
+      html += `<div style="color:#10b981;margin-top:4px">✅ <b>微信审核配置已就绪</b>（mediaCheckAsync 异步推送；云端新模式提交已有 COS 链接）</div>`;
     } else {
       html += `<div style="color:#ef4444;margin-top:4px">❌ <b>微信免费审核未就绪</b>：缺少 ${missing.join("、")}</div>`;
     }
