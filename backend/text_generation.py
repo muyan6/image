@@ -14,8 +14,8 @@ class TextBody(BaseModel):
 
 def ready(m):
     conf=m.settings.snapshot()['text_generation'];provider=text_gateway(m.settings)
-    return bool(conf['enabled'] and conf['model'] and m.settings.provider_enabled('worldcodes') and provider.get('base_url') and provider.get('api_key') and m.settings.cos_ready()
-                and (not m.cloud.enabled() or m.cloud.ready()))
+    return bool(conf['enabled'] and conf['model'] and provider.get('base_url') and provider.get('api_key') and m.settings.cos_ready()
+                and (not m.cloud.enabled() or m.cloud.ready(text=True)))
 
 def run_text_job(m,jid,conf,provider,prompt,size):
     job=m.jobs.get(jid)

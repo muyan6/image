@@ -22,7 +22,7 @@ import threading
 import time
 import uuid
 from urllib.parse import urlsplit
-from gateway_profiles import gateway_profile
+from gateway_profiles import gateway_profile, materialize_text_gateway
 from typing import Any, Callable, Dict, List, Optional
 
 log = logging.getLogger("rescue.settings")
@@ -219,6 +219,18 @@ def _validate(doc: Dict[str, Any]) -> None:
     if not isinstance(tg.get('model'),str) or len(tg['model'])>200:raise ValueError('文生图模型名无效')
     if not isinstance(tg.get('endpoint'),str) or not tg['endpoint'].startswith('/') or len(tg['endpoint'])>200:raise ValueError('文生图接口路径必须以 / 开头')
     if type(tg.get('price')) is not int or not 0<=tg['price']<=9999:raise ValueError('文生图价格必须为 0~9999 光子')
+    for field,limit in (('base_url',500),('api_key',8192)):
+        if not isinstance(tg.get(field),str) or len(tg[field])>limit:raise ValueError('文生图 '+field+' 格式无效')
+    url=tg['base_url']
+    if url:
+        try:
+            parsed=urlsplit(url);port=parsed.port
+            if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or any(c.isspace() for c in url):raise ValueError()
+        except ValueError:raise ValueError('文生图 Base URL 必须是有效 HTTPS 地址，不含密钥或查询参数')
+    if tg['endpoint'].startswith('//') or any(c.isspace() for c in tg['endpoint']) or '?' in tg['endpoint'] or '#' in tg['endpoint']:
+        raise ValueError('文生图接口路径必须以单个 / 开头，不含查询参数')
+    if type(tg.get('timeout')) is not int or not 10<=tg['timeout']<=600:raise ValueError('文生图超时必须为 10~600 秒')
+    if type(tg.get('price_cny')) not in (int,float) or not 0<=tg['price_cny']<=1000:raise ValueError('文生图供应商参考成本必须为 0~1000')
     if type(doc.get('processing',{}).get('ci_enabled')) is not bool:
         raise ValueError('processing.ci_enabled 必须是布尔值')
     for tier in ("light", "fine"):
@@ -343,6 +355,7 @@ class SettingsStore:
         if mutate_default is not None:
             # 首次落盘前从环境变量迁移密钥等一次性操作
             mutate_default(defaults)
+        materialize_text_gateway(defaults,dict(defaults['text_generation']))
 
         self._data = defaults
         self._load_or_init(defaults)
@@ -373,6 +386,8 @@ class SettingsStore:
             return
         # 深合并:文件里缺的新字段用默认补齐,未知字段保留
         self._data = _deep_merge(defaults, loaded)
+        if materialize_text_gateway(self._data,loaded.get('text_generation',{})):
+            self._save_locked(self._data)
         if not loaded.get('cloud_mode_revision'):
             self._data['cloud_pipeline'].update(enabled=True,audit_mode='wechat_auto')
             self._data['cloud_mode_revision']=1

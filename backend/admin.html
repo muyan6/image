@@ -430,6 +430,20 @@
           </div>
           <p class="muted">同步模式兼容 OpenAI Images 接口；云端模式需要供应商支持异步任务协议，结果地址仍须匹配已配置的 COS 回源域名。</p>
         </div>
+        <div class="card" id="text-gateway-card">
+          <div class="card-head"><h2>文生图 · 独立网关配置<small>URL、密钥、接口与模型独立；修改轻量或精细档不会影响文生图</small></h2></div>
+          <div class="form-grid">
+            <div class="field"><label>Base URL</label><input type="url" id="tg-base" placeholder="https://你的供应商域名"></div>
+            <div class="field"><label>API Key<small>打码表示保持原密钥</small></label><input type="password" id="tg-key" autocomplete="new-password" placeholder="文生图独立 API Key"></div>
+            <div class="field"><label>文生图接口路径</label><input id="tg-endpoint" placeholder="/v1/images/generations"><small>填写路径，不填完整 URL；云端模式使用对应的异步接口。</small></div>
+            <div class="field"><label>文生图模型名</label><input id="tg-model" placeholder="填写文生图模型名"></div>
+            <div class="field"><label>网关请求超时（秒）</label><input type="number" id="tg-timeout" min="10" max="600"><small>提交与查询接口的单次响应超时，不是任务总时限。</small></div>
+            <div class="field"><label>供应商参考成本（¥/张）<small>不是实际账单，不影响光子扣费</small></label><input type="number" id="tg-cost" step="0.01" min="0" max="1000"></div>
+            <div class="field"><label>文生图光子价格</label><input type="number" id="tg-price" min="0" max="9999"></div>
+            <div class="field"><label><input type="checkbox" id="tg-enabled">启用文生图</label><small>清空本模块密钥只停用文生图，不借用轻量档密钥。</small></div>
+          </div>
+          <p class="muted">供应商需支持现有异步任务协议，成品地址须匹配已配置的 COS 回源域名。旧配置首次升级会复制原来使用的轻量连接，之后独立保存。</p>
+        </div>
         <div class="card">
           <div class="card-head"><h2>其它供应商密钥</h2></div>
           <div class="form-grid">
@@ -443,15 +457,6 @@
           <div class="field"><label>轻量档提示词</label><textarea id="prompt-light"></textarea></div>
           <div class="field" style="margin-top:12px"><label>精细档提示词</label><textarea id="prompt-fine"></textarea></div>
 
-        </div>
-        <div class="card">
-          <div class="card-head"><h2>文字生图<small>沿用轻量档的 URL 与密钥；文生图模型、接口和光子价格独立</small></h2></div>
-          <div class="form-grid">
-            <div class="field"><label><input type="checkbox" id="tg-enabled">启用文生图</label><small>需确认中转商支持无输入图片的生成接口；未配置时不接单。</small></div>
-            <div class="field"><label>文生图模型名</label><input id="tg-model" placeholder="填写中转商支持的模型名"></div>
-            <div class="field"><label>文生图接口路径</label><input id="tg-endpoint" placeholder="/v1/images/generations"></div>
-            <div class="field"><label>文生图光子价格</label><input type="number" id="tg-price" min="0" max="9999"></div>
-          </div>
         </div>
       </section>
 
@@ -833,6 +838,8 @@ function renderProviderForm() {
   const tg=SETTINGS.text_generation||{};
   $('tg-enabled').checked=!!tg.enabled;$('tg-model').value=tg.model||'';
   $('tg-endpoint').value=tg.endpoint||'/v1/images/generations';$('tg-price').value=tg.price??40;
+  $('tg-base').value=tg.base_url||'';$('tg-key').value=tg.api_key||'';
+  $('tg-timeout').value=tg.timeout??30;$('tg-cost').value=tg.price_cny??0;
   const wc = SETTINGS.providers.worldcodes || {};
   for(const quality of ['light','fine']){
     const tier=wc.tiers?.[quality]||{};
@@ -863,6 +870,7 @@ window.saveProviders = async () => {
   return saveSettingsPatch({chain:[...PROVIDER_DRAFT.chain],providers,
     prompts:{light:$('prompt-light').value,fine:$('prompt-fine').value},
     text_generation:{enabled:$('tg-enabled').checked,model:$('tg-model').value.trim(),
+      base_url:$('tg-base').value.trim(),api_key:$('tg-key').value.trim(),timeout:Number($('tg-timeout').value),price_cny:Number($('tg-cost').value),
       endpoint:$('tg-endpoint').value.trim(),price:Number($('tg-price').value)}},()=>{renderProviderForm();renderChain();});
 };
 
@@ -1443,7 +1451,7 @@ async function loadJobs() {
                   "<th>状态</th><th>当前／失败阶段</th><th>阶段耗时</th><th>成本</th><th>错误</th></tr></thead><tbody></tbody>";
     const tbody = t.tBodies[0];
     data.items.forEach((j) => {
-      const cost = j.cost_cny != null ? "¥" + (+j.cost_cny).toFixed(2)
+      const cost = j.cost_cny != null ? (j.cost_estimated?"≈¥":"¥") + (+j.cost_cny).toFixed(2)
                  : j.cost_usd != null ? "$" + (+j.cost_usd).toFixed(4) : "—";
       const badge = j.status === "succeeded" ? '<span class="badge green">成功</span>'
                   : j.status === "failed" ? '<span class="badge red">失败</span>'

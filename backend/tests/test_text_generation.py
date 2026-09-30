@@ -10,7 +10,7 @@ from image_processing import QueueFull
 
 class TextTests(WorkflowTests):
     def enable(self,price=40):
-        m.settings.update({'text_generation':{'enabled':True,'model':'fixture-image','price':price},
+        m.settings.update({'text_generation':{'enabled':True,'model':'fixture-image','price':price,'base_url':'https://fixture.invalid','api_key':'fixture'},
                            'providers':{'worldcodes':{'enabled':True,'base_url':'https://fixture.invalid','api_key':'fixture'}}})
     def post(self,**kw):return self.client.post('/api/text-generation',headers=self.headers,json={'prompt':'水彩森林','aspect_ratio':'1:1',**kw})
 

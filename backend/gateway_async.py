@@ -21,7 +21,7 @@ class AsyncImages:
         try:
             response=requests.request(method,self.base+path,
                 headers={'Authorization':'Bearer '+self.conf['api_key'],'Content-Type':'application/json'},
-                json=body,timeout=(5,30),allow_redirects=False,stream=True)
+                json=body,timeout=(5,self.conf.get('request_timeout',30)),allow_redirects=False,stream=True)
             with response:
                 chunks=[];count=0
                 for chunk in response.iter_content(8192):

@@ -49,9 +49,10 @@ class CloudPipeline:
     def pending(self):
         return self.runtime().jobs.pending_cloud()
 
-    def ready(self,quality='light'):
-        m = self.runtime(); conf = m.settings.gateway_for(quality)
-        if not (m.settings.cos_ready() and m.settings.provider_enabled('worldcodes')
+    def ready(self,quality='light',*,text=False):
+        m = self.runtime(); conf = text_gateway(m.settings) if text else m.settings.gateway_for(quality)
+        enabled=conf.get('enabled') if text else m.settings.provider_enabled('worldcodes')
+        if not (m.settings.cos_ready() and enabled
                 and conf.get('api_key') and urlsplit(conf.get('base_url', '')).scheme == 'https'):
             return False
         tc=m.settings.tencent()
@@ -92,7 +93,7 @@ class CloudPipeline:
     def admit(self, openid, quality='light', style='', source=None, template=None,
               text_values=None, aspect_ratio='', custom_prompt='', text=None):
         m=self.runtime()
-        if not self.ready(quality):raise HTTPException(503,detail='云端生成通道未就绪：请核对该档位配置和 COS 限定回源规则')
+        if not self.ready(quality,text=bool(text)):raise HTTPException(503,detail='云端生成通道未就绪：请核对所选生成网关配置和 COS 限定回源规则')
         template=m.select_template_quality(template,quality) if template else None
         if template:aspect_ratio=''
         provider=text_gateway(m.settings) if text else m.settings.gateway_for(quality)
@@ -114,6 +115,7 @@ class CloudPipeline:
                     'base':provider['base_url'],'key_fingerprint':key_fingerprint(provider),
                     'template':copy.deepcopy(template or {}),'text_values':dict(text_values or {}),
                     'source':dict(source or {}),'normalize_long_side':m.settings.normalize_long_side()}
+            if text:packet['estimated_cost_cny']=provider.get('price_light_cny',0)
             prefix=openid[:8]+'/'+jid
             try:
                 m.jobs.create(jid,openid=openid,status='processing',stage='queued',cloud_pipeline=True,
@@ -274,6 +276,8 @@ class CloudPipeline:
                  'processing_ms':round((now-job.get('started_at',now))*1000)}
         m.jobs.update(job['id'],status='succeeded',stage='done',cloud_phase='done',provider='worldcodes',
                       width=final['width'],height=final['height'],completed_at=now,timings=timings,processing_mode='cloud_only')
+        if job.get('input_mode')=='text' and 'estimated_cost_cny' in p:
+            m.jobs.update(job['id'],cost_cny=p['estimated_cost_cny'],cost_estimated=True)
         current=m.jobs.get(job['id'])
         if current.get('deleted_at') or current['status']!='succeeded':raise RuntimeError('作品已取消，停止交付')
         m.users.complete_charge(job['id'])

@@ -84,7 +84,7 @@ class BackendFixTests(CloudTests):
   record('B05',{'http_status':r.status_code,'orphan_incoming_files':len(left),'orphan_bytes':sum(p.stat().st_size for p in left),'retention_seconds':m.ORIGINAL_TTL_SECONDS})
 
  def test_rejected_text_queue_does_not_consume_daily_submission_quota(self):
-  m.settings.update({'cloud_pipeline':{'enabled':False},'text_generation':{'enabled':True,'model':'fixture','price':40},'quota':{'daily':1,'per_minute':1000}})
+  m.settings.update({'cloud_pipeline':{'enabled':False},'text_generation':{'enabled':True,'model':'fixture','price':40,'base_url':'https://fixture.invalid','api_key':'fixture'},'quota':{'daily':1,'per_minute':1000}})
   with patch.object(m,'_moderate_text_or_reject',return_value=None),patch.object(m.pool,'submit',side_effect=QueueFull('fixture queue full')):
    r=self.client.post('/api/text-generation',headers=self.headers,json={'prompt':'水彩森林'})
    follow=self.client.post('/api/text-generation',headers=self.headers,json={'prompt':'水彩森林'})

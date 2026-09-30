@@ -30,6 +30,7 @@ from community_store import CommunityStore, MEDIA_PREFIX
 
 # 需要打码的密钥字段: (节路径) -> 字段列表
 _MASK_SCHEMA = {
+    ('text_generation',): ('api_key',),
     ("providers", "worldcodes"): ("api_key",),
     ("providers", "worldcodes", "tiers", "light"): ("api_key",),
     ("providers", "worldcodes", "tiers", "fine"): ("api_key",),

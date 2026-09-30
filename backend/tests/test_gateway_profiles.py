@@ -8,6 +8,11 @@ from gateway_async import AsyncImages
 import cloud_pipeline as cp
 
 class ProfileTests(WorkflowTests):
+    def tearDown(self):
+        if m.cloud._audits:
+            m.cloud._audits.close();m.cloud._audits=None
+        super().tearDown()
+
     def config_tiers(self):
         m.settings.update({'providers':{'worldcodes':{'enabled':True,'base_url':'https://legacy.invalid','api_key':'legacy-secret-7890',
             'tiers':{'light':{'base_url':'https://light.invalid','api_key':'light-secret-1234','endpoint':'/v2/edits','model':'light-model','timeout':60,'price_cny':.03},
@@ -104,9 +109,96 @@ class ProfileTests(WorkflowTests):
         m.cloud.ready_cache=(None,0,False)
         with patch.object(m.settings,'cos_ready',return_value=True),patch.object(cp.cos,'origin_ready',return_value=True):
             self.assertFalse(m.cloud.ready('light'));self.assertTrue(m.cloud.ready('fine'))
-    def test_profile_text_connection_follows_light_not_fine(self):
-        self.config_tiers();conf=text_gateway(m.settings)
-        self.assertEqual(conf['base_url'],'https://light.invalid');self.assertEqual(conf['api_key'],'light-secret-1234')
+    def test_profile_text_connection_is_independent(self):
+        self.config_tiers()
+        m.settings.update({'text_generation':{'enabled':True,'base_url':'https://text.invalid','api_key':'text-secret-9012','model':'text-model','timeout':45,'price_cny':0.12}})
+        m.settings.update({'providers':{'worldcodes':{'tiers':{'light':{'base_url':'https://changed.invalid','api_key':''}}}}})
+        conf=text_gateway(m.settings)
+        self.assertEqual(conf['base_url'],'https://text.invalid');self.assertEqual(conf['api_key'],'text-secret-9012')
+        self.assertEqual(conf['request_timeout'],45);self.assertEqual(conf['price_light_cny'],0.12)
+
+    def test_profile_text_legacy_connection_is_migrated_once(self):
+        from settings_store import SettingsStore
+        self.config_tiers();doc=m.settings.snapshot()
+        for key in ('base_url','api_key','timeout','price_cny'):doc['text_generation'].pop(key,None)
+        doc['text_generation'].update(model='legacy-text',endpoint='/custom/generations',price=60)
+        folder=self.d/'legacy-text';folder.mkdir()
+        (folder/'settings.json').write_text(json.dumps(doc),encoding='utf-8')
+        migrated=SettingsStore(str(folder));text=migrated.snapshot()['text_generation']
+        self.assertEqual(text['base_url'],'https://light.invalid');self.assertEqual(text['api_key'],'light-secret-1234')
+        self.assertEqual((text['model'],text['endpoint'],text['price']),('legacy-text','/custom/generations',60))
+        migrated.update({'providers':{'worldcodes':{'tiers':{'light':{'api_key':'changed'}}}}})
+        self.assertEqual(text_gateway(SettingsStore(str(folder)))['api_key'],'light-secret-1234')
+
+    def test_profile_text_partial_connection_does_not_borrow_secret(self):
+        from gateway_profiles import materialize_text_gateway
+        doc={'providers':{'worldcodes':{'api_key':'do-not-copy','base_url':'https://light.invalid'}},'text_generation':{'base_url':'https://other.invalid'}}
+        materialize_text_gateway(doc,dict(doc['text_generation']))
+        self.assertEqual(doc['text_generation']['api_key'],'')
+
+    def test_profile_text_mask_preserve_clear_and_public_redaction(self):
+        self.config_tiers();m.settings.update({'text_generation':{'base_url':'https://text.invalid','api_key':'text-private-9012'}})
+        masked=self.admin.get('/admin/api/settings').json()['text_generation']['api_key']
+        self.assertEqual(masked,'••••9012')
+        r=self.admin.put('/admin/api/settings',json={'text_generation':{'api_key':masked,'model':'new-text'}})
+        self.assertEqual(r.status_code,200,r.text);self.assertEqual(text_gateway(m.settings)['api_key'],'text-private-9012')
+        for path in ('/api/config','/api/health'):
+            with patch.object(m.settings,'cos_ready',return_value=False):r=self.client.get(path)
+            self.assertNotIn('text-private',r.text);self.assertNotIn('https://text.invalid',r.text)
+        self.assertEqual(self.admin.put('/admin/api/settings',json={'text_generation':{'api_key':''}}).status_code,200)
+        self.assertEqual(text_gateway(m.settings)['api_key'],'');self.assertEqual(m.settings.gateway_for('light')['api_key'],'light-secret-1234')
+
+    def test_profile_text_validation_is_atomic(self):
+        before=m.settings.snapshot()
+        for bad in [{'base_url':'https://user:key@x.invalid'},{'base_url':'http://x.invalid'},
+                    {'base_url':'https://x.invalid?key=secret'},{'endpoint':'//other.invalid'},
+                    {'endpoint':'/generate?key=secret'},{'api_key':12},{'timeout':0},{'price_cny':-1}]:
+            r=self.admin.put('/admin/api/settings',json={'text_generation':bad})
+            self.assertEqual(r.status_code,400,r.text);self.assertEqual(m.settings.snapshot(),before)
+
+    def test_profile_text_ready_does_not_require_photo_gateway(self):
+        m.settings.update({'providers':{'worldcodes':{'enabled':False}},'text_generation':{'enabled':True,'model':'text-model','base_url':'https://text.invalid','api_key':'text-key'}})
+        with patch.object(m.settings,'cos_ready',return_value=True),patch.object(cp.cos,'origin_ready',return_value=True),patch.object(m.settings,'gateway_for',side_effect=AssertionError('PHOTO_GATEWAY')):
+            self.assertTrue(m.cloud.ready(text=True))
+        m.settings.update({'text_generation':{'api_key':''}})
+        with patch.object(m.settings,'cos_ready',return_value=True):self.assertFalse(m.cloud.ready(text=True))
+
+    def test_profile_cloud_text_submit_and_poll_use_text_connection(self):
+        self.config_tiers();m.settings.update({'text_generation':{'enabled':True,'model':'text-model','base_url':'https://text.invalid','api_key':'text-key','timeout':42,'price_cny':0.12}})
+        with patch.object(m.cloud,'ready',return_value=True):
+            jid=m.cloud.admit('sample_user',text={'prompt':'fixture','model':'text-model','endpoint':'/custom/generations','price':40})['job_id']
+        seen=[]
+        def submit(client,model,prompt,url,size,endpoint):
+            seen.append((client.base,client.conf['api_key'],endpoint,client.conf['request_timeout']));return 'imgtask_text'
+        with patch.object(AsyncImages,'submit',new=submit):m.jobs.update(jid,cloud_phase='submit');m.cloud.step(jid)
+        self.assertEqual(seen,[('https://text.invalid','text-key','/custom/generations',42)])
+        def poll(client,task):seen.append((client.base,client.conf['api_key']));return {'status':'running'}
+        m.settings.update({'providers':{'worldcodes':{'tiers':{'light':{'api_key':'changed-light'}}}}})
+        with patch.object(AsyncImages,'poll',new=poll):m.cloud.step(jid)
+        self.assertEqual(seen[-1],('https://text.invalid','text-key'))
+        self.assertEqual(m.jobs.get(jid)['cloud_request']['estimated_cost_cny'],0.12)
+
+    def test_profile_text_timeout_reaches_actual_async_request(self):
+        from test_cloud_origin import response
+        import gateway_async
+        m.settings.update({'text_generation':{'base_url':'https://text.invalid','api_key':'text-key','timeout':47}})
+        r=response(200,b'{"status":"running"}')
+        with patch.object(gateway_async.requests,'request',return_value=r) as request:
+            AsyncImages(text_gateway(m.settings)).poll('imgtask_fixture')
+        self.assertEqual(request.call_args.kwargs['timeout'],(5,47))
+        self.assertEqual(request.call_args.kwargs['headers']['Authorization'],'Bearer text-key')
+
+    def test_profile_text_reference_cost_does_not_change_credit_charge(self):
+        m.settings.update({'text_generation':{'enabled':True,'model':'text-model','base_url':'https://text.invalid','api_key':'text-key','price_cny':0.12}})
+        with patch.object(m.cloud,'ready',return_value=True):
+            jid=m.cloud.admit('sample_user',text={'prompt':'fixture','model':'text-model','price':40})['job_id']
+        m.jobs.update(jid,cloud_phase='finalize',vendor_result_key='images/fixture.png')
+        with patch.object(cp.cos,'image_info',return_value={'width':1024,'height':1024}),patch.object(cp.cos,'object_metadata',return_value={'size':1000}),patch.object(cp.cos,'process_image',return_value={'size':1000}):
+            m.cloud.step(jid)
+        job=m.jobs.get(jid)
+        self.assertEqual(job['status'],'succeeded',job.get('error'))
+        self.assertEqual(job['cost_cny'],0.12);self.assertTrue(job['cost_estimated'])
+        self.assertEqual(m.users.get_balance('sample_user'),60)
 
 if __name__=='__main__':
     suite=unittest.TestSuite(ProfileTests(n) for n in ProfileTests.__dict__ if n.startswith('test_profile_'))
