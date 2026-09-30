@@ -1,11 +1,13 @@
 """WeChat mini-program approval binds a browser to the same account/balance."""
 import hashlib
 import hmac
+import os
 import secrets
 import sqlite3
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -16,6 +18,38 @@ COOKIE='wechat_browser_challenge'
 PREFIX='/api/auth/wechat-web'
 PAGE='pages/web-login/web-login'
 TTL=300
+DEFAULT_PUBLIC_ORIGIN='https://image.myil.top'
+
+
+def normalized_origin(value):
+    """Compare scheme/host/effective port, never paths or forwarded headers."""
+    if not isinstance(value,str) or not value or any(c.isspace() or ord(c)<32 for c in value):return None
+    try:
+        u=urlsplit(value)
+        if (u.scheme not in ('http','https') or not u.hostname or u.username is not None
+                or u.password is not None or u.path not in ('','/') or u.query or u.fragment
+                or u.netloc.endswith(':')):return None
+        return (u.scheme,u.hostname.lower(),u.port or (443 if u.scheme=='https' else 80))
+    except ValueError:return None
+
+
+def browser_request(request):
+    if request.headers.get('x-web-login')!='1':raise HTTPException(403,detail='请从本站登录')
+    if request.headers.get('sec-fetch-site')=='cross-site':raise HTTPException(403,detail='登录请求来源不匹配')
+    configured=os.environ.get('WEB_PUBLIC_ORIGIN',DEFAULT_PUBLIC_ORIGIN).strip()
+    public=normalized_origin(configured)
+    if public is None:raise HTTPException(503,detail='WEB_PUBLIC_ORIGIN 配置无效，请填写完整站点地址')
+    origin=request.headers.get('origin')
+    if origin is None:
+        # Same-origin GETs often omit Origin. Keep the custom-header/cookie
+        # binding; do not infer any authority from untrusted proxy headers.
+        return normalized_origin(str(request.base_url))
+    supplied=normalized_origin(origin)
+    direct=normalized_origin(str(request.base_url))
+    local=direct and direct[1] in ('localhost','127.0.0.1','::1')
+    if supplied is None or not (supplied==public or (local and supplied==direct)):
+        raise HTTPException(403,detail='登录请求来源不匹配')
+    return supplied
 
 
 class Approval(BaseModel):
@@ -75,12 +109,6 @@ def make_web_login_router(runtime):
                 holder.update(path=path,store=BrowserLogin(path))
             return holder['store']
 
-    def browser_request(request):
-        if request.headers.get('x-web-login')!='1':raise HTTPException(403,detail='请从本站登录')
-        origin=request.headers.get('origin')
-        if origin and origin.rstrip('/')!=str(request.base_url).rstrip('/'):
-            raise HTTPException(403,detail='登录请求来源不匹配')
-
     def owned(request,sid):
         row=store().browser(sid,request.cookies.get(COOKIE,''))
         if row['app_id']!=runtime().settings.wechat().get('app_id'):
@@ -89,10 +117,10 @@ def make_web_login_router(runtime):
 
     @router.post(PREFIX+'/start')
     def start(request:Request,response:Response):
-        browser_request(request);conf=runtime().settings.wechat()
+        external=browser_request(request);conf=runtime().settings.wechat()
         if not conf.get('app_id') or not conf.get('app_secret'):raise HTTPException(503,detail='微信登录尚未配置')
         sid,secret=store().create(conf['app_id'],request.client.host if request.client else 'unknown')
-        response.set_cookie(COOKIE,secret,max_age=TTL,httponly=True,secure=request.url.scheme=='https',samesite='strict',path=PREFIX)
+        response.set_cookie(COOKIE,secret,max_age=TTL,httponly=True,secure=bool(external and external[0]=='https'),samesite='strict',path=PREFIX)
         response.headers['Cache-Control']='no-store'
         return {'id':sid,'expires_in':TTL,'qr_url':PREFIX+'/'+sid+'/qr'}
 
