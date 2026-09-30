@@ -48,6 +48,15 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
 }
 
 (async()=>{
+  await test('community_empty_category_keeps_filter_navigation',()=>{
+    const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/community/community.wxml'),'utf8');
+    const empty=xml.match(/<scroll-view\s+wx:if="([^"]+)"\s+class="salon-filter-bar"/);
+    const {page}=loadPage('community');
+    page.setData({items:[{id:'p1',category:'portrait'}],activeFilter:'film'});
+    page.filterItems('film');
+    return [empty?.[1].includes('items.length') && !empty[1].includes('filteredItems') && page.data.filteredItems.length===0,
+      {guard:empty?.[1],items:page.data.items.length,filtered:page.data.filteredItems.length}];
+  });
   await test('javascript_syntax_and_wxml_handlers',()=>{
     const errors=[];let count=0;let bindings=0;
     const walk=dir=>fs.readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(dir,e.name)):[path.join(dir,e.name)]);

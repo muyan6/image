@@ -8,7 +8,7 @@
 
   <!-- 展区筛选胶囊：没有展品时不显示筛选条 -->
   <scroll-view
-    wx:if="{{ filteredItems.length > 0 }}"
+    wx:if="{{ items.length > 0 }}"
     class="salon-filter-bar"
     scroll-x
     enable-flex
