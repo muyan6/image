@@ -374,6 +374,10 @@
   background: rgba(0, 0, 0, 0.02);
 }
 
+.menu-contact { width: 100%; margin: 0; border: 0; border-radius: 0; background: transparent;
+  text-align: left; line-height: normal; font-weight: normal; }
+.menu-contact::after { border: none; }
+
 .menu-label {
   font-size: 26rpx;
   color: var(--ink-body);
@@ -393,6 +397,19 @@
 .menu-danger-text {
   color: var(--accent-rust);
 }
+
+.profile-mask { position: fixed; inset: 0; z-index: 400; display: flex; align-items: center;
+  justify-content: center; padding: 32rpx; background: rgba(25,24,22,.58); }
+.profile-dialog { box-sizing: border-box; width: 100%; padding: 38rpx 32rpx;
+  background: #faf8f3; border-radius: 22rpx; box-shadow: 0 20rpx 60rpx rgba(0,0,0,.22); }
+.profile-title { display: block; font-size: 34rpx; color: #1a1917; font-weight: 700; }
+.profile-desc { display: block; margin-top: 14rpx; color: #777168; font-size: 22rpx; line-height: 1.5; }
+.profile-input { box-sizing: border-box; width: 100%; margin-top: 24rpx; height: 78rpx;
+  padding: 0 20rpx; border: 1rpx solid #d7cec2; border-radius: 10rpx; background: #fff;
+  font-size: 26rpx; color: #1a1917; }
+.profile-actions { display: flex; gap: 16rpx; margin-top: 28rpx; }
+.profile-actions button { flex: 1; margin: 0; font-size: 24rpx; }
+.profile-actions button:last-child { background: #1a1917; color: #fff; }
 
 /* 底部微标 */
 .dossier-footer {
@@ -417,4 +434,3 @@
 }
 
 /* 算力补给模态框 */
-

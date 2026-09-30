@@ -1490,6 +1490,7 @@ def public_config() -> Dict[str, Any]:
     community = CommunityStore(settings)._normalize()
     return {
         "prices": settings.prices(),
+        "rewards": settings.rewards(),
         "free_mode": settings.free_mode(),
         "cos_ready": settings.cos_ready(),
         "maintenance": settings.maintenance(),
@@ -1528,7 +1529,8 @@ def public_community() -> Dict[str, Any]:
             "liked": False,
             "pinned": bool(raw.get("pinned")),
         })
-    return {"enabled": True, "items": items}
+    return {"enabled": True, "items": items,
+            "featured_reward": settings.rewards()["community_featured"]}
 
 
 @app.get("/api/community/media/{filename}")
@@ -1782,6 +1784,10 @@ class _ViolationFeedbackBody(BaseModel):
     message: str = ""
 
 
+class _ProfileBody(BaseModel):
+    nickname: str = ""
+
+
 def _login_response(openid: str, account_type: str = "wechat", app_id: str = "") -> Dict[str, Any]:
     try:
         user = users.ensure_user(openid, account_type=account_type, app_id=app_id)
@@ -1857,12 +1863,27 @@ def get_me(request: Request):
         "balance": user["balance"],
         "total_jobs": user["total_jobs"],
         "invite_code": user["invite_code"],
+        "nickname": user.get("nickname", ""),
         "banned": user.get("banned", False),
         "earn": {
-            "checkin_done": users.earn_count_today(openid, "checkin") > 0,
+            **users.checkin_status(openid),
+            "checkin_reward": settings.rewards()["checkin"],
+            "checkin_seventh_bonus": settings.rewards()["checkin_seventh_bonus"],
             "video_today": users.earn_count_today(openid, "video"),
         },
     }
+
+
+@app.post("/api/me/profile")
+def update_profile(body: _ProfileBody, request: Request):
+    user = _current_user(request)
+    nickname = body.nickname.strip()
+    if not nickname or len(nickname) > 24 or any(ord(ch) < 32 for ch in nickname):
+        raise HTTPException(status_code=400, detail="昵称需为 1～24 字")
+    reject = _moderate_text_or_reject(nickname, user["openid"])
+    if reject:
+        raise HTTPException(status_code=400, detail=reject)
+    return {"ok": True, "nickname": users.set_nickname(user["openid"], nickname)}
 
 
 @app.post("/api/me/violation-feedback")
@@ -1892,6 +1913,16 @@ def earn_points(body: _EarnBody, request: Request):
     if kind == "video" and not settings.ads()["rewarded_video_ready"]:
         raise HTTPException(status_code=403,
                             detail="激励视频广告未配置，暂不可领取")
+    if kind == "checkin":
+        rewards = settings.rewards()
+        claim = users.claim_checkin(user["openid"], rewards["checkin"],
+                                    rewards["checkin_seventh_bonus"])
+        if not claim["claimed"]:
+            raise HTTPException(status_code=429, detail="今日签到奖励已领完，明天再来吧")
+        return {"ok": True, "kind": kind, "balance": claim["balance"],
+                "reward": claim["reward"], "bonus_awarded": claim["bonus_awarded"],
+                "checkin_streak": claim["checkin_streak"],
+                "checkin_progress": claim["checkin_progress"], "count_today": 1}
     if kind == "video":
         try:
             event_id = verify_video(settings, user["openid"], body.receipt)
@@ -1899,8 +1930,6 @@ def earn_points(body: _EarnBody, request: Request):
                                                          conf["reward"], conf["limit"])
         except ValueError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
-    else:
-        ok, balance, count = users.earn(user["openid"], kind, conf["reward"], conf["limit"])
     if not ok:
         raise HTTPException(status_code=429,
                             detail="今日%s奖励已领完，明天再来吧" % conf["label"])
@@ -1922,10 +1951,11 @@ def bind_invite(body: _InviteBody, request: Request):
     if inviter["openid"] == openid:
         raise HTTPException(status_code=400, detail="不能填写自己的邀请码")
     try:
-        my_balance, inviter_balance = users.bind_invite_once(openid, code)
+        reward = settings.rewards()["invite"]
+        my_balance, inviter_balance = users.bind_invite_once(openid, code, reward=reward)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"ok": True, "balance": my_balance,
+    return {"ok": True, "balance": my_balance, "reward": reward,
             "inviter_balance": inviter_balance}
 
 
@@ -2164,8 +2194,9 @@ def query_job_status(job_id: str, request: Request):
 @app.get("/api/credits/packages")
 def credit_packages() -> Dict[str, Any]:
     """先公开真实价格表；收款与发货未闭环前绝不由客户端加光子。"""
-    return {"packages": public_packages(), "points_per_yuan": POINTS_PER_YUAN,
-            "generation_cost": GENERATION_COST, "payment_ready": False}
+    cost = settings.prices().get("light", GENERATION_COST)
+    return {"packages": public_packages(cost), "points_per_yuan": POINTS_PER_YUAN,
+            "generation_cost": cost, "payment_ready": False}
 
 
 @app.post("/api/jobs/{job_id}/refresh-media")

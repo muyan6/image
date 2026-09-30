@@ -213,25 +213,10 @@
         <text>本次扣除 ✦{{ violationDetail.charged || 0 }}</text>
         <text>近 7 天违规 {{ violationDetail.weekly_count || 0 }}/3 次</text>
       </view>
-      <text class="violation-explain">{{ violationDetail.banned ? '账号已永久封禁，剩余点数不予退还。' : '一周内累计 3 次将永久封禁账号。若有误判，可提交人工复核。' }}</text>
+      <text class="violation-explain">{{ violationDetail.banned ? '账号已永久封禁，剩余点数不予退还。' : '一周内累计 3 次将永久封禁账号。若有误判，请联系在线客服。' }}</text>
       <view class="violation-actions">
-        <button class="violation-secondary" bindtap="onOpenViolationFeedback">误判反馈</button>
+        <button class="violation-secondary" open-type="contact" session-from="violation-{{ violationId }}" bindtap="onAcknowledgeViolation">误判反馈</button>
         <button class="violation-primary" bindtap="onAcknowledgeViolation">我知道了</button>
-      </view>
-    </view>
-  </view>
-
-  <view class="violation-mask" wx:if="{{ showViolationFeedback }}">
-    <view class="violation-dialog" catchtap="true">
-      <text class="violation-eyebrow">人工复核</text>
-      <text class="violation-title">提交误判反馈</text>
-      <text class="violation-message">请简要说明误判原因。反馈会送到后台“用户管理”的违规复核列表。</text>
-      <textarea class="feedback-input" value="{{ feedbackText }}" maxlength="500"
-        placeholder="例如：照片中的人物均已授权，内容不含违规元素。"
-        cursor-spacing="80" bindinput="onFeedbackInput" />
-      <view class="violation-actions">
-        <button class="violation-secondary" bindtap="onCloseViolationFeedback">取消</button>
-        <button class="violation-primary" bindtap="onSubmitViolationFeedback" loading="{{ feedbackSubmitting }}" disabled="{{ feedbackSubmitting }}">提交反馈</button>
       </view>
     </view>
   </view>

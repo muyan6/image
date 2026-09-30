@@ -34,10 +34,7 @@ Page({
     customPrompt: '',
     showViolationNotice: false,
     violationDetail: {},
-    showViolationFeedback: false,
     violationId: '',
-    feedbackText: '',
-    feedbackSubmitting: false,
 
     // 用户与权益
     lightPoints: 0,
@@ -308,36 +305,8 @@ Page({
     this.setData({ customPrompt: e.detail.value || '' });
   },
 
-  onFeedbackInput(e) {
-    this.setData({ feedbackText: e.detail.value || '' });
-  },
-
-  onCloseViolationFeedback() {
-    this.setData({ showViolationFeedback: false, feedbackText: '' });
-  },
-
   onAcknowledgeViolation() {
     this.setData({ showViolationNotice: false });
-  },
-
-  onOpenViolationFeedback() {
-    this.setData({ showViolationNotice: false, showViolationFeedback: true });
-  },
-
-  async onSubmitViolationFeedback() {
-    if (this.data.feedbackSubmitting) return;
-    const message = this.data.feedbackText.trim();
-    if (!message) { wx.showToast({title: '请填写误判说明', icon: 'none'}); return; }
-    this.setData({ feedbackSubmitting: true });
-    try {
-      await api.submitViolationFeedback(this.data.violationId, message);
-      this.setData({ showViolationFeedback: false, feedbackText: '' });
-      wx.showToast({title: '反馈已提交', icon: 'success'});
-    } catch (err) {
-      wx.showToast({title: err.message || '提交失败', icon: 'none'});
-    } finally {
-      this.setData({ feedbackSubmitting: false });
-    }
   },
 
   async onStartGenerate() {

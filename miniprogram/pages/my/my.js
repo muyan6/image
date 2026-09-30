@@ -21,6 +21,9 @@ Page({
   data: {
     userId: '',
     nickName: '微信用户',
+    profileDraft: '',
+    showProfileEditor: false,
+    profileSaving: false,
     avatarUrl: '/images/logo.jpg',
     lightPoints: 0,
     freeMode: false,
@@ -46,20 +49,33 @@ Page({
   },
 
   onPullDownRefresh() {
-    this.refreshUserData();
+    this.refreshUserData(true);
     wx.stopPullDownRefresh();
   },
 
-  refreshUserData() {
+  refreshUserData(force = false) {
     const list = app.globalData.historyList || [];
+    const previewList = list.slice(0, 3).map(w => {
+      const local = w.jobId && app.globalData.mediaCache && app.globalData.mediaCache[w.jobId] &&
+        app.globalData.mediaCache[w.jobId].result;
+      return local ? Object.assign({}, w, {preview: local}) : w;
+    });
+    const keys = list.map(w => w.jobId || w.result || '').join('|');
+    if (!force && this._lastProfileSync && Date.now() - this._lastProfileSync < 30000 &&
+        keys === this._lastHistoryKeys && !list.some(w => w.status === 'processing')) {
+      this.setData({lightPoints: app.globalData.lightPoints || 0,
+        nickName: app.globalData.nickname || this.data.nickName});
+      return;
+    }
     const version = (this._profileLoadVersion || 0) + 1;
     this._profileLoadVersion = version;
-    this.setData({
+    if (keys !== this._lastHistoryKeys || !this.data.historyList.length) this.setData({
       userId: app.globalData.userId || '登录后显示',
+      nickName: app.globalData.nickname || this.data.nickName,
       lightPoints: app.globalData.lightPoints || 0,
       freeMode: !!app.globalData.freeMode,
       historyList: list,
-      previewWorks: list.slice(0, 3),
+      previewWorks: previewList,
       processingCount: list.filter(w => w.status === 'processing').length
     });
 
@@ -82,19 +98,28 @@ Page({
       const prior = app.globalData.historyList || [];
       const byId = new Map(prior.filter(w => w.jobId).map(w => [w.jobId, w]));
       const localOnly = prior.filter(w => !w.jobId);
-      const cloud = result.jobs.map(j => Object.assign({}, byId.get(j.id) || {}, {
+      const cloud = result.jobs.map(j => {
+        const old = byId.get(j.id) || {};
+        const local = app.globalData.mediaCache && app.globalData.mediaCache[j.id] &&
+          app.globalData.mediaCache[j.id].result;
+        const fresh = api.absolute(j.result_url || '');
+        return Object.assign({}, old, {
         jobId: j.id, original: api.absolute(j.orig_url || ''),
-        result: j.status === 'succeeded' ? api.absolute(j.result_url || '') : '',
+        result: j.status === 'succeeded' ? fresh : '',
         preview: j.status === 'succeeded' &&
-          (typeof api.isJobCosUrl !== 'function' || api.isJobCosUrl(j.result_url)) ? api.absolute(j.result_url || '') : '',
+          (typeof api.isJobCosUrl !== 'function' || api.isJobCosUrl(j.result_url))
+          ? (local || (old.status === 'succeeded' && old.preview ? old.preview : fresh)) : '',
         status: j.status, quality: j.quality, provider: j.provider,
         templateName: j.template_name || '', createdAt: j.created_at || 0
-      }));
+        });
+      });
       const merged = localOnly.concat(cloud).sort((a,b) => (b.createdAt || 0) - (a.createdAt || 0));
       app.globalData.historyList = merged;
       app.persist();
       this.setData({ historyList: merged, previewWorks: merged.slice(0,3),
         processingCount: merged.filter(w => w.status === 'processing').length });
+      this._lastProfileSync = Date.now();
+      this._lastHistoryKeys = merged.map(w => w.jobId || w.result || '').join('|');
     }).catch(() => {});
 
     // 光子余额 / 视频补给进度以服务端为准
@@ -103,14 +128,32 @@ Page({
       if (typeof d.balance === 'number') app.setBalance(d.balance);
       this.setData({
         userId: d.user_id || app.globalData.userId || '登录后显示',
+        nickName: d.nickname || '微信用户',
         lightPoints: app.globalData.lightPoints,
         videoTasksToday: (d.earn && d.earn.video_today) || 0
       });
+      if (d.nickname && typeof app.setNickname === 'function') app.setNickname(d.nickname);
     }).catch(() => {});
   },
 
   onHide() {
     this._profileLoadVersion = (this._profileLoadVersion || 0) + 1;
+  },
+
+  onPreviewError(e) {
+    const jobId = e.currentTarget.dataset.jobId;
+    if (!jobId) return;
+    if (app.globalData.mediaCache && app.globalData.mediaCache[jobId])
+      delete app.globalData.mediaCache[jobId].result;
+    this._previewRepairAttempts = this._previewRepairAttempts || new Set();
+    if (this._previewRepairAttempts.has(jobId)) return;
+    this._previewRepairAttempts.add(jobId);
+    api.repairJobMedia(jobId, 'result').then(url => {
+      const list = this.data.historyList.map(w => w.jobId === jobId ? Object.assign({},w,{preview:url,result:url}) : w);
+      app.globalData.historyList = list;
+      app.persist();
+      this.setData({historyList:list,previewWorks:list.slice(0,3)});
+    }).catch(() => {});
   },
 
   onCopyUserId() {
@@ -130,10 +173,23 @@ Page({
   },
 
   onEditProfile() {
-    wx.showToast({
-      title: '已绑定微信身份',
-      icon: 'none'
-    });
+    this.setData({showProfileEditor:true, profileDraft:this.data.nickName === '微信用户' ? '' : this.data.nickName});
+  },
+
+  onCloseProfile() { this.setData({showProfileEditor:false}); },
+  onProfileInput(e) { this.setData({profileDraft:e.detail.value || ''}); },
+  async onSaveProfile() {
+    if (this.data.profileSaving) return;
+    const nickname = this.data.profileDraft.trim();
+    if (!nickname) { wx.showToast({title:'请输入昵称',icon:'none'}); return; }
+    this.setData({profileSaving:true});
+    try {
+      const result = await api.updateProfile(nickname);
+      if (typeof app.setNickname === 'function') app.setNickname(result.nickname);
+      this.setData({nickName:result.nickname,showProfileEditor:false});
+      wx.showToast({title:'昵称已保存',icon:'success'});
+    } catch (err) { wx.showToast({title:err.message || '保存失败',icon:'none'}); }
+    finally { this.setData({profileSaving:false}); }
   },
 
   /* 二级页面跳转 */
@@ -250,27 +306,6 @@ Page({
       .catch((err) => {
         wx.showToast({ title: err.message || '补给失败，稍后再试', icon: 'none' });
       });
-  },
-
-  onContactSupport() {
-    wx.showActionSheet({
-      itemList: ['在线客服咨询', '意见与风格定制反馈', '照片保存期限说明'],
-      itemColor: '#1a1917',
-      success: (res) => {
-        if (res.tapIndex === 0) {
-          wx.showModal({
-            title: '专属客服',
-            content: '客服服务时间：09:30 - 21:00\n如有问题或技术支持，可随时联系。',
-            showCancel: false,
-            confirmText: '我知道了'
-          });
-        } else if (res.tapIndex === 1) {
-          wx.showToast({ title: '感谢您的支持与反馈', icon: 'success' });
-        } else {
-          this.onGoRetention();
-        }
-      }
-    });
   },
 
   /** 清理本地缓存：光子在服务端记账，清缓存不再丢余额 */

@@ -6,6 +6,15 @@ Page({
     lightPoints: 0,
     freeMode: false,
     checkedIn: false,
+    showCheckinSheet: false,
+    checkinBusy: false,
+    checkinReward: 10,
+    checkinBonus: 30,
+    checkinStreak: 0,
+    checkinProgress: 0,
+    checkinDay: 1,
+    checkinDays: [],
+    inviteReward: 40,
     costPerGeneration: 40,
     estimatedGenerations: 0,
     paymentReady: false,
@@ -19,7 +28,7 @@ Page({
   },
 
   onLoad() {
-    this.refreshData();
+    // 首次进入由 onShow 统一加载，避免两次相同请求。
   },
 
   onShow() {
@@ -28,18 +37,23 @@ Page({
 
   refreshData() {
     this.setData({ lightPoints: app.globalData.lightPoints,
-      estimatedGenerations: Math.floor(app.globalData.lightPoints / this.data.costPerGeneration) });
+      estimatedGenerations: this.data.costPerGeneration > 0
+        ? Math.floor(app.globalData.lightPoints / this.data.costPerGeneration) : 0 });
 
     api.request('/api/credits/packages').then((d) => {
       if (!d || !Array.isArray(d.packages)) return;
-      const cost = d.generation_cost || 40;
+      const cost = typeof d.generation_cost === 'number' ? d.generation_cost : 40;
       this.setData({packages: d.packages, paymentReady: !!d.payment_ready,
         costPerGeneration: cost,
-        estimatedGenerations: Math.floor(app.globalData.lightPoints / cost)});
+        estimatedGenerations: cost > 0 ? Math.floor(app.globalData.lightPoints / cost) : 0});
     }).catch(() => {});
 
     api.config().then((c) => {
-      if (c) this.setData({ freeMode: !!c.free_mode });
+      if (c) this.setData({ freeMode: !!c.free_mode,
+        inviteReward: c.rewards && typeof c.rewards.invite === 'number' ? c.rewards.invite : this.data.inviteReward,
+        checkinReward: c.rewards && typeof c.rewards.checkin === 'number' ? c.rewards.checkin : this.data.checkinReward,
+        checkinBonus: c.rewards && typeof c.rewards.checkin_seventh_bonus === 'number'
+          ? c.rewards.checkin_seventh_bonus : this.data.checkinBonus });
     }).catch(() => {});
 
     // 签到状态与余额都以服务端为准
@@ -48,31 +62,53 @@ Page({
       if (typeof d.balance === 'number') app.setBalance(d.balance);
       this.setData({
         lightPoints: app.globalData.lightPoints,
-        estimatedGenerations: Math.floor(app.globalData.lightPoints / this.data.costPerGeneration),
-        checkedIn: !!(d.earn && d.earn.checkin_done)
+        estimatedGenerations: this.data.costPerGeneration > 0
+          ? Math.floor(app.globalData.lightPoints / this.data.costPerGeneration) : 0
       });
+      this.renderCheckin(d.earn || {});
     }).catch(() => {});
   },
 
-  /** 每日签到：服务端记账（1 次/天），成功 +10 光子 */
+  renderCheckin(earn) {
+    const done = !!earn.checkin_done;
+    const progress = Math.max(0, Math.min(7, Number(earn.checkin_progress) || 0));
+    const day = Math.max(1, Math.min(7, Number(earn.checkin_day) || 1));
+    this.setData({
+      checkedIn: done,
+      checkinStreak: Number(earn.checkin_streak) || 0,
+      checkinProgress: progress,
+      checkinDay: day,
+      checkinReward: typeof earn.checkin_reward === 'number' ? earn.checkin_reward : this.data.checkinReward,
+      checkinBonus: typeof earn.checkin_seventh_bonus === 'number' ? earn.checkin_seventh_bonus : this.data.checkinBonus,
+      checkinDays: [1,2,3,4,5,6,7].map(n => ({day:n, done:n <= progress,
+        today:!done && n === day, bonus:n === 7}))
+    });
+  },
+
+  onOpenCheckin() { this.setData({showCheckinSheet:true}); },
+  onCloseCheckin() { this.setData({showCheckinSheet:false}); },
+
+  /** 每日签到：奖励和连续七日加奖由服务端原子记账。 */
   onCheckIn() {
+    if (this.data.checkinBusy) return;
     if (this.data.checkedIn) {
       wx.showToast({ title: '今日已签到', icon: 'none' });
       return;
     }
+    this.setData({checkinBusy:true});
     api.earn('checkin')
       .then((d) => {
         if (d && typeof d.balance === 'number') app.setBalance(d.balance);
-        this.setData({
-          checkedIn: true,
-          lightPoints: app.globalData.lightPoints,
-          estimatedGenerations: Math.floor(app.globalData.lightPoints / this.data.costPerGeneration)
-        });
-        wx.showToast({ title: '签到成功 ✦10 光子', icon: 'success' });
+        this.setData({lightPoints: app.globalData.lightPoints,
+          estimatedGenerations: this.data.costPerGeneration > 0
+            ? Math.floor(app.globalData.lightPoints / this.data.costPerGeneration) : 0});
+        this.renderCheckin({checkin_done:true,checkin_streak:d.checkin_streak,
+          checkin_progress:d.checkin_progress,checkin_day:d.checkin_progress});
+        wx.showToast({ title: `签到成功 ✦${d.reward}`, icon: 'none' });
       })
       .catch((err) => {
         wx.showToast({ title: err.message || '签到失败，稍后再试', icon: 'none' });
-      });
+      }).finally(() => this.setData({checkinBusy:false}));
   },
 
   /** 充值套餐：服务端未完成支付验单与发货前，不会凭前端点击加点。 */

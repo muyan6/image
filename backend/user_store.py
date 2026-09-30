@@ -7,12 +7,13 @@
 
 光子经济（常量即规则，后台 /admin 可改的是价格 prices）：
 - 新用户注册赠送 WELCOME_BALANCE 光子；
-- 每日签到 +10（1 次/天）、看视频 +10（3 次/天）、邀请一名新用户双方 +30；
+- 每日签到与邀请奖励由后台配置；看视频默认 +10（3 次/天）。
 - 提交任务按模板价/档位价预扣，任务失败自动全额退款。
 """
 from __future__ import annotations
 
 import hashlib
+import datetime
 import os
 import sqlite3
 import threading
@@ -21,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # 光子经济常量
 WELCOME_BALANCE = 100
-INVITE_REWARD = 30
+INVITE_REWARD = 40
 ACCOUNT_TYPES = ("wechat", "web")
 
 
@@ -123,6 +124,8 @@ class UserStore:
                 self._conn.execute("ALTER TABLE users ADD COLUMN app_id TEXT NOT NULL DEFAULT ''")
             if "admin_hidden" not in cols:
                 self._conn.execute("ALTER TABLE users ADD COLUMN admin_hidden INTEGER NOT NULL DEFAULT 0")
+            if "nickname" not in cols:
+                self._conn.execute("ALTER TABLE users ADD COLUMN nickname TEXT NOT NULL DEFAULT ''")
             # Historical auth had exactly two namespaces. Keep every balance/job;
             # split IP-derived web visitors from mini-program accounts, don't merge.
             self._conn.execute("UPDATE users SET account_type='web' WHERE account_type='' AND openid LIKE 'web-%'")
@@ -296,7 +299,7 @@ class UserStore:
             balance = self._conn.execute("SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()[0]
             return {"status": next_status, "balance": int(balance)}
 
-    def bind_invite_once(self, openid: str, code: str) -> Tuple[int, int]:
+    def bind_invite_once(self, openid: str, code: str, reward: int = INVITE_REWARD) -> Tuple[int, int]:
         with self._lock, self._conn:
             self._conn.execute("BEGIN IMMEDIATE")
             inviter = self._conn.execute("SELECT openid FROM users WHERE invite_code=?", (code,)).fetchone()
@@ -309,7 +312,7 @@ class UserStore:
             self._conn.execute("INSERT INTO invite_bindings VALUES(?,?,?)", (openid, inviter[0], time.time()))
             for target, action, detail in ((openid, "invite_bound", "by=" + code),
                                             (inviter[0], "invite_reward", "invitee=%s***" % openid[:6])):
-                self._conn.execute("UPDATE users SET balance=balance+? WHERE openid=?", (INVITE_REWARD, target))
+                self._conn.execute("UPDATE users SET balance=balance+? WHERE openid=?", (reward, target))
                 self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
                                    (time.time(), target, action, detail))
             return tuple(int(self._conn.execute("SELECT balance FROM users WHERE openid=?", (target,)).fetchone()[0])
@@ -335,7 +338,7 @@ class UserStore:
             return True, int(balance) + reward, count + 1
 
     _USER_COLS = ("openid, created_at, last_seen, total_jobs, blocked, "
-                  "balance, invite_code, banned, account_type, app_id, admin_hidden")
+                  "balance, invite_code, banned, account_type, app_id, admin_hidden, nickname")
 
     @staticmethod
     def _user_row(row) -> Dict[str, Any]:
@@ -343,7 +346,7 @@ class UserStore:
                 "total_jobs": row[3], "blocked": row[4],
                 "balance": int(row[5] or 0), "invite_code": row[6] or "",
                 "banned": bool(row[7]), "account_type": row[8], "app_id": row[9],
-                "admin_hidden": bool(row[10]),
+                "admin_hidden": bool(row[10]), "nickname": row[11] or "",
                 "user_id": public_user_id(row[0], row[8])}
 
     def ensure_user(self, openid: str, account_type: Optional[str] = None,
@@ -382,6 +385,11 @@ class UserStore:
         with self._lock, self._conn:
             self._conn.execute("UPDATE users SET last_seen=?,admin_hidden=0 "
                                "WHERE openid=? AND (last_seen<? OR admin_hidden=1)", (now, openid, now - 300))
+
+    def set_nickname(self, openid: str, nickname: str) -> str:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE users SET nickname=? WHERE openid=?", (nickname, openid))
+        return nickname
 
     def hide_from_admin(self, openid: str) -> bool:
         """Remove from management lists, not authentication, balances, works or bans."""
@@ -492,6 +500,49 @@ class UserStore:
     def earn_count_today(self, openid: str, kind: str) -> int:
         return self.action_count_in_window(
             openid, "earn_" + kind, _local_midnight())
+
+    def _checkin_status_locked(self, openid: str, now: float) -> Dict[str, Any]:
+        today = datetime.date.fromtimestamp(now).toordinal()
+        rows = self._conn.execute("SELECT ts FROM audit WHERE openid=? AND action='earn_checkin'",
+                                  (openid,)).fetchall()
+        days = {datetime.date.fromtimestamp(ts).toordinal() for (ts,) in rows}
+        done = today in days
+        cursor = today if done else today - 1
+        streak = 0
+        while cursor in days:
+            streak += 1
+            cursor -= 1
+        progress = ((streak - 1) % 7 + 1) if done and streak else streak % 7
+        return {"checkin_done": done, "checkin_streak": streak,
+                "checkin_progress": progress,
+                "checkin_day": progress if done else progress + 1}
+
+    def checkin_status(self, openid: str) -> Dict[str, Any]:
+        with self._lock:
+            return self._checkin_status_locked(openid, time.time())
+
+    def claim_checkin(self, openid: str, reward: int, seventh_bonus: int) -> Dict[str, Any]:
+        """每日一次与七日奖励在同一事务完成；重复请求不重复发放。"""
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            now = time.time()
+            status = self._checkin_status_locked(openid, now)
+            balance_row = self._conn.execute("SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
+            if balance_row is None:
+                raise ValueError("账号不存在")
+            if status["checkin_done"]:
+                return {**status, "claimed": False, "balance": int(balance_row[0]),
+                        "reward": 0, "bonus_awarded": 0}
+            streak = status["checkin_streak"] + 1
+            bonus = seventh_bonus if streak % 7 == 0 else 0
+            total = reward + bonus
+            self._conn.execute("UPDATE users SET balance=balance+? WHERE openid=?", (total, openid))
+            self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
+                               (now, openid, "earn_checkin", "+%d streak=%d bonus=%d" % (total, streak, bonus)))
+            return {"claimed": True, "balance": int(balance_row[0]) + total,
+                    "reward": total, "bonus_awarded": bonus, "checkin_done": True,
+                    "checkin_streak": streak, "checkin_progress": (streak - 1) % 7 + 1,
+                    "checkin_day": (streak - 1) % 7 + 1}
 
     def action_count(self, openid: str, action: str) -> int:
         return self.action_count_in_window(openid, action, 0.0)

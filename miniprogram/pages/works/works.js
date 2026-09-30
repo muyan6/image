@@ -15,14 +15,18 @@ Page({
   },
 
   async onPullDownRefresh() {
-    await this.loadWorks();
+    await this.loadWorks(true);
     wx.stopPullDownRefresh();
   },
 
-  async loadWorks() {
+  async loadWorks(force = false) {
+    const localKeys = (app.globalData.historyList || []).map(w => w.jobId || w.result || '').join('|');
+    const shownKeys = this.data.works.map(w => w.jobId || w.result || '').join('|');
+    if (!force && this._lastLoadedAt && Date.now() - this._lastLoadedAt < 30000 &&
+        localKeys === shownKeys && !this.data.works.some(w => w.status === 'processing')) return;
     const version = (this._loadVersion || 0) + 1;
     this._loadVersion = version;
-    this.setData({ works: (app.globalData.historyList || []).map(w =>
+    if (!this.data.works.length) this.setData({ works: (app.globalData.historyList || []).map(w =>
       Object.assign({}, w, {preview: this.safePreview(w)})) });
     try {
       const res = await api.myJobs(100);
@@ -44,7 +48,7 @@ Page({
           templateName: cj.template_name || '', createdAt: cj.created_at || old.createdAt || 0,
           time: cj.created_at ? this.formatTime(new Date(cj.created_at * 1000)) : old.time || '近期'
         });
-        work.preview = this.safePreview(work);
+        work.preview = old.status === 'succeeded' && old.preview ? this.safePreview(old) : this.safePreview(work);
         byId.set(cj.id, work);
       });
       // A successful empty/full cloud response is authoritative for server jobs.
@@ -69,11 +73,17 @@ Page({
       app.globalData.historyList = merged;
       app.persist();
       this.setData({works: merged});
+      this._lastLoadedAt = Date.now();
     } catch (e) { /* keep local cache for a transient network failure */ }
     if (this._loadVersion === version) await this.refreshPendingWorks();
   },
 
   safePreview(work) {
+    const local = work.jobId && app.globalData.mediaCache && app.globalData.mediaCache[work.jobId] &&
+      app.globalData.mediaCache[work.jobId].result;
+    if (local) return local;
+    if (work.preview && (/^(wxfile:|http:\/\/tmp\/)/i.test(work.preview) ||
+        (typeof api.isJobCosUrl === 'function' && api.isJobCosUrl(work.preview)))) return work.preview;
     if (!work.jobId) {
       const url = work.result || work.original || '';
       if (typeof api.isJobCosUrl === 'function' &&
@@ -87,6 +97,8 @@ Page({
   onWorkImageError(e) {
     const item = this.data.works[e.currentTarget.dataset.index];
     if (!item || !item.jobId || item.status !== 'succeeded') return;
+    if (app.globalData.mediaCache && app.globalData.mediaCache[item.jobId])
+      delete app.globalData.mediaCache[item.jobId].result;
     this._previewRepairAttempts = this._previewRepairAttempts || new Set();
     if (this._previewRepairAttempts.has(item.jobId)) return;
     this._previewRepairAttempts.add(item.jobId);
@@ -254,6 +266,7 @@ Page({
           const deletion = item.jobId ? await api.deleteJob(item.jobId) : null;
           this._deletedIds = this._deletedIds || new Set();
           if (item.jobId) this._deletedIds.add(item.jobId);
+          if (item.jobId && app.globalData.mediaCache) delete app.globalData.mediaCache[item.jobId];
           app.globalData.historyList = (app.globalData.historyList || []).filter(w => w !== item && w.jobId !== item.jobId);
           app.persist();
           this.setData({works: app.globalData.historyList});

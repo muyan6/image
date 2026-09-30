@@ -62,7 +62,7 @@ step "2/4 写入 systemd 服务（${SERVICE_NAME}）"
 APP_DIR="$(pwd)"
 cat <<EOF | $SUDO tee "/etc/systemd/system/${SERVICE_NAME}.service" >/dev/null
 [Unit]
-Description=Photo Rescue Backend (废片拯救所)
+Description=Photo Renewal Backend (废片新生所)
 After=network-online.target
 Wants=network-online.target
 

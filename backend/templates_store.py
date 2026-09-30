@@ -554,6 +554,18 @@ class TemplateStore:
         items.sort(key=lambda t: (t.get("sort", 0), t.get("id", "")))
         return items
 
+    def reprice_by_engine(self, prices: Dict[str, int]) -> int:
+        """后台改档位价时，同步现有模板，避免模板旧价覆盖新的全站定价。"""
+        amounts = {key: int(prices[key]) for key in ENGINES}
+        if any(value < 0 or value > 9999 for value in amounts.values()):
+            raise ValueError("模板价格必须是 0～9999 光子")
+        with self._lock:
+            for template in self._templates:
+                template["price"] = amounts[template.get("engine", "light")]
+                template["updated_at"] = time.time()
+            self._save_locked()
+            return len(self._templates)
+
     def get_template(self, tpl_id: str,
                      enabled_only: bool = False) -> Optional[Dict[str, Any]]:
         with self._lock:

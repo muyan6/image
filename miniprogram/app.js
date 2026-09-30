@@ -12,6 +12,7 @@ const STORAGE_BALANCE = 'lightPoints';
 const LEGACY_BALANCE = 'fishTokens'; // 旧版本地积分，仅作一次性迁移展示
 const STORAGE_HISTORY = 'historyList';
 const STORAGE_USER_ID = 'studioUserId';
+const STORAGE_NICKNAME = 'studioNickname';
 
 App({
   globalData: {
@@ -19,8 +20,10 @@ App({
     lightPoints: 0,
     freeMode: false,
     historyList: [],
+    mediaCache: {},
     selectedTemplate: null, // 从模板库或社区携带过来的目标模板
-    userId: ''
+    userId: '',
+    nickname: ''
   },
 
   onLaunch() {
@@ -49,6 +52,8 @@ App({
     // The display ID comes from the server's OpenID record, never Math.random().
     const uid = wx.getStorageSync(STORAGE_USER_ID);
     this.globalData.userId = typeof uid === 'string' && /^(WX|WEB)-[0-9A-F]{16}$/.test(uid) ? uid : '';
+    const nickname = wx.getStorageSync(STORAGE_NICKNAME);
+    this.globalData.nickname = typeof nickname === 'string' ? nickname : '';
   },
 
   onHide() {
@@ -69,6 +74,11 @@ App({
     if (typeof uid !== 'string' || !/^(WX|WEB)-[0-9A-F]{16}$/.test(uid)) return;
     this.globalData.userId = uid;
     try { wx.setStorageSync(STORAGE_USER_ID, uid); } catch (e) {}
+  },
+
+  setNickname(nickname) {
+    this.globalData.nickname = typeof nickname === 'string' ? nickname : '';
+    try { wx.setStorageSync(STORAGE_NICKNAME, this.globalData.nickname); } catch (e) {}
   },
 
   setBalance(n) {

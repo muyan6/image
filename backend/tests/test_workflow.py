@@ -56,10 +56,37 @@ class WorkflowTests(unittest.TestCase):
     def test_new_economy_and_credit_package_catalog(self):
         self.assertEqual(m.users.get_balance('sample_user'),100)
         self.assertEqual(m.settings.prices(),{'light':40,'fine':40})
+        self.assertEqual(m.settings.rewards()['invite'],40)
         r=self.client.get('/api/credits/packages');self.assertEqual(r.status_code,200)
         items=r.json()['packages']
         self.assertEqual([(x['yuan'],x['points']) for x in items],[(6,600),(30,3300),(68,8160),(128,16640)])
         self.assertFalse(r.json()['payment_ready'])
+
+    def test_seven_day_checkin_is_atomic_and_awards_configured_bonus(self):
+        now=time.time()
+        for days_ago in range(1,7):
+            m.users._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
+                                  (now-days_ago*86400,'sample_user','earn_checkin','+10'))
+        m.users._conn.commit()
+        before=self.client.get('/api/me',headers=self.headers).json()['earn']
+        self.assertEqual((before['checkin_streak'],before['checkin_day']),(6,7))
+        claimed=self.client.post('/api/me/earn',headers=self.headers,json={'kind':'checkin'})
+        self.assertEqual(claimed.status_code,200,claimed.text)
+        self.assertEqual((claimed.json()['reward'],claimed.json()['bonus_awarded']),(40,30))
+        self.assertEqual(m.users.get_balance('sample_user'),140)
+        self.assertEqual(self.client.post('/api/me/earn',headers=self.headers,json={'kind':'checkin'}).status_code,429)
+
+    def test_invite_reward_and_nickname_follow_server_settings(self):
+        m.settings.update({'rewards':{'invite':45,'community_featured':65}})
+        code=m.users.get_user('other_user')['invite_code']
+        result=self.client.post('/api/me/invite',headers=self.headers,json={'code':code})
+        self.assertEqual((result.status_code,result.json()['reward'],result.json()['balance']),(200,45,145))
+        self.assertEqual(m.users.get_balance('other_user'),145)
+        self.assertEqual(self.client.get('/api/config').json()['rewards']['community_featured'],65)
+        with patch.object(m,'_moderate_text_or_reject',return_value=None):
+            profile=self.client.post('/api/me/profile',headers=self.headers,json={'nickname':'小山'})
+        self.assertEqual(profile.status_code,200,profile.text)
+        self.assertEqual(self.client.get('/api/me',headers=self.headers).json()['nickname'],'小山')
 
     def test_old_pricing_migrates_once_without_changing_other_settings(self):
         old=self.d/'old-pricing';old.mkdir()
@@ -83,6 +110,22 @@ class WorkflowTests(unittest.TestCase):
             migrated=templates_store.TemplateStore(str(directory))
         self.assertTrue(all(item['price']==40 for item in migrated.list_templates()))
         self.assertEqual(json.loads(path.read_text(encoding='utf-8'))['version'],3)
+
+    def test_admin_price_change_updates_existing_template_prices(self):
+        directory=self.d/'repriced-templates';directory.mkdir()
+        with patch.object(templates_store.TemplateStore,'ensure_placeholder_covers'):
+            store=templates_store.TemplateStore(str(directory))
+        app=FastAPI();app.include_router(admin_api.make_admin_router(settings=m.settings,
+            announcements=m.announcements,templates=store,jobs=m.jobs,users=m.users,
+            health_fn=m.health,stats_fn=lambda:{}))
+        with TestClient(app) as admin:
+            admin.post('/admin/api/login',json={'password':'workflow-tests'})
+            admin.headers.update({'X-Admin-Request':'1'})
+            saved=admin.put('/admin/api/settings',json={'prices':{'light':55,'fine':55}})
+        self.assertEqual(saved.status_code,200,saved.text)
+        self.assertEqual(m.settings.prices(),{'light':55,'fine':55})
+        self.assertTrue(all(t['price']==55 for t in store.list_templates()))
+        self.assertEqual(self.client.get('/api/credits/packages').json()['generation_cost'],55)
 
     def test_payment_credentials_remain_admin_only_and_masked(self):
         saved=self.admin.put('/admin/api/settings',json={'payment':{

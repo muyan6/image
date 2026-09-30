@@ -32,7 +32,7 @@ Page({
     const demo = !!options.demo || (!options.job && !orig && !res);
 
     this._jobId = options.job ? decodeURIComponent(options.job) : '';
-    this._mediaCache = {};
+    this._mediaCache = (app.globalData.mediaCache && app.globalData.mediaCache[this._jobId]) || {};
     this._reloadAttempts = {};
     this._unloaded = false;
 
@@ -45,8 +45,8 @@ Page({
     } catch (e) { /* 取不到就用默认值，onReady 会立刻纠正 */ }
 
     this.setData({
-      originalUrl: demo ? DEMO_ORIG : (this._jobId ? '' : orig),
-      resultUrl: demo ? DEMO_RESULT : (this._jobId ? '' : res),
+      originalUrl: demo ? DEMO_ORIG : (this._jobId ? (this._mediaCache.orig || '') : orig),
+      resultUrl: demo ? DEMO_RESULT : (this._jobId ? (this._mediaCache.result || '') : res),
       quality: quality,
       demo: demo,
       label: quality === 'fine' ? '精细修复' : '轻量修复',
@@ -67,9 +67,11 @@ Page({
   },
 
   /** 本地文件在当前页面复用；再次进入页面会重新获取签名，不存过期链接。 */
-  refreshUrls() {
+  refreshUrls(force = false) {
     if (!this._jobId || this.data.demo) return Promise.resolve(false);
     if (this._refreshPromise) return this._refreshPromise;
+    if (!force && this._lastMediaRefreshAt && Date.now() - this._lastMediaRefreshAt < 60000 &&
+        this.data.resultUrl && !this.data.resultError) return Promise.resolve(true);
     this._mediaCache = this._mediaCache || {};
     this.setData({loadingMedia: true});
     this._refreshPromise = api.request('/api/jobs/' + encodeURIComponent(this._jobId))
@@ -113,6 +115,7 @@ Page({
           originalError: original.error ? original.error.message || '原图加载失败' : '',
           originalUnavailable: !job.orig_url,
           label: (job.provider === 'local' ? '本地增强' : 'AI 修复') + (dimensions ? ' · ' + dimensions : '') });
+        if (result.path) this._lastMediaRefreshAt = Date.now();
         return !!result.path;
       })
       .catch((err) => {
@@ -220,13 +223,13 @@ Page({
       this.setData({[field]: '图片加载失败，点击重试'}); return;
     }
     this._reloadAttempts[kind] = 1;
-    this.refreshUrls();
+    this.refreshUrls(true);
   },
 
   onRetryMedia() {
     this._reloadAttempts = {};
     this._mediaCache = {};
-    this.refreshUrls();
+    this.refreshUrls(true);
   },
 
   /** 保存高清修复照片到系统相册 */

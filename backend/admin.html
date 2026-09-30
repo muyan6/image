@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>废片拯救所 · 管理后台</title>
+<title>废片新生所 · 管理后台</title>
 <style>
   :root {
     --bg: #f1f4f9; --card: #ffffff; --border: #dfe5ef;
@@ -242,7 +242,7 @@
       <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.6"/>
       <path d="M12 3v5.4M12 15.6V21M3 12h5.4M15.6 12H21"/>
     </svg>
-    <h1>废片拯救所 · 管理后台</h1>
+    <h1>废片新生所 · 管理后台</h1>
     <p>密码在 backend/.env 的 ADMIN_PASSWORD<br>首次启动会自动生成并打印在日志里</p>
     <input type="password" id="pwd" placeholder="管理密码" onkeydown="if(event.key==='Enter')doLogin()">
     <p style="margin-top:16px"><button class="btn-primary" style="width:100%" onclick="doLogin()">登 录</button></p>
@@ -258,7 +258,7 @@
         <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.6"/>
         <path d="M12 3v5.4M12 15.6V21M3 12h5.4M15.6 12H21"/>
       </svg>
-      <div><b>废片拯救所</b><small>PHOTO RESCUE ADMIN</small></div>
+      <div><b>废片新生所</b><small>PHOTO RENEWAL ADMIN</small></div>
     </div>
     <nav>
       <div class="nav-label">概览</div>
@@ -431,12 +431,22 @@
       <!-- 通用设置 -->
       <section id="page-conf" hidden>
         <div class="card">
-          <div class="card-head"><h2>计费与输出</h2></div>
+          <div class="card-head"><h2>计费与输出<small>修改档位价后，已有模板价格会自动同步</small></h2></div>
           <div class="form-grid">
             <div class="field"><label>轻量档价格（光子/张）</label><input type="number" id="price-light" min="0" max="9999"></div>
             <div class="field"><label>精细档价格（光子/张）</label><input type="number" id="price-fine" min="0" max="9999"></div>
             <div class="field"><label>归一化长边<small>0 = 关闭缩放；改小可省网关费用</small></label><input type="number" id="normalize" min="0" max="8192"></div>
           </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>光子奖励配置<small>保存后小程序文案与服务端发放同步更新</small></h2></div>
+          <div class="form-grid">
+            <div class="field"><label>邀请双方各得（光子）</label><input type="number" id="reward-invite" min="0" max="100000"></div>
+            <div class="field"><label>每日签到（光子）</label><input type="number" id="reward-checkin" min="0" max="100000"></div>
+            <div class="field"><label>连续第 7 天额外奖励（光子）</label><input type="number" id="reward-seventh" min="0" max="100000"></div>
+            <div class="field"><label>沙龙精选文案奖励（光子）<small>仅控制前端展示，精选发放由管理员操作</small></label><input type="number" id="reward-featured" min="0" max="100000"></div>
+          </div>
+          <button class="btn-primary" onclick="saveConf()">保存奖励配置</button>
         </div>
         <div class="card">
           <div class="card-head"><h2>维护与调试</h2></div>
@@ -783,6 +793,10 @@ window.saveProviders = async () => {
 function renderConf() {
   $("price-light").value = SETTINGS.prices?.light ?? 1;
   $("price-fine").value = SETTINGS.prices?.fine ?? 3;
+  $("reward-invite").value = SETTINGS.rewards?.invite ?? 40;
+  $("reward-checkin").value = SETTINGS.rewards?.checkin ?? 10;
+  $("reward-seventh").value = SETTINGS.rewards?.checkin_seventh_bonus ?? 30;
+  $("reward-featured").value = SETTINGS.rewards?.community_featured ?? 50;
   $("normalize").value = SETTINGS.normalize_long_side ?? 1536;
   $("mt-message").value = SETTINGS.maintenance?.message || "";
   $("mt-enabled").checked = SETTINGS.maintenance?.enabled || false;
@@ -797,6 +811,10 @@ window.saveConf = async () => {
     SETTINGS = await api("/settings", { method: "PUT", body: {
       prices: { light: parseInt($("price-light").value, 10) || 0,
                 fine: parseInt($("price-fine").value, 10) || 0 },
+      rewards: { invite: parseInt($("reward-invite").value, 10) || 0,
+                 checkin: parseInt($("reward-checkin").value, 10) || 0,
+                 checkin_seventh_bonus: parseInt($("reward-seventh").value, 10) || 0,
+                 community_featured: parseInt($("reward-featured").value, 10) || 0 },
       normalize_long_side: parseInt($("normalize").value, 10) || 0,
       maintenance: { enabled: $("mt-enabled").checked,
                      message: $("mt-message").value },
@@ -1068,7 +1086,7 @@ function renderTplTable() {
            ${extra ? `<span class="sub">${esc(extra)}</span>` : ""}</td>
        <td>${esc(gname(tpl.group_id))}</td>
        <td><span class="badge ${tpl.engine === "fine" ? "indigo" : ""}">${esc(tpl.engine)}</span></td>
-       <td>${tpl.price > 0 ? tpl.price + " 干" : '<span class="muted">按档位</span>'}</td>
+       <td>${tpl.price > 0 ? tpl.price + " 光子" : '<span class="muted">按档位</span>'}</td>
        <td>${tpl.output_size > 0 ? esc(tpl.output_size + "px") : "—"}</td>
        <td>${tpl.usage_count ?? 0}</td>
        <td><label class="switch"><input type="checkbox" ${tpl.enabled ? "checked" : ""}

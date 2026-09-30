@@ -4,11 +4,15 @@ const api = require('../../utils/api.js');
 Page({
   data: {
     inviteCode: '',
-    inviteError: false
+    inviteError: false,
+    inviteReward: 40
   },
 
   onLoad() {
     this.loadInviteCode();
+    if (typeof api.config === 'function') api.config().then(c => {
+      if (c && c.rewards) this.setData({inviteReward: c.rewards.invite});
+    }).catch(() => {});
   },
 
   onShow() {
@@ -48,7 +52,7 @@ Page({
       return {title: '来废片新生所拯救你的旧照片！', path: '/pages/index/index'};
     }
     return {
-      title: '送你 ✦30 光子，来废片新生所拯救你的废旧照片！',
+      title: `送你 ✦${this.data.inviteReward} 光子，来废片新生所重塑旧照片！`,
       path: '/pages/index/index?invite=' + this.data.inviteCode,
       imageUrl: '/images/logo.jpg'
     };

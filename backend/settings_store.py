@@ -68,6 +68,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "chain": ["worldcodes", "fal", "baidu", "local"],
     "prompts": {"light": DEFAULT_LIGHT_PROMPT, "fine": DEFAULT_FINE_PROMPT},
     "prices": {"light": 40, "fine": 40},
+    "rewards": {"invite": 40, "checkin": 10, "checkin_seventh_bonus": 30,
+                "community_featured": 50},
     "pricing_revision": 2,
     "free_mode": False,
     "wechat": {"app_id": "", "app_secret": ""},
@@ -112,7 +114,7 @@ def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
 
 # 误删后服务会残废的关键结构：合并后一律用默认值兜底补齐
 _DICT_SECTIONS = ("providers", "wechat", "payment", "tencent", "moderation", "quota",
-                  "prompts", "prices", "maintenance", "quality_to_style",
+                  "prompts", "prices", "rewards", "maintenance", "quality_to_style",
                   "community", "ads")
 
 
@@ -168,6 +170,10 @@ def _validate(doc: Dict[str, Any]) -> None:
         value = prices.get(tier)
         if not isinstance(value, int) or not 0 <= value <= 9999:
             raise ValueError("prices.%s 必须是 0~9999 的整数(光子)" % tier)
+    for field, value in doc.get("rewards", {}).items():
+        if field in ("invite", "checkin", "checkin_seventh_bonus", "community_featured") \
+                and (type(value) is not int or not 0 <= value <= 100000):
+            raise ValueError("rewards.%s 必须是 0~100000 的整数(光子)" % field)
 
     if not isinstance(doc.get("free_mode"), bool):
         raise ValueError("free_mode 必须是布尔值")
@@ -374,6 +380,9 @@ class SettingsStore:
 
     def prices(self) -> Dict[str, int]:
         return copy.deepcopy(self.snapshot()["prices"])
+
+    def rewards(self) -> Dict[str, int]:
+        return copy.deepcopy(self.snapshot()["rewards"])
 
     def free_mode(self) -> bool:
         """调试模式：小程序读到 true 就跳过小鱼干扣减，次数不限。"""

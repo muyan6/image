@@ -103,7 +103,8 @@ def reset(name):
     m._uploads.clear()
     m.cleanup = CleanupStore(str(d), m.UPLOAD_DIR)
     m.settings.update({'normalize_long_side': 96, 'chain': ['local'],
-                       'prices': {'light': 1, 'fine': 3}})
+                       'prices': {'light': 1, 'fine': 3},
+                       'rewards': {'invite': 30}})
     return d
 
 

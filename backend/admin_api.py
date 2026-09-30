@@ -297,6 +297,8 @@ def make_admin_router(*, settings: SettingsStore,
             updated = settings.update(patch)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if "prices" in patch:
+            templates.reprice_by_engine(updated["prices"])
         return _masked_settings(updated)
 
     @router.get("/community/posts")

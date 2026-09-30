@@ -45,7 +45,7 @@ Page({
     }
   },
 
-  /** 登录后绑定邀请码，双方 +30 光子（失败静默，不打扰正常使用） */
+  /** 登录后绑定邀请码，奖励由服务端配置与发放。 */
   bindPendingInvite() {
     let code = '';
     try { code = wx.getStorageSync('pendingInvite') || ''; } catch (e) {}
@@ -56,7 +56,7 @@ Page({
         try { wx.removeStorageSync('pendingInvite'); } catch (e) {}
         if (d && typeof d.balance === 'number') app.setBalance(d.balance);
         this.setData({ lightPoints: app.globalData.lightPoints });
-        wx.showToast({ title: '邀请奖励 ✦30 已到账', icon: 'none' });
+        wx.showToast({ title: `邀请奖励 ✦${typeof d.reward === 'number' ? d.reward : 40} 已到账`, icon: 'none' });
       })
       .catch((err) => {
         try { wx.removeStorageSync('pendingInvite'); } catch (e) {}

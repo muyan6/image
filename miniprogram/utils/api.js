@@ -212,6 +212,15 @@ function repairJobMedia(jobId, kind = 'result') {
 /** 图片始终直连 COS；403 时仅向 API 换新签名重试一次，不代理图片字节。 */
 async function downloadJobMedia(jobId, kind, signedUrl) {
   if (!['orig', 'result'].includes(kind)) throw new Error('图片参数错误');
+  const remember = (path) => {
+    const app = getApp();
+    if (app && app.globalData && jobId) {
+      app.globalData.mediaCache = app.globalData.mediaCache || {};
+      app.globalData.mediaCache[jobId] = app.globalData.mediaCache[jobId] || {};
+      app.globalData.mediaCache[jobId][kind] = path;
+    }
+    return path;
+  };
   const directUrl = (url) => {
     // 拒绝历史本地存储地址以及所有 API 同域地址，避免占用业务服务器图片带宽。
     if (!/^https:\/\//i.test(url || '')) throw new Error('此图片尚未同步到 COS，请重新打开作品重试');
@@ -227,18 +236,18 @@ async function downloadJobMedia(jobId, kind, signedUrl) {
   }
   const repair = async () => {
     const url = await repairJobMedia(jobId, kind);
-    return downloadImage(directUrl(url));
+    return remember(await downloadImage(directUrl(url)));
   };
   if (jobId && url && (!/^https:\/\//i.test(url) || url.split('/')[2].toLowerCase() === apiBase().split('/')[2].toLowerCase()))
     return repair();
-  try { return await downloadImage(directUrl(url)); }
+  try { return remember(await downloadImage(directUrl(url))); }
   catch (err) {
     if (jobId && err.status === 404) return repair();
     if (!jobId || (err.status !== 403 && err.status !== 401)) throw err;
     const job = await request('/api/jobs/' + encodeURIComponent(jobId));
     const fresh = job[kind + '_url'];
     if (!fresh) throw new Error(kind === 'orig' ? '原图已到保存期限' : '作品已到保存期限');
-    return downloadImage(directUrl(fresh));
+    return remember(await downloadImage(directUrl(fresh)));
   }
 }
 
@@ -368,6 +377,10 @@ function templates() {
 /** 当前用户资料：光子余额、邀请码、今日奖励进度 */
 function me() {
   return request('/api/me');
+}
+
+function updateProfile(nickname) {
+  return request('/api/me/profile', {method:'POST', data:{nickname}});
 }
 
 /** 每日奖励：kind = 'checkin'（1次/天）| 'video'（3次/天），服务端记账 */
@@ -520,6 +533,7 @@ module.exports = {
   ensureLogin,
   authedCall,
   me,
+  updateProfile,
   earn,
   bindInvite,
   submitViolationFeedback,

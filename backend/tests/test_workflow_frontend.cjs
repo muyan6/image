@@ -82,7 +82,7 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
     const p=page('compare',{request:async()=>{requests++;return job;},downloadJobMedia:async(id,kind)=>{downloads++;return 'wxfile://'+kind+'.jpg';}});
     p.onLoad({job:job.id,original:'expired-orig',result:'expired-result'});p.onShow();await p._refreshPromise;
     assert.equal(requests,1);assert.equal(downloads,2);assert.equal(p.data.resultUrl,'wxfile://result.jpg');
-    p.onShow();await p._refreshPromise;assert.equal(requests,2);assert.equal(downloads,2);assert.equal(p.data.resultError,'');
+    p.onShow();await p._refreshPromise;assert.equal(requests,1);assert.equal(downloads,2);assert.equal(p.data.resultError,'');
   });
   await test('failed_result_is_visible_error_and_original_still_renders',async()=>{
     const p=page('compare',{request:async()=>job,downloadJobMedia:async(id,kind)=>{
@@ -146,15 +146,13 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
     p._foreground=true;p.data.customPrompt='移除背景人群，保留主体';
     await p.executeUpload('photo.jpg');assert.equal(sent.custom_prompt,p.data.customPrompt);
   });
-  await test('violation_modal_offers_feedback_and_syncs_charged_balance',async()=>{
-    let submitted;
+  await test('violation_dialog_routes_feedback_to_wechat_service',async()=>{
     const violation={code:'CONTENT_VIOLATION',violation_id:'event123',message:'图片内容未通过安全审核',charged:1,weekly_count:2,banned:false};
-    const p=page('adjust',{submitJob:async()=>{const e=new Error(violation.message);e.detail=violation;throw e;},
-      submitViolationFeedback:async(id,msg)=>{submitted=[id,msg];}});
+    const p=page('adjust',{submitJob:async()=>{const e=new Error(violation.message);e.detail=violation;throw e;}});
     p._foreground=true;await p.executeUpload('photo.jpg');assert.equal(p.data.showViolationNotice,true);
-    p.onOpenViolationFeedback();assert.equal(p.data.showViolationNotice,false);
-    assert.equal(p.data.showViolationFeedback,true);p.data.feedbackText='误判说明';
-    await p.onSubmitViolationFeedback();assert.deepEqual(submitted,['event123','误判说明']);
+    const xml=fs.readFileSync(path.join(root,'miniprogram/pages/adjust/adjust.wxml'),'utf8');
+    assert(xml.includes('open-type="contact"'));assert(xml.includes('session-from="violation-{{ violationId }}"'));
+    p.onAcknowledgeViolation();assert.equal(p.data.showViolationNotice,false);
   });
   await test('selecting_template_resets_old_crop_and_disables_ratio_picker',async()=>{
     const p=page('adjust');p._imgWidth=160;p._imgHeight=90;

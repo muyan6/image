@@ -21,6 +21,7 @@ Page({
     items: [],
     filteredItems: [],
     enabled: false,
+    featuredReward: 50,
     loading: true
   },
 
@@ -33,11 +34,12 @@ Page({
   },
 
   onPullDownRefresh() {
-    this.loadCommunity().then(() => wx.stopPullDownRefresh());
+    this.loadCommunity(true).then(() => wx.stopPullDownRefresh());
   },
 
   /** 拉取沙龙展品：后端未开启或无内容时返回空列表，不做任何本地兜底 */
-  loadCommunity() {
+  loadCommunity(force = false) {
+    if (!force && this._lastLoadedAt && Date.now() - this._lastLoadedAt < 30000) return Promise.resolve();
     return api.request('/api/community', { timeout: 8000 })
       .then((d) => {
         this._communityLoaded = true;
@@ -47,10 +49,12 @@ Page({
         }));
         this.setData({
           enabled: !!(d && d.enabled),
+          featuredReward: d && typeof d.featured_reward === 'number' ? d.featured_reward : this.data.featuredReward,
           items: items,
           loading: false
         });
         this.filterItems(this.data.activeFilter);
+        this._lastLoadedAt = Date.now();
       })
       .catch(() => {
         // 网络异常按「暂无内容」处理，不展示假数据

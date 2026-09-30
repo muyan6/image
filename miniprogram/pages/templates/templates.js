@@ -27,13 +27,18 @@ Page({
   onPullDownRefresh() {
     this.fetchTemplates(() => {
       wx.stopPullDownRefresh();
-    });
+    }, true);
   },
 
-  fetchTemplates(callback) {
+  fetchTemplates(callback, force = false) {
+    if (!force && this._lastFetchedAt && Date.now() - this._lastFetchedAt < 30000 &&
+        this.data.allTemplates.length) {
+      if (typeof callback === 'function') callback();
+      return;
+    }
     const version = (this._fetchVersion || 0) + 1;
     this._fetchVersion = version;
-    this.setData({ loading: true });
+    if (!this.data.allTemplates.length) this.setData({ loading: true });
     if (this.data.freeMode !== !!app.globalData.freeMode && !this._latestRawItems) {
       this.setData({ freeMode: !!app.globalData.freeMode });
     }
@@ -41,7 +46,7 @@ Page({
     // 1. 尝试读本地缓存，秒开
     try {
       const cached = wx.getStorageSync('cached_templates_data');
-      if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
+      if (!this.data.allTemplates.length && cached && Array.isArray(cached.items) && cached.items.length > 0) {
         this._renderData(cached.groups || [], cached.items);
       }
     } catch (e) {}
@@ -69,6 +74,7 @@ Page({
         try { wx.setStorageSync('cached_templates_data', data); } catch (e) {}
         this._renderData(groups, rawItems);
         this.setData({ loading: false });
+        this._lastFetchedAt = Date.now();
         if (typeof callback === 'function') callback();
       })
       .catch((err) => {

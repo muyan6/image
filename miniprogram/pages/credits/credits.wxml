@@ -12,12 +12,12 @@
     </view>
     <text class="balance-desc">当前余额约可生成 {{ estimatedGenerations }} 张照片</text>
 
-    <view class="checkin-row" bindtap="onCheckIn">
+    <view class="checkin-row" bindtap="onOpenCheckin">
       <view class="checkin-status">
         <text class="check-icon">{{ checkedIn ? '✓' : '✦' }}</text>
-        <text class="check-text">{{ checkedIn ? '今日已签到' : '点击签到领 ✦10' }}</text>
+        <text class="check-text">{{ checkedIn ? '今日已签到' : '每日签到领 ✦' + checkinReward }}</text>
       </view>
-      <text class="checkin-link">签到日历 ›</text>
+      <text class="checkin-link">查看签到日历 ›</text>
     </view>
   </view>
 
@@ -47,10 +47,10 @@
 
   <!-- 3. 邀请好友得光子卡片 -->
   <view class="invite-banner gallery-card" bindtap="onGoInvite">
-    <view class="banner-badge">✦30</view>
+    <view class="banner-badge">✦{{ inviteReward }}</view>
     <view class="banner-content">
       <text class="banner-title">邀请好友</text>
-      <text class="banner-desc">好友绑定你的邀请码后，你和对方各得 30 光子。</text>
+      <text class="banner-desc">好友绑定你的邀请码后，你和对方各得 {{ inviteReward }} 光子。</text>
     </view>
     <button class="btn-ink banner-btn">邀请</button>
   </view>
@@ -97,5 +97,32 @@
       </view>
     </view>
     <text class="disclaimer-text">光子为虚拟权益，仅用于本小程序内的图片生成与风格重塑服务。</text>
+  </view>
+
+  <view class="checkin-mask" wx:if="{{ showCheckinSheet }}" bindtap="onCloseCheckin">
+    <view class="checkin-sheet" catchtap="true">
+      <view class="checkin-grip"></view>
+      <view class="checkin-head">
+        <view><text class="checkin-eyebrow">DAILY STUDIO</text><text class="checkin-title">每日签到</text></view>
+        <text class="checkin-close" bindtap="onCloseCheckin">✕</text>
+      </view>
+      <text class="checkin-subtitle">连续 7 天，解锁本周额外奖励</text>
+      <view class="checkin-reward-card">
+        <view><text class="checkin-reward-label">TODAY REWARD</text>
+          <text class="checkin-reward-amount">+{{ checkinReward }}<text class="checkin-unit"> 光子</text></text>
+          <text class="checkin-bonus-hint">第 7 天额外获得 {{ checkinBonus }} 光子</text></view>
+        <view class="checkin-streak"><text>{{ checkinStreak }}</text><text>连续天数</text></view>
+      </view>
+      <view class="checkin-progress-head"><text>本周进度</text><text>{{ checkinProgress }}/7</text></view>
+      <view class="checkin-days">
+        <view class="checkin-day" wx:for="{{ checkinDays }}" wx:key="day">
+          <text class="checkin-day-label">{{ item.bonus ? 'BONUS' : 'DAY ' + item.day }}</text>
+          <view class="checkin-day-circle {{ item.done ? 'checkin-done' : (item.today ? 'checkin-today' : '') }} {{ item.bonus ? 'checkin-bonus' : '' }}">{{ item.done ? '✓' : (item.bonus ? '★' : item.day) }}</view>
+          <text class="checkin-day-caption">{{ item.done ? '已签' : (item.today ? '今天' : (item.bonus ? '+' + checkinBonus : '+' + checkinReward)) }}</text>
+        </view>
+      </view>
+      <text class="checkin-progress-tip">{{ checkedIn ? '今天已签到，明天继续保持。' : '完成今天的签到，奖励会立即计入余额。' }}</text>
+      <button class="checkin-claim" bindtap="onCheckIn" disabled="{{ checkedIn || checkinBusy }}" loading="{{ checkinBusy }}">{{ checkedIn ? '今日已签到' : '签到领取 ' + checkinReward + ' 光子' }}</button>
+    </view>
   </view>
 </view>

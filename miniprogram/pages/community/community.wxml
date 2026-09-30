@@ -102,6 +102,6 @@
   <!-- 底部装裱签条 -->
   <view class="salon-footer">
     <view class="footer-divider"></view>
-    <text class="footer-note">欢迎将您的重生之作投稿至沙龙 · 每期精选赠送 ✦50 光子</text>
+    <text class="footer-note">欢迎将您的重生之作投稿至沙龙 · 每期精选赠送 ✦{{ featuredReward }} 光子</text>
   </view>
 </view>

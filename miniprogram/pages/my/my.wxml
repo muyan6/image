@@ -1,19 +1,19 @@
 <view class="page-container">
   <!-- 1. 用户身份档案卡 (Artist Dossier Card) -->
-  <view class="user-card gallery-card">
+  <view class="user-card gallery-card" bindtap="onEditProfile">
     <view class="user-main">
       <view class="avatar-wrap">
         <image class="user-avatar" src="{{ avatarUrl || '/images/logo.jpg' }}" mode="aspectFill"></image>
       </view>
       <view class="user-info">
         <text class="user-name">{{ nickName || '微信用户' }}</text>
-        <view class="user-id-row" bindtap="onCopyUserId">
+        <view class="user-id-row" catchtap="onCopyUserId">
           <text class="user-id-text">ID {{ userId }}</text>
           <text class="user-copy-tag">复制</text>
         </view>
       </view>
     </view>
-    <view class="user-arrow" bindtap="onEditProfile">›</view>
+    <view class="user-arrow">›</view>
   </view>
 
   <!-- 2. 可用光子黑卡 (Studio Pass Black Card) -> 点击进入二级页面【光子中心】 -->
@@ -94,7 +94,7 @@
         wx:key="jobId"
         class="work-card gallery-card"
       >
-        <image class="work-thumb" src="{{ item.preview }}" mode="aspectFill"></image>
+        <image class="work-thumb" src="{{ item.preview }}" mode="aspectFill" binderror="onPreviewError" data-job-id="{{ item.jobId }}"></image>
         <view class="work-tag">
           <text>{{ item.quality === 'fine' ? '2K精细' : '1.5K' }}</text>
         </view>
@@ -136,10 +136,10 @@
     </view>
     <view class="menu-divider"></view>
 
-    <view class="menu-item" bindtap="onContactSupport">
+    <button class="menu-item menu-contact" open-type="contact" session-from="profile-feedback">
       <text class="menu-label">联系客服与反馈</text>
       <text class="menu-arrow">›</text>
-    </view>
+    </button>
     <view class="menu-divider"></view>
 
     <view class="menu-item menu-item-danger" bindtap="onClearStorage">
@@ -152,5 +152,18 @@
   <view class="dossier-footer">
     <text class="dossier-brand">废片新生所 · 典藏个人档案</text>
     <text class="dossier-ver">VERSION 2.4 · 艺术策展引擎</text>
+  </view>
+
+  <view class="profile-mask" wx:if="{{ showProfileEditor }}" bindtap="onCloseProfile">
+    <view class="profile-dialog" catchtap="true">
+      <text class="profile-title">设置展示昵称</text>
+      <text class="profile-desc">点击输入框可选择微信昵称，也可以自己填写。账号身份仍由微信静默登录维护。</text>
+      <input class="profile-input" type="nickname" maxlength="24" value="{{ profileDraft }}"
+        placeholder="请输入昵称" bindinput="onProfileInput" />
+      <view class="profile-actions">
+        <button bindtap="onCloseProfile">取消</button>
+        <button bindtap="onSaveProfile" loading="{{ profileSaving }}" disabled="{{ profileSaving }}">保存昵称</button>
+      </view>
+    </view>
   </view>
 </view>

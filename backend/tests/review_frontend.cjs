@@ -201,11 +201,57 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}) {
     const css=fs.readFileSync(path.join(ROOT,'miniprogram/pages/adjust/adjust.wxss'),'utf8');
     const {page}=loadPage('credits',{config:async()=>({free_mode:false}),me:async()=>({balance:100,earn:{}}),
       request:async()=>({generation_cost:40,payment_ready:false,packages:[{id:'points_600',yuan:6,points:600,generations:15}]})});
-    page.onLoad();await tick();await tick();
+    page.onLoad();page.onShow();await tick();await tick();
     return [page.data.costPerGeneration===40&&page.data.estimatedGenerations===2&&
       page.data.packages[0].points===600&&xml.includes('showViolationNotice')&&
       css.includes('.violation-mask')&&!xml.includes('class="feedback-sheet"'),
       {cost:page.data.costPerGeneration,images:page.data.estimatedGenerations,custom_dialog:true}];
+  });
+
+  await test('checkin_calendar_and_customer_service_are_real_actions',async()=>{
+    let claims=0;
+    const {page}=loadPage('credits',{request:async()=>({packages:[],generation_cost:40}),
+      config:async()=>({free_mode:false,rewards:{checkin:10,checkin_seventh_bonus:30,invite:40}}),
+      me:async()=>({balance:100,earn:{checkin_done:false,checkin_streak:6,checkin_progress:6,checkin_day:7}}),
+      earn:async()=>{claims++;return {balance:140,reward:40,checkin_streak:7,checkin_progress:7};}});
+    page.onShow();await tick();await tick();page.onOpenCheckin();page.onCheckIn();await tick();await tick();
+    const creditsXml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/credits/credits.wxml'),'utf8');
+    const myXml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/my/my.wxml'),'utf8');
+    const adjustXml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/adjust/adjust.wxml'),'utf8');
+    return [claims===1&&page.data.checkinDays.length===7&&page.data.checkedIn&&
+      creditsXml.includes('onOpenCheckin')&&myXml.includes('open-type="contact"')&&
+      adjustXml.includes('open-type="contact"'),{claims,days:page.data.checkinDays.length,contact:true}];
+  });
+
+  await test('downloaded_result_is_reused_in_session_media_cache',async()=>{
+    const app=appFixture();
+    const api=apiModule({downloadFile:o=>o.success({statusCode:200,tempFilePath:'wxfile://cached-result.jpg'}),
+      getImageInfo:o=>o.success({width:90,height:160})},app);
+    const path=await api.downloadJobMedia('abcdef123456','result','https://cos.invalid/result.jpg');
+    return [path==='wxfile://cached-result.jpg'&&
+      app.globalData.mediaCache['abcdef123456'].result===path,{cached:path}];
+  });
+
+  await test('works_reentry_reuses_thumbnail_and_skips_duplicate_fetch',async()=>{
+    let calls=0;
+    const app=appFixture([{jobId:'id1',result:'https://cos.invalid/old',preview:'https://cos.invalid/old',status:'succeeded'}]);
+    const {page}=loadPage('works',{myJobs:async()=>{calls++;return {jobs:[{id:'id1',status:'succeeded',result_url:'https://cos.invalid/new'}]};},
+      absolute:x=>x,isJobCosUrl:x=>x.startsWith('https://cos.invalid/')},app);
+    page.onShow();await tick();await tick();const first=page.data.works[0].preview;
+    page.onShow();await tick();
+    return [calls===1&&first==='https://cos.invalid/old'&&page.data.works[0].preview===first,
+      {calls,preview:first}];
+  });
+
+  await test('nickname_requires_user_input_and_persists_server_reply',async()=>{
+    const {page}=loadPage('my',{config:async()=>({free_mode:false,ads:{},prices:{light:40,fine:40}}),
+      myJobs:async()=>({jobs:[]}),me:async()=>({user_id:'WX-0123456789ABCDEF',balance:100,nickname:'小山',earn:{}}),
+      updateProfile:async(name)=>({nickname:name})});
+    page.onShow();await tick();await tick();page.onEditProfile();
+    page.onProfileInput({detail:{value:'阿星'}});await page.onSaveProfile();
+    const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/my/my.wxml'),'utf8');
+    return [page.data.nickName==='阿星'&&!page.data.showProfileEditor&&xml.includes('type="nickname"'),
+      {nickname:page.data.nickName,user_action:true}];
   });
 
   await test('works_repair_old_server_media_without_loading_photo_bytes_from_api',async()=>{

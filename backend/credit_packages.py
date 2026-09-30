@@ -11,8 +11,8 @@ PACKAGES = (
 )
 
 
-def public_packages():
+def public_packages(generation_cost: int = GENERATION_COST):
     return [{**item, "price_text": "¥%d" % item["yuan"],
-             "generations": item["points"] // GENERATION_COST,
+             "generations": item["points"] // generation_cost if generation_cost > 0 else 0,
              "bonus_text": "多送 %d 光子" % item["bonus"] if item["bonus"] else "标准 1 元 = 100 光子"}
             for item in PACKAGES]

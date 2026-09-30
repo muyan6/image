@@ -4,10 +4,10 @@
     <text class="card-eyebrow">INVITE REWARDS · 典藏奖励</text>
     <view class="reward-num-row">
       <text class="reward-plus">✦</text>
-      <text class="reward-number">30</text>
+      <text class="reward-number">{{ inviteReward }}</text>
       <text class="reward-unit">光子 / 位</text>
     </view>
-    <text class="reward-sub">好友填写你的邀请码即生效：你获得 30 光子，对方也获赠 30 光子（每人限参与一次）。</text>
+    <text class="reward-sub">好友填写你的邀请码即生效：你和对方各获 {{ inviteReward }} 光子（每人限参与一次）。</text>
 
     <view class="code-pill" bindtap="onCopyCode">
       <text class="code-text">{{ inviteCode || (inviteError ? '邀请码获取失败' : '正在获取邀请码') }}</text>
@@ -25,7 +25,7 @@
     </view>
   </view>
 
-  <text class="rule-hint">每位新用户仅可绑定一次邀请码；绑定成功后双方各获 30 光子。</text>
+  <text class="rule-hint">每位新用户仅可绑定一次邀请码；绑定成功后双方各获 {{ inviteReward }} 光子。</text>
 
   <!-- 5. 底部固定主行动按钮 -->
   <view class="bottom-action-bar">
