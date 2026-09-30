@@ -47,6 +47,8 @@ from admin_api import ensure_admin_password, make_admin_router
 from cleanup_store import CleanupStore
 from community_store import CommunityStore
 from template_output import select_template_output
+from image_processing import IMAGE_LOCK, image_limited, upload_limited, normalization_rule, BoundedExecutor, QueueFull
+from cos_store import process_image as cos_process_image
 from credit_packages import GENERATION_COST, POINTS_PER_YUAN, public_packages
 from cos_store import (CosError, get_object as cos_get,
                        head_exists as cos_head, presign as cos_presign,
@@ -159,6 +161,7 @@ EARN_DEFS: Dict[str, Dict[str, Any]] = {
 
 # 线程池：cv2 / 网络 IO 都会阻塞，别占住事件循环
 WORKERS = int(os.environ.get("WORKERS", 4))
+MAX_QUEUED_JOBS = max(0,int(os.environ.get("MAX_QUEUED_JOBS",32)))
 
 # CORS：默认只放行本机与微信开发者工具常用来源。
 # 需要放开时用环境变量覆盖，逗号分隔；填 * 表示全放行（但不带 cookie）。
@@ -297,15 +300,16 @@ def _get_client(name: str):
     conf = settings.provider(name)
     fp = _fingerprint(conf)
     with _clients_lock:
-        cached = _clients.get(name)
+        cache_key = (name, threading.get_ident())
+        cached = _clients.get(cache_key)
         if cached is not None and cached[0] == fp:
             return cached[1]
         client = _build_client(name, conf)
-        _clients[name] = (fp, client)
+        _clients[cache_key] = (fp, client)
         return client
 
 
-pool = ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="rescue")
+pool = BoundedExecutor(WORKERS,MAX_QUEUED_JOBS)
 
 
 # --------------------------------------------------------------------------- #
@@ -564,16 +568,16 @@ def _register_job(openid: str, quality: str, style: str,
         # 若指定了非原图画幅比例裁剪，原图同步按相同画幅居中裁剪，
         # 保证原画与重构图画幅、构图与像素级视差 100% 对齐（彻底消除对比滑块错位重影问题）
         ar = str(aspect_ratio).strip().lower()
-        if ar and ar not in ("original", "auto", "none", ""):
+        if ar and ar not in ("original", "auto", "none", "") and not (settings.cos_ready() and settings.snapshot()['processing']['ci_enabled']):
             try:
                 import cv2
-                _img = cv2.imread(orig_path, cv2.IMREAD_COLOR)
-                if _img is not None:
-                    _cropped = _crop_aspect_ratio(_img, ar)
-                    _target_ext = ext if ext.lower() in (".jpg", ".jpeg", ".png") else ".jpg"
-                    _ok, _buf = cv2.imencode(_target_ext, _cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-                    if _ok:
-                        _buf.tofile(orig_path)
+                with IMAGE_LOCK:
+                    _img = cv2.imread(orig_path, cv2.IMREAD_COLOR)
+                    if _img is not None:
+                        _cropped = _crop_aspect_ratio(_img, ar)
+                        _target_ext = ext if ext.lower() in (".jpg", ".jpeg", ".png") else ".jpg"
+                        _ok, _buf = cv2.imencode(_target_ext, _cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+                        if _ok:_buf.tofile(orig_path)
             except Exception as _exc:
                 log.warning("[%s] 原图居中裁剪同步失败: %s", job_id, _exc)
 
@@ -622,7 +626,7 @@ def _register_job(openid: str, quality: str, style: str,
             cleanup.schedule("cos", orig_cos, time.time() + ORIGINAL_TTL_SECONDS)
         pool.submit(_run_pipeline, job_id, quality, style,
                     copy_template(template), dict(text_values or {}), aspect_ratio, custom_prompt)
-    except Exception:
+    except Exception as exc:
         users.refund_job(openid, job_id, cancel=True)
         existing = jobs.get(job_id)
         if existing:
@@ -632,6 +636,7 @@ def _register_job(openid: str, quality: str, style: str,
             _safe_remove(orig_path)
             if orig_cos:
                 cleanup.schedule("cos", orig_cos, time.time())
+        if isinstance(exc,QueueFull):raise HTTPException(status_code=429,detail=str(exc)) from exc
         raise
     jobs.sweep()
     current = jobs.get(job_id)
@@ -940,12 +945,12 @@ def _cleanup_job_files(evicted_jobs: List[Dict[str, Any]]) -> None:
             continue
         if job.get("status") == "processing":
             users.refund_job(job.get("openid", ""), job["id"])
-        for field in ("orig_file", "result_file"):
+        for field in ("orig_file", "result_file", "comparison_file"):
             name = job.get(field)
             if name:
                 cleanup.schedule("local", name, time.time())
                 _safe_remove(os.path.join(UPLOAD_DIR, name))
-        for field in ("orig_cos", "result_cos", "norm_cos"):
+        for field in ("orig_cos", "result_cos", "norm_cos", "comparison_cos"):
             if job.get(field):
                 cleanup.schedule("cos", job[field], time.time())
 
@@ -961,7 +966,7 @@ def _startup_file_gc() -> None:
             continue
         if base.startswith(("incoming_", "tmp_", "norm_", "orig_")):
             ttl = ORIGINAL_TTL_SECONDS
-        elif base.startswith("result_"):
+        elif base.startswith(("result_", "compare_")):
             ttl = JOB_TTL_SECONDS
         else:
             continue
@@ -976,8 +981,9 @@ def _startup_file_gc() -> None:
         orig_due = float(job.get("created_at") or now) + ORIGINAL_TTL_SECONDS
         result_due = float(job.get("completed_at") or job.get("created_at") or now) + JOB_TTL_SECONDS
         for kind, field, due in (("local", "orig_file", orig_due), ("cos", "orig_cos", orig_due),
-                                 ("cos", "norm_cos", orig_due), ("local", "result_file", result_due),
-                                 ("cos", "result_cos", result_due)):
+                                 ("cos", "norm_cos", result_due if job.get('comparison_cos')==job.get('norm_cos') else orig_due),
+                                 ("local", "comparison_file", result_due), ("cos", "comparison_cos", result_due),
+                                 ("local", "result_file", result_due), ("cos", "result_cos", result_due)):
             if job.get(field):
                 cleanup.schedule(kind, job[field], time.time() if field.startswith("result_") and job.get("status") == "failed" else due)
 
@@ -1020,6 +1026,7 @@ def _resolve_upload(filename: str) -> str:
     return path
 
 
+@image_limited
 def _validate_image(path: str) -> None:
     """确认落盘的是真图片，并检查像素规模。"""
     import cv2  # 延迟导入，加快启动
@@ -1042,6 +1049,7 @@ def _validate_image(path: str) -> None:
         raise HTTPException(status_code=400, detail="无法识别的图片格式")
 
 
+@image_limited
 def _validate_output(path: str) -> Tuple[int, int]:
     _validate_image(path)
     import cv2
@@ -1052,6 +1060,7 @@ def _validate_output(path: str) -> Tuple[int, int]:
     return w, h
 
 
+@image_limited
 def _normalize_long_side(src: str, dst: str, target: int = 0,
                          aspect_ratio: str = "") -> str:
     """把长边缩放到 target，支持指定画幅比例居中裁剪，输出 JPEG q95。
@@ -1089,7 +1098,7 @@ def _normalize_long_side(src: str, dst: str, target: int = 0,
 
 def _media_expires_at(job: Dict[str, Any], kind: str) -> float:
     origin = float(job.get("created_at") or 0)
-    return origin + ORIGINAL_TTL_SECONDS if kind == "orig" else \
+    return origin + ORIGINAL_TTL_SECONDS if kind == "orig" and not (job.get('comparison_cos') or job.get('comparison_file')) else \
         float(job.get("completed_at") or origin) + JOB_TTL_SECONDS
 
 
@@ -1107,12 +1116,13 @@ def _job_media_url(job: Dict[str, Any], kind: str) -> Optional[str]:
     ttl = min(MEDIA_URL_TTL_SECONDS, int(_media_expires_at(job, kind) - time.time()))
     if ttl <= 0:
         return None
-    if job.get(kind + "_cos") and settings.cos_ready():
+    prefix='comparison' if kind=='orig' and (job.get('comparison_cos') or job.get('comparison_file')) else kind
+    if job.get(prefix + "_cos") and settings.cos_ready():
         try:
-            return cos_presign(settings, "get", job[kind + "_cos"], ttl_seconds=ttl)
+            return cos_presign(settings, "get", job[prefix + "_cos"], ttl_seconds=ttl)
         except CosError:
             pass
-    filename = job.get(kind + "_file")
+    filename = job.get(prefix + "_file")
     if not filename:
         return None
     expiry = int(time.time()) + ttl
@@ -1141,6 +1151,9 @@ def _run_pipeline(job_id: str, quality: str, style: str,
     job = jobs.get(job_id)
     if job is None or job.get("deleted_at") or job.get("status") != "processing":
         return
+    clock_started=time.monotonic()
+    timings={"queue_ms":max(0,round((time.time()-float(job.get("created_at") or time.time()))*1000))}
+    jobs.update(job_id,started_at=time.time(),stage="normalize")
 
     src = os.path.join(UPLOAD_DIR, job["orig_file"])
     out = os.path.join(UPLOAD_DIR, job["result_file"])
@@ -1155,23 +1168,46 @@ def _run_pipeline(job_id: str, quality: str, style: str,
         aspect_ratio = ""
     try:
         # --- 1. 归一化（包含画幅裁剪）---
-        _normalize_long_side(src, norm, target=settings.normalize_long_side(),
-                             aspect_ratio=aspect_ratio)
+        phase=time.monotonic()
+        cloud_key=None
+        if settings.cos_ready() and job.get('orig_cos') and settings.snapshot()['processing']['ci_enabled']:
+            from PIL import Image
+            with Image.open(src) as image:
+                width,height=image.size
+                if image.getexif().get(274) in (6,8):width,height=height,width
+            cloud_key='comparisons/%s/%s.jpg'%((job.get('openid') or 'anon')[:8],job_id)
+            cleanup.schedule('cos',cloud_key,time.time()+2*JOB_TTL_SECONDS)
+            jobs.update(job_id,comparison_cos=cloud_key)
+            cos_process_image(settings,job['orig_cos'],cloud_key,
+                normalization_rule(width,height,settings.normalize_long_side(),aspect_ratio))
+            with open(norm,'wb') as fh:fh.write(cos_get(settings,cloud_key,max_bytes=MAX_UPLOAD_BYTES))
+            _validate_output(norm)
+        else:
+            _normalize_long_side(src,norm,target=settings.normalize_long_side(),aspect_ratio=aspect_ratio)
+        compare_file='compare_%s.jpg'%job_id
+        shutil.copyfile(norm,os.path.join(UPLOAD_DIR,compare_file))
+        jobs.update(job_id,comparison_file=compare_file,comparison_cos=cloud_key,
+                    processing_mode='ci' if cloud_key else 'local_serial')
+        cleanup.schedule('local',compare_file,time.time()+2*JOB_TTL_SECONDS)
+        timings['normalize_ms']=round((time.monotonic()-phase)*1000)
         jobs.update(job_id, stage="enhance")
 
         # 归一化图上传 COS 并生成签名直链：让网关自己来拉，
         # 服务器→供应商的公网出方向流量归零（同地域内网上传免费）
         gateway_url = None
-        if settings.cos_ready():
+        if cloud_key:
+            gateway_url=cos_presign(settings,'get',cloud_key,ttl_seconds=3600)
+            jobs.update(job_id,norm_cos=cloud_key)
+        elif settings.cos_ready():
             try:
                 norm_key = "norms/%s/%s.jpg" % ((job.get("openid") or "anon")[:8],
                                                 job_id)
-                cleanup.schedule("cos", norm_key, time.time() + ORIGINAL_TTL_SECONDS)
+                cleanup.schedule("cos", norm_key, time.time() + 2*JOB_TTL_SECONDS)
                 with open(norm, "rb") as fh:
                     cos_put(settings, norm_key, fh.read())
                 gateway_url = cos_presign(settings, "get", norm_key,
                                           ttl_seconds=3600)
-                jobs.update(job_id, norm_cos=norm_key)
+                jobs.update(job_id,norm_cos=norm_key,comparison_cos=norm_key)
                 log.info("[%s] URL 直连就绪：%s", job_id, norm_key)
             except CosError as exc:
                 log.warning("[%s] 归一化图传 COS 失败，回退 multipart: %s",
@@ -1189,6 +1225,7 @@ def _run_pipeline(job_id: str, quality: str, style: str,
         # 自定义要求必须由支持提示词的编辑引擎处理，不能静默退化为忽略要求的超分/本地引擎。
         requires_prompt = bool((custom_prompt and not template) or template.get("requires_prompt"))
         chain = ["worldcodes"] if requires_prompt else settings.chain()
+        phase=time.monotonic()
         for name in chain:
             if enhanced:
                 break
@@ -1241,29 +1278,31 @@ def _run_pipeline(job_id: str, quality: str, style: str,
             log.info("[%s] 外部链路全部失败，走本地引擎（quality=%s, style=%s）",
                      job_id, quality, style)
             # 前面已经归一化过，这里关掉 2K 上采样，避免把 1536 插值回 2000
-            engine.process(norm, tmp, quality=quality, upscale_2k=False,
-                           style=style)
+            with IMAGE_LOCK:engine.process(norm,tmp,quality=quality,upscale_2k=False,style=style)
             provider_used = "local"
 
+        timings['provider_ms']=round((time.monotonic()-phase)*1000)
+        phase=time.monotonic()
         current = jobs.get(job_id)
         if not current or current.get("deleted_at"):
             raise RuntimeError("作品已删除，停止交付")
 
         # --- 3.5 几何画幅守恒：校验模型生成图与输入图比例，若有偏差做居中对齐，杜绝对比滑块双图错位 ---
         try:
-            import cv2
-            _n_img = cv2.imread(norm)
-            _t_img = cv2.imread(tmp)
-            if not template and _n_img is not None and _t_img is not None:
-                nh, nw = _n_img.shape[:2]
-                th, tw = _t_img.shape[:2]
-                norm_ratio = nw / float(nh) if nh > 0 else 1.0
-                tmp_ratio = tw / float(th) if th > 0 else 1.0
-                if abs(norm_ratio - tmp_ratio) > 0.015:
-                    log.info("[%s] 模型生成画幅(%.3f)与输入(%.3f)存在偏差，自动进行像素级居中对齐",
-                             job_id, tmp_ratio, norm_ratio)
-                    _t_cropped = _crop_aspect_ratio(_t_img, "%d:%d" % (nw, nh))
-                    cv2.imwrite(tmp, _t_cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+            with IMAGE_LOCK:
+                import cv2
+                _n_img = cv2.imread(norm)
+                _t_img = cv2.imread(tmp)
+                if not template and _n_img is not None and _t_img is not None:
+                    nh, nw = _n_img.shape[:2]
+                    th, tw = _t_img.shape[:2]
+                    norm_ratio = nw / float(nh) if nh > 0 else 1.0
+                    tmp_ratio = tw / float(th) if th > 0 else 1.0
+                    if abs(norm_ratio - tmp_ratio) > 0.015:
+                        log.info("[%s] 模型生成画幅(%.3f)与输入(%.3f)存在偏差，自动进行像素级居中对齐",
+                                 job_id, tmp_ratio, norm_ratio)
+                        _t_cropped = _crop_aspect_ratio(_t_img, "%d:%d" % (nw, nh))
+                        cv2.imwrite(tmp, _t_cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
         except Exception as _ar_exc:
             log.warning("[%s] 画幅几何对齐检查异常: %s", job_id, _ar_exc)
 
@@ -1279,7 +1318,7 @@ def _run_pipeline(job_id: str, quality: str, style: str,
             merged = collect_values(spec, text_values or {})
             if merged:
                 layout = str(template.get("layout") or "postcard_bottom")
-                apply_text_overlay(tmp, tmp, layout, spec, merged)
+                with IMAGE_LOCK:apply_text_overlay(tmp,tmp,layout,spec,merged)
                 log.info("[%s] 文字排版完成（%s，%d 项）",
                          job_id, layout, len(merged))
 
@@ -1303,6 +1342,8 @@ def _run_pipeline(job_id: str, quality: str, style: str,
         current = jobs.get(job_id)
         if not current or current.get("deleted_at"):
             raise RuntimeError("作品已删除，停止交付")
+        timings['finalize_ms']=round((time.monotonic()-phase)*1000)
+        phase=time.monotonic()
         result_key = job.get("result_cos")
         if settings.cos_ready() and not result_key:
             result_key = "results/%s/%s.jpg" % (job["openid"][:8], job_id)
@@ -1327,7 +1368,9 @@ def _run_pipeline(job_id: str, quality: str, style: str,
                     if attempt:
                         raise CosError("结果保存到 COS 失败，请重试；本次光子将退回", code="RESULT_STORAGE_FAILED") from exc
                     log.warning("[%s] 结果存储失败，重试一次: %s", job_id, exc)
-        jobs.update(job_id, status="succeeded", stage="done",
+        timings['storage_ms']=round((time.monotonic()-phase)*1000)
+        timings['processing_ms']=round((time.monotonic()-clock_started)*1000)
+        jobs.update(job_id, status="succeeded", stage="done",timings=timings,
                     provider=provider_used, completed_at=time.time(), width=width, height=height)
         current = jobs.get(job_id)
         if not current or current.get("deleted_at"):
@@ -1336,19 +1379,26 @@ def _run_pipeline(job_id: str, quality: str, style: str,
         cleanup.schedule("local", job["result_file"], current["completed_at"] + JOB_TTL_SECONDS)
         if current.get("result_cos"):
             cleanup.schedule("cos", current["result_cos"], current["completed_at"] + JOB_TTL_SECONDS)
+        cleanup.schedule('local',compare_file,current['completed_at']+JOB_TTL_SECONDS)
+        if current.get('comparison_cos'):cleanup.schedule('cos',current['comparison_cos'],current['completed_at']+JOB_TTL_SECONDS)
         users.audit(job.get("openid", ""), "completed", "job=%s" % job_id)
         log.info("[%s] 任务完成 -> %s", job_id, os.path.basename(out))
 
     except Exception as exc:  # noqa: BLE001
         log.exception("[%s] 处理失败（stage=%s）", job_id, stage)
         try:
-            jobs.update(job_id, status="failed", error=str(exc)[:500], stage=stage)
+            timings['processing_ms']=round((time.monotonic()-clock_started)*1000)
+            jobs.update(job_id, status="failed", error=str(exc)[:500], stage=stage,timings=timings)
         finally:
             _refund_charged(job.get("openid", ""), job_id,
                             int(job.get("price") or 0))
             _safe_remove(out)
             if job.get("result_cos"):
                 cleanup.schedule("cos", job["result_cos"], time.time())
+            failed=jobs.get(job_id) or {}
+            for field in ('comparison_cos','norm_cos'):
+                if failed.get(field):cleanup.schedule('cos',failed[field],time.time())
+            if failed.get('comparison_file'):_safe_remove(os.path.join(UPLOAD_DIR,failed['comparison_file']))
     finally:
         current = jobs.get(job_id)
         if current and current.get("deleted_at"):
@@ -1361,6 +1411,7 @@ def _run_pipeline(job_id: str, quality: str, style: str,
                 pass
 
 
+@image_limited
 def _finalize(src: str, dst: str) -> None:
     """把结果统一成 JPEG 输出。
 
@@ -1388,6 +1439,7 @@ def _finalize(src: str, dst: str) -> None:
     buf.tofile(dst)
 
 
+@image_limited
 def _resize_long_side(path: str, dst: str, target: int) -> None:
     """把图片长边统一到 target（印刷级模板用）。
 
@@ -1469,6 +1521,7 @@ def health() -> Dict[str, Any]:
     return {
         "ok": True,
         "source_revision": SOURCE_REVISION,
+        "generation_queue": pool.snapshot(),
         "gateway": gateway_ok,
         "fal": fal_conf,
         "baidu": baidu_conf,
@@ -1505,6 +1558,7 @@ def public_config() -> Dict[str, Any]:
         "free_mode": settings.free_mode(),
         "cos_ready": settings.cos_ready(),
         "template_output_modes": ["template", "single"],
+        "image_processing": {"ci_enabled":settings.snapshot()["processing"]["ci_enabled"],"local_image_parallelism":1},
         "maintenance": settings.maintenance(),
         "styles": settings.styles(),
         # 社区（灵感沙龙）：enabled=False 时小程序端隐藏 tab 与入口
@@ -2031,6 +2085,7 @@ def _chosen_quality(req_q: str, tpl_quality: str) -> str:
 
 
 @app.post("/api/rescue")
+@upload_limited
 def create_rescue_job(
     request: Request,
     image: UploadFile = File(...),
@@ -2120,6 +2175,7 @@ def create_rescue_job(
 
 
 @app.post("/api/rescue/by-upload")
+@upload_limited
 def create_rescue_job_by_upload(payload: _RescueByUploadBody,
                                 request: Request):
     """COS 直传路径：JSON {upload_id, quality, style, template_id, text_fields, aspect_ratio}，
@@ -2200,6 +2256,10 @@ def query_job_status(job_id: str, request: Request):
         "template_id": job.get("template_id", ""),
         "template_name": job.get("template_name", ""),
         "template_output_mode": job.get("template_output_mode", "template" if job.get("template_id") else ""),
+        "comparison_compressed":bool(job.get("comparison_file") or job.get("comparison_cos")),
+        "timings":job.get("timings",{}),
+        "started_at":job.get("started_at"),
+        "completed_at":job.get("completed_at"),
         "price": job.get("price"),
         "provider": job.get("provider"),
         "width": job.get("width"),
@@ -2237,17 +2297,18 @@ def refresh_job_media(job_id: str, request: Request, kind: str = "result"):
             raise HTTPException(status_code=410, detail="原图已到保存期限" if kind == "orig" else "作品已到保存期限")
         if not settings.cos_ready():
             raise HTTPException(status_code=503, detail="COS 尚未配置完整")
-        key = job.get(kind + "_cos")
+        prefix="comparison" if kind=="orig" and (job.get("comparison_cos") or job.get("comparison_file")) else kind
+        key = job.get(prefix + "_cos")
         if key and cos_head(settings, key):
             return {"url": _job_media_url(job, kind), "recovered": False}
-        filename = job.get(kind + "_file")
+        filename = job.get(prefix + "_file")
         path = _resolve_upload(filename) if filename else ""
         if not path or not os.path.isfile(path):
             raise HTTPException(status_code=404, detail="COS 结果缺失，服务器本地副本也不存在" if kind == "result" else "原图文件已缺失")
         # 新对象键避开旧键可能遗留的立即删除队列；不延长原有保存期限。
         ext = os.path.splitext(filename)[1]
-        prefix = "results" if kind == "result" else "origins"
-        recovered_key = "%s/%s/%s_recovered_%s%s" % (prefix, user["openid"][:8], job_id, uuid.uuid4().hex[:8], ext)
+        object_prefix = "results" if kind == "result" else ("comparisons" if prefix=='comparison' else "origins")
+        recovered_key = "%s/%s/%s_recovered_%s%s" % (object_prefix, user["openid"][:8], job_id, uuid.uuid4().hex[:8], ext)
         expires = _media_expires_at(job, kind)
         cleanup.schedule("cos", recovered_key, expires)
         try:
@@ -2262,7 +2323,7 @@ def refresh_job_media(job_id: str, request: Request, kind: str = "result"):
         if not current or current.get("deleted_at") or time.time() >= expires:
             cleanup.schedule("cos", recovered_key, time.time())
             raise HTTPException(status_code=410, detail="作品已删除或到期")
-        jobs.update(job_id, **{kind + "_cos": recovered_key})
+        jobs.update(job_id, **{prefix + "_cos": recovered_key})
         return {"url": _job_media_url(jobs.get(job_id), kind), "recovered": True}
 
 
@@ -2320,14 +2381,16 @@ def delete_all_my_jobs(request: Request):
 @app.get("/api/images/{filename}")
 def get_image(filename: str, request: Request) -> FileResponse:
     path = _resolve_upload(filename)
-    match = re.fullmatch(r"(orig|result)_([0-9a-f]{6,32})[.][A-Za-z0-9]+", filename)
+    match = re.fullmatch(r"(orig|result|compare)_([0-9a-f]{6,32})[.][A-Za-z0-9]+", filename)
     job = jobs.get(match[2]) if match else None
-    if not job or job.get("deleted_at") or filename != job.get(match[1] + "_file"):
+    prefix='comparison' if match and match[1]=='compare' else (match[1] if match else '')
+    if not job or job.get("deleted_at") or filename != job.get(prefix + "_file"):
         raise HTTPException(status_code=404, detail="图片不存在")
     kind = match[1]
     if kind == "result" and job.get("status") != "succeeded":
         raise HTTPException(status_code=404, detail="图片尚未完成")
-    if time.time() >= _media_expires_at(job, kind) or not os.path.isfile(path):
+    expires=(float(job.get('created_at') or 0)+ORIGINAL_TTL_SECONDS) if kind=='orig' else _media_expires_at(job,'result')
+    if time.time() >= expires or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="图片已过期或不存在")
     token = bearer_of({k.lower(): v for k, v in request.headers.items()})
     owner = verify_user_token(token) if token else None

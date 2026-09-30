@@ -14,7 +14,8 @@ Page({
 
   onShow() {
     this._visible = true;
-    this._pollDeadline = Date.now() + 5 * 60 * 1000;
+    this._pollDeadline = Date.now() + 30 * 60 * 1000;
+    this._pollStartedAt = Date.now();
     return this.loadWorks().finally(() => this.schedulePendingRefresh());
   },
 
@@ -41,7 +42,7 @@ Page({
       if (!this._visible) return;
       await this.refreshPendingWorks();
       this.schedulePendingRefresh();
-    }, 3000);
+    }, Date.now() - this._pollStartedAt > 60000 ? 10000 : 3000);
   },
 
   async onPullDownRefresh() {

@@ -315,6 +315,7 @@ async function waitForJob(jobId, options) {
   const timeout = opts.timeout || POLL_TIMEOUT;
   const deadline = Date.now() + timeout;
   let lastStatus = null;
+  let delay = interval;
 
   while (Date.now() < deadline) {
     if (opts.isCanceled && opts.isCanceled()) {
@@ -324,11 +325,12 @@ async function waitForJob(jobId, options) {
     }
     try {
       const job = await request('/api/jobs/' + jobId);
+      delay = job.stage === 'queued' ? Math.max(5000, interval) : interval;
       if (opts.isCanceled && opts.isCanceled()) {
         const err = new Error('任务已转入后台'); err.code = 'USER_BACKGROUND'; throw err;
       }
-      if (job.status !== lastStatus) {
-        lastStatus = job.status;
+      if (job.status + ':' + job.stage !== lastStatus) {
+        lastStatus = job.status + ':' + job.stage;
         if (opts.onTick) opts.onTick(job);
       }
       if (job.status === 'succeeded') return job;
@@ -353,7 +355,7 @@ async function waitForJob(jobId, options) {
         throw err;
       }
     }
-    await sleep(interval);
+    await sleep(delay);
   }
 
   const err = new Error('处理超时，请稍后在历史记录中查看');

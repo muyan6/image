@@ -20,6 +20,8 @@ import hashlib
 import hmac
 import logging
 import time
+import json
+from urllib.parse import quote
 from typing import Any, Dict, Optional
 
 import requests
@@ -66,7 +68,8 @@ def _sign_key(conf: Dict[str, str], key_time: str) -> str:
 
 
 def presign(settings: SettingsStore, method: str, key: str,
-            ttl_seconds: int = 3600, internal: bool = False) -> str:
+            ttl_seconds: int = 3600, internal: bool = False,
+            params: Optional[Dict[str, str]] = None, headers: Optional[Dict[str, str]] = None) -> str:
     """生成预签名 URL。method: put / get / head / delete（小写）。"""
     conf = _conf(settings)
     now = int(time.time())
@@ -74,7 +77,12 @@ def presign(settings: SettingsStore, method: str, key: str,
     sign_key = _sign_key(conf, key_time)
 
     uri = "/" + key.lstrip("/")
-    http_string = "%s\n%s\n%s\n%s\n" % (method.lower(), uri, "", "")
+    def canonical(values):
+        pairs=sorted((quote(str(k),safe='').lower(),quote(str(v),safe='')) for k,v in (values or {}).items())
+        return '&'.join(k+'='+v for k,v in pairs),';'.join(k for k,v in pairs)
+    query_values,query_keys=canonical(params)
+    header_values,header_keys=canonical({k.lower():v for k,v in (headers or {}).items()})
+    http_string = "%s\n%s\n%s\n%s\n" % (method.lower(), uri, query_values, header_values)
     string_to_sign = "sha1\n%s\n%s\n" % (
         key_time, hashlib.sha1(http_string.encode("utf-8")).hexdigest())
     signature = hmac.new(sign_key.encode("utf-8"), string_to_sign.encode("utf-8"),
@@ -82,9 +90,28 @@ def presign(settings: SettingsStore, method: str, key: str,
 
     query = (
         "q-sign-algorithm=sha1&q-ak={ak}&q-sign-time={kt}&q-key-time={kt}"
-        "&q-header-list=&q-url-param-list=&q-signature={sig}".format(
-            ak=conf["secret_id"], kt=key_time, sig=signature))
+        "&q-header-list={hk}&q-url-param-list={qk}&q-signature={sig}".format(
+            ak=conf["secret_id"], kt=key_time, sig=signature,
+            hk=quote(header_keys,safe=''),qk=quote(query_keys,safe='')))
+    if params:
+        query+='&'+'&'.join(quote(str(k),safe='')+'='+quote(str(v),safe='') for k,v in params.items())
     return "https://%s%s?%s" % (_host(conf, internal=internal), uri, query)
+
+
+def process_image(settings: SettingsStore, source: str, target: str, rule: str) -> None:
+    """CI basic processing persists a separate object; source is never overwritten."""
+    if source == target:
+        raise ValueError("Processed object must have a separate key")
+    operations=json.dumps({'is_pic_info':1,'rules':[{'fileid':quote(target,safe='/'),'rule':rule}]},separators=(',',':'))
+    headers={'Pic-Operations':operations}
+    for internal in (True,False):
+        try:
+            response=requests.post(presign(settings,'post',source,internal=internal,
+                params={'image_process':''},headers=headers),headers=headers,data=b'',timeout=(5,30))
+            if response.status_code==200 and head_exists(settings,target):return
+            if not internal:raise CosError('CI 基础图片处理失败 HTTP %s'%response.status_code,code='CI_PROCESSING_FAILED')
+        except requests.RequestException as exc:
+            if not internal:raise CosError('CI 基础图片处理请求失败',code='CI_PROCESSING_FAILED') from exc
 
 
 def put_object(settings: SettingsStore, key: str, data: bytes,

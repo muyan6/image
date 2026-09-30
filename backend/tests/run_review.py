@@ -51,6 +51,9 @@ if not args.legacy and deployment_test.exists():
 template_output_test = Path(__file__).with_name('test_template_output.py')
 if not args.legacy and template_output_test.exists():
     commands.append(['python', '-u', template_output_test.as_posix()])
+ci_test = Path(__file__).with_name('test_ci_performance.py')
+if not args.legacy and ci_test.exists():
+    commands.append(['python', '-u', ci_test.as_posix()])
 executions = []
 for command in commands:
     result = subprocess.run(command, cwd=source, env=environment, capture_output=True, text=True, encoding='utf-8')
@@ -77,6 +80,8 @@ if not args.legacy and deployment_test.exists():
     rows.extend(json.loads((output / 'deployment_results.json').read_text(encoding='utf-8'))['cases'])
 if not args.legacy and template_output_test.exists():
     rows.extend(json.loads((output / 'template_output_results.json').read_text(encoding='utf-8'))['cases'])
+if not args.legacy and ci_test.exists():
+    rows.extend(json.loads((output / 'ci_performance_results.json').read_text(encoding='utf-8'))['cases'])
 errors = [r for r in rows if 'harness_error' in r]
 failed = sum(not r['passed'] for r in rows)
 summary = {'total': len(rows), 'passed': len(rows) - failed, 'failed': failed, 'harness_errors': len(errors)}

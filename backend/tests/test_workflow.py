@@ -30,7 +30,7 @@ initial_connections = [m.users._conn, m.jobs._conn, m.cleanup._conn]
 class WorkflowTests(unittest.TestCase):
     def setUp(self):
         self.d=base/self._testMethodName;self.d.mkdir()
-        m.settings=SettingsStore(str(self.d));m.users=UserStore(str(self.d))
+        m.settings=SettingsStore(str(self.d));m.settings.update({'processing':{'ci_enabled':False}});m.users=UserStore(str(self.d))
         m.jobs=m.JobStore(2592000,5000,db_path=str(self.d/'jobs.db'))
         m.cleanup=CleanupStore(str(self.d),m.UPLOAD_DIR)
         m.users.ensure_user('sample_user');m.users.ensure_user('other_user')

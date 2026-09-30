@@ -436,6 +436,7 @@
             <div class="field"><label>轻量档价格（光子/张）</label><input type="number" id="price-light" min="0" max="9999"></div>
             <div class="field"><label>精细档价格（光子/张）</label><input type="number" id="price-fine" min="0" max="9999"></div>
             <div class="field"><label>归一化长边<small>0 = 关闭缩放；改小可省网关费用</small></label><input type="number" id="normalize" min="0" max="8192"></div>
+            <div class="field"><label><input type="checkbox" id="ci-enabled">使用腾讯云 CI 基础图片处理</label><small>缩放、裁剪、转 JPEG 由 CI 执行；仅使用基础处理，不调用高级压缩或 AI 修复。关闭时本机重处理串行执行。</small></div>
           </div>
         </div>
         <div class="card">
@@ -798,6 +799,7 @@ function renderConf() {
   $("reward-seventh").value = SETTINGS.rewards?.checkin_seventh_bonus ?? 30;
   $("reward-featured").value = SETTINGS.rewards?.community_featured ?? 50;
   $("normalize").value = SETTINGS.normalize_long_side ?? 1536;
+  $("ci-enabled").checked = SETTINGS.processing?.ci_enabled !== false;
   $("mt-message").value = SETTINGS.maintenance?.message || "";
   $("mt-enabled").checked = SETTINGS.maintenance?.enabled || false;
   $("free-mode").checked = SETTINGS.free_mode || false;
@@ -816,6 +818,7 @@ window.saveConf = async () => {
                  checkin_seventh_bonus: parseInt($("reward-seventh").value, 10) || 0,
                  community_featured: parseInt($("reward-featured").value, 10) || 0 },
       normalize_long_side: parseInt($("normalize").value, 10) || 0,
+      processing: {ci_enabled:$("ci-enabled").checked},
       maintenance: { enabled: $("mt-enabled").checked,
                      message: $("mt-message").value },
       free_mode: $("free-mode").checked,
@@ -1336,7 +1339,7 @@ async function loadJobs() {
     const data = await api("/jobs?offset=" + JOBS_OFFSET + "&limit=50");
     const t = $("jobs-table");
     t.innerHTML = "<thead><tr><th>时间</th><th>ID</th><th>档位</th><th>模板</th><th>供应商</th>" +
-                  "<th>状态</th><th>成本</th><th>错误</th></tr></thead><tbody></tbody>";
+                  "<th>状态</th><th>阶段耗时</th><th>成本</th><th>错误</th></tr></thead><tbody></tbody>";
     const tbody = t.tBodies[0];
     data.items.forEach((j) => {
       const cost = j.cost_cny != null ? "¥" + (+j.cost_cny).toFixed(2)
@@ -1349,6 +1352,7 @@ async function loadJobs() {
         `<td>${fmtTime(j.created_at)}</td><td><code>${esc(j.id)}</code></td>` +
         `<td>${esc(j.quality)}</td><td>${esc(j.template_name || "—")}</td>` +
         `<td>${esc(j.provider || "—")}</td><td>${badge}</td>` +
+        `<td class="muted">${j.timings ? esc(['排队 '+Math.round((j.timings.queue_ms||0)/1000)+'s','处理 '+Math.round((j.timings.normalize_ms||0)/1000)+'s','AI '+Math.round((j.timings.provider_ms||0)/1000)+'s','保存 '+Math.round((j.timings.storage_ms||0)/1000)+'s'].join(' / ')) : '旧任务无计时'}</td>` +
         `<td>${cost}</td><td class="muted">${esc(j.error || "")}</td>`;
       tbody.appendChild(tr);
     });

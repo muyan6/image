@@ -72,6 +72,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
                 "community_featured": 50},
     "pricing_revision": 2,
     "free_mode": False,
+    "processing": {"ci_enabled": True},
     "wechat": {"app_id": "", "app_secret": ""},
     "payment": {"offer_id": "", "sandbox_app_key": "", "production_app_key": ""},
     "tencent": {"secret_id": "", "secret_key": "", "cos_bucket": "", "cos_region": "ap-guangzhou", "cos_custom_domain": ""},
@@ -113,7 +114,7 @@ def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # 误删后服务会残废的关键结构：合并后一律用默认值兜底补齐
-_DICT_SECTIONS = ("providers", "wechat", "payment", "tencent", "moderation", "quota",
+_DICT_SECTIONS = ("providers", "wechat", "payment", "tencent", "moderation", "quota", "processing",
                   "prompts", "prices", "rewards", "maintenance", "quality_to_style",
                   "community", "ads")
 
@@ -166,6 +167,8 @@ def _validate(doc: Dict[str, Any]) -> None:
         raise ValueError("worldcodes.timeout 必须是 10~600 的整数(秒)")
 
     prices = doc.get("prices", {})
+    if type(doc.get('processing',{}).get('ci_enabled')) is not bool:
+        raise ValueError('processing.ci_enabled 必须是布尔值')
     for tier in ("light", "fine"):
         value = prices.get(tier)
         if not isinstance(value, int) or not 0 <= value <= 9999:
