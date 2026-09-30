@@ -17,6 +17,7 @@ function apiModule(wx) {
   vm.runInNewContext(fs.readFileSync(path.join(root,'miniprogram/utils/api.js'),'utf8'),sandbox);return sandbox.module.exports;
 }
 async function test(name,fn) {
+  if (process.env.REVIEW_CASE_PATTERN && !new RegExp(process.env.REVIEW_CASE_PATTERN).test(name)) return;
   try{await fn();rows.push({case:name,passed:true});console.log('PASS '+name);}
   catch(e){rows.push({case:name,passed:false,error:String(e.stack)});console.log('FAIL '+name+': '+e.stack);}
 }
@@ -172,10 +173,16 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
     assert.equal(p.data.priceLabel,'✦ 2–5 光子');
     assert.equal(p.data.template.coverUrl,'cover.jpg');
   });
+  await test('custom_prompt_copy_does_not_limit_requirement_count',()=>{
+    const xml=fs.readFileSync(path.join(root,'miniprogram/pages/adjust/adjust.wxml'),'utf8');
+    assert(xml.includes('placeholder="输入明确请求，例如：移除背景中的路人，美化皮肤等"'));
+    assert(!xml.includes('仅补充一项'));
+    assert(xml.includes('maxlength="500"'));assert(xml.includes('bindinput="onCustomPromptInput"'));
+  });
   await test('plain_restore_sends_custom_requirement',async()=>{
     let sent;
     const p=page('adjust',{submitJob:async(_,form)=>{sent=form;throw new Error('fixture');}});
-    p._foreground=true;p.data.customPrompt='移除背景人群，保留主体';p.onToggleCustomPrompt();
+    p._foreground=true;p.data.customPrompt='移除背景中的路人，美化皮肤，保留主体特征';p.onToggleCustomPrompt();
     await p.executeUpload('photo.jpg');assert.equal(sent.custom_prompt,p.data.customPrompt);
   });
   await test('violation_dialog_routes_feedback_to_wechat_service',async()=>{

@@ -149,7 +149,7 @@
       <text class="section-hint">不用填写，直接生成即可自动优化清晰度、曝光与色彩。</text>
       <block wx:if="{{ showCustomPrompt }}">
         <textarea class="custom-prompt-input" value="{{ customPrompt }}" maxlength="500"
-          placeholder="仅补充一项明确需求，例如：移除背景中的路人。"
+          placeholder="输入明确请求，例如：移除背景中的路人，美化皮肤等"
           bindinput="onCustomPromptInput" />
         <text class="prompt-hint">不确定怎么写就留空。过多或相互冲突的要求可能降低效果；收起后不提交补充文字。</text>
       </block>
