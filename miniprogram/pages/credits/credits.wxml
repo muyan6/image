@@ -25,9 +25,10 @@
   <view class="section-box">
     <view class="section-head">
       <text class="section-title">充值光子</text>
-      <text class="section-tip">{{ paymentReady ? '选择套餐充值' : '充值接入尚未完成' }}</text>
+      <text class="section-tip">{{ paymentBusy ? '订单处理中…' : (paymentReady ? '选择套餐充值' : '充值暂未启用') }}</text>
     </view>
 
+    <view class="menu-item gallery-card" bindtap="onGoOrders"><text>充值订单 / 核对到账</text><text> ›</text></view>
     <view class="package-list gallery-card">
       <block wx:for="{{ packages }}" wx:key="id">
       <view class="package-item" bindtap="onSelectPackage" data-id="{{ item.id }}">

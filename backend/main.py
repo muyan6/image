@@ -50,6 +50,8 @@ from cleanup_store import CleanupStore
 from community_store import CommunityStore
 from template_output import select_template_output, select_template_quality
 from text_generation import make_text_router, ready as text_generation_ready
+from virtual_payment import VirtualPayment
+from payment_api import make_payment_router, handle_message
 from cloud_pipeline import CloudPipeline
 from image_processing import IMAGE_LOCK, image_limited, upload_limited, normalization_rule, BoundedExecutor, QueueFull
 from cos_store import process_image as cos_process_image
@@ -197,9 +199,11 @@ async def lifespan(_app: FastAPI):
     threading.Thread(target=_bg_sweeper, name="job-sweeper",
                      daemon=True).start()
     cloud.start()
+    payments.start()
     yield
     _sweeper_stop.set()
     cloud.stop()
+    payments.stop()
     pool.shutdown(wait=False, cancel_futures=True)
     log.info("已停止")
 
@@ -272,6 +276,7 @@ announcements = AnnouncementStore(DATA_DIR)
 templates = TemplateStore(DATA_DIR)
 users = UserStore(DATA_DIR)
 cleanup = CleanupStore(DATA_DIR, UPLOAD_DIR)
+payments = VirtualPayment(lambda:sys.modules[__name__])
 
 
 # --------------------------------------------------------------------------- #
@@ -1706,21 +1711,9 @@ def wxpush_verify(request: Request):
 
 @app.post("/api/wxpush")
 @app.post("/wxpush")
-def wxpush_message(body: _WxPushBody, request: Request):
-    """微信内容安全 mediaCheckAsync 的异步结果推送端点。"""
-    if not _wxpush_signature_ok(request):
-        raise HTTPException(status_code=403, detail="签名校验失败")
-    parsed = wechat_sec.parse_push_body(body or {})
-    if parsed is None:
-        log.info("收到非审核类微信推送或安全模式包体，忽略: %s",
-                 str(body)[:150])
-    else:
-        trace_id, suggest, label, score = parsed
-        cloud.audits.wechat_callback(trace_id, suggest)
-        hit = wechat_sec.resolve_pending(trace_id, suggest, label, score)
-        log.info("微信审核推送: trace=%s suggest=%s label=%s 命中=%s",
-                 trace_id, suggest, label, hit)
-    return PlainTextResponse("success")
+async def wxpush_message(request: Request):
+    """Shared JSON/XML callback endpoint: content audit + authoritative payment delivery."""
+    return await handle_message(sys.modules[__name__],request)
 
 
 @app.post("/api/callbacks/cos-audit")
@@ -1759,9 +1752,9 @@ def home_page(request: Request):
 
 
 @app.post("/")
-def home_post(body: _WxPushBody, request: Request):
+async def home_post(request: Request):
     """兼容微信推送 URL 填成根路径的情况。"""
-    return wxpush_message(body, request)
+    return await wxpush_message(request)
 
 
 @app.get("/logo.jpg")
@@ -2336,7 +2329,8 @@ def credit_packages() -> Dict[str, Any]:
     """先公开真实价格表；收款与发货未闭环前绝不由客户端加光子。"""
     cost = settings.prices().get("light", GENERATION_COST)
     return {"packages": public_packages(cost), "points_per_yuan": POINTS_PER_YUAN,
-            "generation_cost": cost, "payment_ready": False}
+            "generation_cost": cost, "payment_ready": payments.ready(),
+            "payment_env":payments.conf().get('env',0),"order_center_path":"pages/orders/orders"}
 
 
 @app.post("/api/jobs/{job_id}/refresh-media")
@@ -2475,6 +2469,7 @@ async def unhandled(request, exc):  # noqa: ANN001, ARG001
 
 
 app.include_router(make_text_router(lambda:sys.modules[__name__]))
+app.include_router(make_payment_router(lambda:sys.modules[__name__]))
 
 if __name__ == "__main__":
     import uvicorn

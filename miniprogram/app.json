@@ -8,6 +8,7 @@
     "pages/community/community",
     "pages/my/my",
     "pages/credits/credits",
+    "pages/orders/orders",
     "pages/invite/invite",
     "pages/privacy/privacy",
     "pages/retention/retention",

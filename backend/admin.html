@@ -521,11 +521,13 @@
         <div class="card">
           <div class="card-head"><h2>微信虚拟支付配置<small>凭证仅保存在服务端；商品上架与验单发货完成前不开放收款</small></h2></div>
           <div class="form-grid">
+            <div class="field"><label><input type="checkbox" id="pay-enabled">启用光子充值</label><small>确认商品、发货推送及新版小程序已部署后开启；由用户主动确认付款。</small></div>
+            <div class="field"><label>支付环境</label><select id="pay-env"><option value="0">现网（个人主体使用）</option><option value="1">沙箱（仅平台支持的主体）</option></select></div>
             <div class="field"><label>OfferID（支付应用 ID）</label><input type="text" id="pay-offer-id" placeholder="微信虚拟支付基础配置中的 OfferID"></div>
             <div class="field"><label>沙箱 AppKey <small>打码代表已保存</small></label><input type="password" id="pay-sandbox-key" autocomplete="new-password"></div>
             <div class="field"><label>现网 AppKey <small>打码代表已保存</small></label><input type="password" id="pay-production-key" autocomplete="new-password"></div>
           </div>
-          <p class="muted" style="margin:0">先在微信后台按套餐表创建商品并开启道具发货推送；不要把 AppKey 填到小程序或发到聊天中。这里保存凭证不会自动开通支付。</p>
+          <p class="muted" style="margin:0">微信消息推送继续使用 <code>/api/wxpush</code>，明文 XML/JSON 均支持，勾选道具发货和退款事件。订单中心 path：<code>pages/orders/orders</code>。支付开关默认关闭；支付成功回调不会直接加光子。</p>
         </div>
         <div class="card">
           <div class="card-head"><h2>腾讯云<small>内容审核 + COS 对象存储共用</small></h2></div>
@@ -927,6 +929,8 @@ function renderSec() {
   $("wx-appid").value = SETTINGS.wechat?.app_id || "";
   $("wx-secret").value = SETTINGS.wechat?.app_secret || "";
   $("pay-offer-id").value = SETTINGS.payment?.offer_id || "";
+  $("pay-enabled").checked = SETTINGS.payment?.enabled === true;
+  $("pay-env").value = SETTINGS.payment?.env ?? 0;
   $("pay-sandbox-key").value = SETTINGS.payment?.sandbox_app_key || "";
   $("pay-production-key").value = SETTINGS.payment?.production_app_key || "";
   $("tc-id").value = SETTINGS.tencent?.secret_id || "";
@@ -1002,7 +1006,7 @@ window.testWechat = async () => {
 
 window.saveSec = async () => saveSettingsPatch({
       wechat: { app_id: $("wx-appid").value.trim(), app_secret: $("wx-secret").value.trim() },
-      payment: { offer_id: $("pay-offer-id").value.trim(),
+      payment: {enabled:$("pay-enabled").checked,env:Number($("pay-env").value), offer_id: $("pay-offer-id").value.trim(),
                  sandbox_app_key: $("pay-sandbox-key").value.trim(),
                  production_app_key: $("pay-production-key").value.trim() },
       tencent: { secret_id: $("tc-id").value.trim(), secret_key: $("tc-key").value.trim(),

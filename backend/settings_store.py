@@ -80,7 +80,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
                        "poll_interval": 5, "timeout_seconds": 1800, "ci_biz_type": "", "audit_mode": "wechat_auto"},
     "text_generation": {"enabled":False,"model":"","endpoint":"/v1/images/generations","price":40},
     "wechat": {"app_id": "", "app_secret": ""},
-    "payment": {"offer_id": "", "sandbox_app_key": "", "production_app_key": ""},
+    "payment": {"enabled":False,"env":0,"offer_id": "", "sandbox_app_key": "", "production_app_key": ""},
     "tencent": {"secret_id": "", "secret_key": "", "cos_bucket": "", "cos_region": "ap-guangzhou", "cos_custom_domain": ""},
     "moderation": {"enabled": False, "block_on_error": False, "wechat_push_token": ""},
     "quota": {"daily": 20, "per_minute": 3},
@@ -196,6 +196,13 @@ def _validate(doc: Dict[str, Any]) -> None:
             raise ValueError('档位配置字段过长')
 
     prices = doc.get("prices", {})
+    payment=doc.get('payment',{})
+    if type(payment.get('enabled')) is not bool or type(payment.get('env')) is not int or payment['env'] not in (0,1):
+        raise ValueError('支付开关或环境配置无效')
+    if not isinstance(payment.get('offer_id'),str) or (payment['offer_id'] and not payment['offer_id'].isdigit()):
+        raise ValueError('OfferID 必须是数字字符串')
+    for field in ('sandbox_app_key','production_app_key'):
+        if not isinstance(payment.get(field),str) or len(payment[field])>8192:raise ValueError('支付 AppKey 格式无效')
     cloud = doc.get('cloud_pipeline', {})
     if type(cloud.get('enabled')) is not bool: raise ValueError('cloud_pipeline.enabled 必须是布尔值')
     for field, low, high in [('generation_concurrency', 1, 64), ('max_queued', 0, 1000),

@@ -133,7 +133,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_payment_credentials_remain_admin_only_and_masked(self):
         saved=self.admin.put('/admin/api/settings',json={'payment':{
-            'offer_id':'fixture-offer','sandbox_app_key':'sandbox-secret-1234',
+            'offer_id':'123456','sandbox_app_key':'sandbox-secret-1234',
             'production_app_key':'production-secret-5678'}})
         self.assertEqual(saved.status_code,200,saved.text)
         self.assertEqual(saved.json()['payment']['production_app_key'],'••••5678')

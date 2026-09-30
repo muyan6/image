@@ -1,5 +1,6 @@
 const app = getApp();
 const api = require('../../utils/api.js');
+const payment = require('../../utils/payment.js');
 
 Page({
   data: {
@@ -18,6 +19,7 @@ Page({
     costPerGeneration: 40,
     estimatedGenerations: 0,
     paymentReady: false,
+    paymentBusy: false,
     packages: [
       {id:'points_600',points:600,price_text:'¥6',bonus_text:'标准 1 元 = 100 光子',generations:15},
       {id:'points_3300',points:3300,price_text:'¥30',bonus_text:'多送 300 光子',generations:82},
@@ -112,14 +114,18 @@ Page({
   },
 
   /** 充值套餐：服务端未完成支付验单与发货前，不会凭前端点击加点。 */
-  onSelectPackage() {
-    wx.showModal({
-      title: '光子补给',
-      content: '商品发布不等于充值开通：当前版本还未接入支付下单、微信收银台和服务端验单发货。暂不发起付款，也不会发放充值光子。',
-      showCancel: false,
-      confirmText: '我知道了'
-    });
+  async onSelectPackage(e) {
+    if(this.data.paymentBusy)return;
+    if(!this.data.paymentReady){wx.showModal({title:'光子充值',content:'充值暂未启用，请联系管理员确认新版后端和支付配置。',showCancel:false});return;}
+    const pkg=this.data.packages.find(p=>p.id===e.currentTarget.dataset.id);if(!pkg)return;
+    this.setData({paymentBusy:true});
+    try{
+      const result=await payment.buy(pkg);
+      if(result.orderId)wx.navigateTo({url:'/pages/orders/orders?id='+encodeURIComponent(result.orderId)});
+    }catch(err){wx.showModal({title:err.canceled?'支付已取消':'订单状态',content:err.message+'；已创建的订单可在充值订单中查看。',showCancel:false});}
+    finally{this.setData({paymentBusy:false});}
   },
+  onGoOrders(){wx.navigateTo({url:'/pages/orders/orders'});},
 
   onGoInvite() {
     wx.navigateTo({

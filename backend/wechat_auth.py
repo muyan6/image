@@ -32,7 +32,7 @@ class WechatAuthError(RuntimeError):
         self.code = code
 
 
-def code2session(code: str, settings: SettingsStore) -> str:
+def exchange_session(code: str, settings: SettingsStore) -> Dict[str,str]:
     """用 wx.login 的 code 换 openid。失败抛 WechatAuthError。"""
     conf = settings.wechat()
     app_id = (conf.get("app_id") or "").strip()
@@ -50,6 +50,8 @@ def code2session(code: str, settings: SettingsStore) -> str:
                               code="NETWORK") from exc
 
     try:
+        if getattr(resp,'status_code',200)!=200:
+            raise WechatAuthError('微信登录接口 HTTP 状态异常',code='BAD_RESPONSE')
         data = resp.json()
     except ValueError as exc:
         raise WechatAuthError("微信接口返回异常", code="BAD_RESPONSE") from exc
@@ -61,7 +63,11 @@ def code2session(code: str, settings: SettingsStore) -> str:
     openid = data.get("openid")
     if not openid:
         raise WechatAuthError("微信接口未返回 openid", code="BAD_RESPONSE")
-    return openid
+    return {'openid':str(openid),'session_key':str(data.get('session_key') or '')}
+
+
+def code2session(code: str, settings: SettingsStore) -> str:
+    return exchange_session(code,settings)['openid']
 
 
 # --------------------------------------------------------------------------- #
