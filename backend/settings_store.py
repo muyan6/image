@@ -23,6 +23,7 @@ import time
 import uuid
 from urllib.parse import urlsplit
 from gateway_profiles import gateway_profile, materialize_text_gateway
+from credit_packages import default_commerce, validate_commerce
 from typing import Any, Callable, Dict, List, Optional
 
 log = logging.getLogger("rescue.settings")
@@ -74,6 +75,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "rewards": {"invite": 40, "checkin": 10, "checkin_seventh_bonus": 30,
                 "community_featured": 50},
     "pricing_revision": 2,
+    "commerce": default_commerce(),
     "free_mode": False,
     "processing": {"ci_enabled": True},
     "cloud_mode_revision": 1,
@@ -123,7 +125,7 @@ def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
 # 误删后服务会残废的关键结构：合并后一律用默认值兜底补齐
 _DICT_SECTIONS = ("providers", "wechat", "payment", "tencent", "moderation", "quota", "processing", "text_generation", "cloud_pipeline",
                   "prompts", "prices", "rewards", "maintenance", "quality_to_style",
-                  "community", "ads")
+                  "community", "ads", "commerce")
 
 
 def _rebase_defaults(candidate: Dict[str, Any]) -> None:
@@ -144,6 +146,7 @@ def _rebase_defaults(candidate: Dict[str, Any]) -> None:
 
 def _validate(doc: Dict[str, Any]) -> None:
     """整档校验,不合法直接抛 ValueError,调用方放弃本次写入。"""
+    validate_commerce(doc.get('commerce'))
     chain = doc.get("chain")
     if not isinstance(chain, list) or not chain:
         raise ValueError("chain 不能为空")
@@ -386,6 +389,7 @@ class SettingsStore:
             return
         # 深合并:文件里缺的新字段用默认补齐,未知字段保留
         self._data = _deep_merge(defaults, loaded)
+        validate_commerce(self._data['commerce'])
         if materialize_text_gateway(self._data,loaded.get('text_generation',{})):
             self._save_locked(self._data)
         if not loaded.get('cloud_mode_revision'):

@@ -1925,7 +1925,8 @@ class _ProfileBody(BaseModel):
 
 def _login_response(openid: str, account_type: str = "wechat", app_id: str = "") -> Dict[str, Any]:
     try:
-        user = users.ensure_user(openid, account_type=account_type, app_id=app_id)
+        user = users.ensure_user(openid, account_type=account_type, app_id=app_id,
+                                 welcome_balance=settings.snapshot()['commerce']['welcome_points'])
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     users.audit(openid, "login", "source=%s app_id=%s" % (account_type, app_id))
@@ -2347,8 +2348,9 @@ def query_job_status(job_id: str, request: Request):
 def credit_packages() -> Dict[str, Any]:
     """先公开真实价格表；收款与发货未闭环前绝不由客户端加光子。"""
     cost = settings.prices().get("light", GENERATION_COST)
-    return {"packages": public_packages(cost), "points_per_yuan": POINTS_PER_YUAN,
-            "generation_cost": cost, "payment_ready": payments.ready(),
+    catalog = public_packages(cost, settings.snapshot()['commerce']['packages'])
+    return {"packages": catalog, "points_per_yuan": POINTS_PER_YUAN,
+            "generation_cost": cost, "payment_ready": payments.ready() and bool(catalog),
             "payment_env":payments.conf().get('env',0),"order_center_path":"pages/orders/orders"}
 
 

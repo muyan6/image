@@ -5,8 +5,8 @@
 - audit:   关键动作流水（提交/拦截/限流/完成/奖励），合规要求留存 6 个月以上；
 - 每日与每分钟配额、签到/看视频奖励都在 SQLite 里记账，重启不丢。
 
-光子经济（常量即规则，后台 /admin 可改的是价格 prices）：
-- 新用户注册赠送 WELCOME_BALANCE 光子；
+光子经济（运营配置由后台 /admin 管理）：
+- 新用户注册赠送由 commerce.welcome_points 决定，默认 WELCOME_BALANCE；
 - 每日签到与邀请奖励由后台配置；看视频默认 +10（3 次/天）。
 - 提交任务按模板价/档位价预扣，任务失败自动全额退款。
 """
@@ -360,7 +360,9 @@ class UserStore:
                 "user_id": public_user_id(row[0], row[8])}
 
     def ensure_user(self, openid: str, account_type: Optional[str] = None,
-                    app_id: str = "") -> Dict[str, Any]:
+                    app_id: str = "", welcome_balance: int = WELCOME_BALANCE) -> Dict[str, Any]:
+        if type(welcome_balance) is not int or not 0 <= welcome_balance <= 100000:
+            raise ValueError('新用户赠送光子配置无效')
         now = time.time()
         code = invite_code_of(openid)
         kind = account_type or ("web" if openid.startswith("web-") else "wechat")
@@ -378,7 +380,7 @@ class UserStore:
                 "VALUES(?,?,?,?,?,?,?) "
                 "ON CONFLICT(openid) DO UPDATE SET last_seen=excluded.last_seen,admin_hidden=0,"
                 "app_id=CASE WHEN users.app_id='' THEN excluded.app_id ELSE users.app_id END",
-                (openid, now, now, WELCOME_BALANCE, code, kind, app_id))
+                (openid, now, now, welcome_balance, code, kind, app_id))
             # 老用户补发邀请码（一次迁移）
             self._conn.execute(
                 "UPDATE users SET invite_code=? WHERE openid=? AND invite_code=''",

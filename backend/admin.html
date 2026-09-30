@@ -299,6 +299,8 @@
           <circle cx="6" cy="4.5" r="1.7" fill="#fff"/><circle cx="10.5" cy="8" r="1.7" fill="#fff"/>
           <circle cx="5" cy="11.5" r="1.7" fill="#fff"/>
         </svg>通用设置</div>
+      <div class="nav-item" data-page="commerce" onclick="showPage('commerce')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="2"/><path d="M2 6h12M5 10h3"/></svg>光子与活动</div>
       <div class="nav-item" data-page="sec" onclick="showPage('sec')">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
           <path d="M8 1.8l5 2v3.4c0 3.2-2.1 5.6-5 7-2.9-1.4-5-3.8-5-7V3.8l5-2z"/>
@@ -507,6 +509,22 @@
         </div>
       </section>
 
+      <!-- 运营配置完全由服务器下发，兼容已发布的小程序 -->
+      <section id="page-commerce" hidden>
+        <div class="card">
+          <div class="card-head"><h2>新用户赠送<small>仅首次注册发放；已有用户余额保持不变</small></h2></div>
+          <div class="field"><label>首次注册赠送光子</label><input id="commerce-welcome" type="number" min="0" max="100000" step="1"></div>
+          <p class="muted">保存后立即用于新注册账户。填 0 表示不赠送，重复登录不会重复领取。</p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>充值套餐与限时活动</h2><button class="btn-ghost btn-small" onclick="addCommercePackage()">＋ 新增套餐</button></div>
+          <p class="muted">现有小程序会读取套餐售价、到账光子和说明，无需修改小程序。价格精确到分；到账光子已包含赠送。</p>
+          <p class="muted">金额和商品 ID 必须与微信虚拟支付平台一致。建议活动使用单独的微信商品 ID；本页不会自动修改微信商品或发起付款。</p>
+          <p class="muted">活动按服务器时间自动开始、结束；日期按北京时间（UTC+8）填写。旧订单保留成交时的价格和光子数，过期套餐请求会提示刷新。</p>
+        </div>
+        <div id="commerce-packages"></div>
+      </section>
+
       <!-- 平台与安全 -->
       <section id="page-sec" hidden>
         <div class="card">
@@ -655,19 +673,19 @@ function moveSaveHome() {
 }
 function updateSaveBar() {
   const bar=$('page-save-bar');if(!bar)return;
-  bar.hidden=!EDITOR_SAVE&&!['prov','conf','sec'].includes(CURRENT_PAGE);
+  bar.hidden=!EDITOR_SAVE&&!['prov','conf','sec','commerce'].includes(CURRENT_PAGE);
   $('page-save-hint').textContent=EDITOR_SAVE?'保存当前编辑内容':(PAGE_DIRTY?'有未保存修改 · 一次保存本页全部配置':'保存本页全部配置');
 }
 function markPageDirty(){PAGE_DIRTY=true;updateSaveBar();}
 document.addEventListener('input',event=>{
-  if(event.target.closest?.('section[id^="page-"]')&&['prov','conf','sec'].includes(CURRENT_PAGE))markPageDirty();
+  if(event.target.closest?.('section[id^="page-"]')&&['prov','conf','sec','commerce'].includes(CURRENT_PAGE))markPageDirty();
 });
 document.addEventListener('change',event=>{
-  if(event.target.closest?.('section[id^="page-"]')&&['prov','conf','sec'].includes(CURRENT_PAGE))markPageDirty();
+  if(event.target.closest?.('section[id^="page-"]')&&['prov','conf','sec','commerce'].includes(CURRENT_PAGE))markPageDirty();
 });
 window.saveCurrentPage=async()=>{
   if(SAVING)return;
-  const action=EDITOR_SAVE||({prov:window.saveProviders,conf:window.saveConf,sec:window.saveSec})[CURRENT_PAGE];
+  const action=EDITOR_SAVE||({prov:window.saveProviders,conf:window.saveConf,sec:window.saveSec,commerce:window.saveCommerce})[CURRENT_PAGE];
   if(!action)return;
   SAVING=true;const button=$('page-save');button.disabled=true;button.textContent='保存中…';
   const region=EDITOR_SAVE?$('modal-root'):$('page-'+CURRENT_PAGE);
@@ -727,6 +745,7 @@ const PAGES = {
   ann:   { title: "公告管理",      load: loadAnnouncements },
   prov:  { title: "供应商与提示词", load: () => { renderProviderForm(); renderChain(); } },
   conf:  { title: "通用设置",      load: renderConf },
+  commerce: { title: "光子与活动", load: renderCommerce },
   sec:   { title: "平台与安全",    load: renderSec },
   jobs:  { title: "任务记录",      load: loadJobs },
   users: { title: "用户管理",      load: () => { loadUsers(); loadViolationFeedback(); } },
@@ -916,6 +935,84 @@ window.saveConf = async () => saveSettingsPatch({
              rewarded_video_unit_id: $("ad-unit").value.trim(),
              rewarded_video_verifier_url: $("ad-verifier-url").value.trim(),
              rewarded_video_verifier_key: $("ad-verifier-key").value.trim() } }, renderConf);
+
+/* Server-managed catalog editor. This script is embedded in the existing admin page. */
+let COMMERCE_IDS=[];
+function commerceTime(value){return value?new Date((value+8*3600)*1000).toISOString().slice(0,19):'';}
+function commerceMoney(value){return (value/100).toFixed(2);}
+function commerceCard(p,i){
+  const promo=p.promotion;
+  const field=(key,label,value,type='text',extra='')=>`<div class="field"><label>${label}</label><input id="cp-${i}-${key}" type="${type}" value="${esc(value)}" ${extra}></div>`;
+  return `<div class="card commerce-package">
+    <div class="card-head"><h2>套餐 ${i+1}<small>管理标识：${esc(p.id)}</small></h2><label class="check"><input type="checkbox" id="cp-${i}-enabled" ${p.enabled?'checked':''}>在小程序显示</label></div>
+    <div class="form-grid">
+      ${field('product','微信常规商品 ID',p.product_id)}
+      ${field('price','常规售价（元）',commerceMoney(p.amount_fen),'number','min="0.01" max="1000000" step="0.01"')}
+      ${field('points','常规到账光子（含赠送）',p.points,'number','min="1" max="10000000" step="1"')}
+      ${field('description','常规说明（留空自动计算赠送）',p.description,'text','maxlength="100"')}
+    </div>
+    <hr style="border:0;border-top:1px solid var(--border);margin:18px 0">
+    <label class="check"><input type="checkbox" id="cp-${i}-sale" ${promo.enabled?'checked':''}>启用限时活动</label>
+    <div class="form-grid" style="margin-top:12px">
+      ${field('sale-product','微信活动商品 ID',promo.product_id)}
+      ${field('sale-price','活动售价（元）',commerceMoney(promo.amount_fen),'number','min="0.01" max="1000000" step="0.01"')}
+      ${field('sale-points','活动到账光子（含赠送）',promo.points,'number','min="1" max="10000000" step="1"')}
+      ${field('sale-description','活动说明（留空自动生成）',promo.description,'text','maxlength="100"')}
+      ${field('start','开始时间（北京时间）',commerceTime(promo.starts_at),'datetime-local','step="1"')}
+      ${field('end','结束时间（北京时间）',commerceTime(promo.ends_at),'datetime-local','step="1"')}
+    </div>
+    <p class="muted">活动价格应不高于常规价，光子数应不少于常规套餐；结束后自动恢复常规配置。取消勾选可提前结束活动。修改后使用下方统一保存按钮。</p>
+  </div>`;
+}
+function renderCommerce(){
+  const c=SETTINGS.commerce||{welcome_points:100,packages:[]};
+  $('commerce-welcome').value=c.welcome_points;
+  COMMERCE_IDS=c.packages.map(p=>p.id);
+  $('commerce-packages').innerHTML=c.packages.map(commerceCard).join('');
+}
+window.addCommercePackage=()=>{
+  if(COMMERCE_IDS.length>=20){toast('最多 20 个套餐，可停用不再使用的套餐','bad');return;}
+  const id='pkg_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,6),i=COMMERCE_IDS.length;
+  const p={id,product_id:id,enabled:false,amount_fen:600,points:600,description:'',
+    promotion:{enabled:false,product_id:id,amount_fen:600,points:600,description:'',starts_at:0,ends_at:0}};
+  COMMERCE_IDS.push(id);$('commerce-packages').insertAdjacentHTML('beforeend',commerceCard(p,i));markPageDirty();
+};
+function readCommerceInteger(value,label,min,max){
+  const raw=String(value).trim(),n=Number(raw);
+  if(!/^\d+$/.test(raw)||!Number.isSafeInteger(n)||n<min||n>max)throw new Error(label+'必须是 '+min+'~'+max+' 的整数');
+  return n;
+}
+function readCommerceMoney(value){
+  const raw=String(value).trim();
+  if(!/^\d+(\.\d{1,2})?$/.test(raw))throw new Error('售价最多保留两位小数');
+  const parts=raw.split('.'),fen=Number(parts[0])*100+Number((parts[1]||'').padEnd(2,'0'));
+  if(!Number.isSafeInteger(fen)||fen<1||fen>100000000)throw new Error('售价必须为 0.01~1000000 元');
+  return fen;
+}
+function readCommerceTime(value){
+  if(!value)return 0;
+  if(!/^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d)?$/.test(value))throw new Error('活动日期格式无效');
+  const seconds=Date.parse(value+'+08:00')/1000;
+  if(!Number.isInteger(seconds))throw new Error('活动日期无效');return seconds;
+}
+function readCommerce(){
+  return {welcome_points:readCommerceInteger($('commerce-welcome').value,'新人赠送',0,100000),packages:COMMERCE_IDS.map((id,i)=>{
+    const val=k=>$(`cp-${i}-${k}`).value.trim();
+    const p={id,enabled:$(`cp-${i}-enabled`).checked,product_id:val('product'),amount_fen:readCommerceMoney(val('price')),
+      points:readCommerceInteger(val('points'),'到账光子',1,10000000),description:val('description'),
+      promotion:{enabled:$(`cp-${i}-sale`).checked,product_id:val('sale-product'),amount_fen:readCommerceMoney(val('sale-price')),
+        points:readCommerceInteger(val('sale-points'),'活动光子',1,10000000),description:val('sale-description'),
+        starts_at:readCommerceTime(val('start')),ends_at:readCommerceTime(val('end'))}};
+    if(p.promotion.enabled&&!(p.promotion.starts_at>0&&p.promotion.ends_at>p.promotion.starts_at))throw new Error('活动结束时间应晚于开始时间');
+    if(p.promotion.enabled&&(p.promotion.amount_fen>p.amount_fen||p.promotion.points<p.points))throw new Error('活动售价应不高于常规价，光子数应不少于常规套餐');
+    if(p.promotion.enabled&&p.promotion.amount_fen!==p.amount_fen&&p.promotion.product_id===p.product_id)throw new Error('不同售价的活动请填写独立微信商品 ID');
+    return p;
+  })};
+}
+window.saveCommerce=async()=>{
+  if(!SETTINGS.commerce||!Array.isArray(SETTINGS.commerce.packages))throw new Error('请先更新并重启后端，再刷新本页');
+  return saveSettingsPatch({commerce:readCommerce()},renderCommerce);
+};
 
 /* ---------- 平台与安全 ---------- */
 function renderSec() {

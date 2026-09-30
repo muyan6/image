@@ -1,5 +1,6 @@
 """Orders and entitlement adjustments use the SAME SQLite transaction as user balance."""
 import json,time,uuid
+from credit_packages import amount_fen
 
 
 class PaymentStore:
@@ -33,8 +34,9 @@ class PaymentStore:
         with self.users._lock:return self._one('SELECT * FROM payment_orders WHERE openid=? AND client_key=?',(openid,key))
     def create(self,openid,key,app,offer,env,package):
         now=time.time();jid='P'+uuid.uuid4().hex[:30]
-        data={'offerId':offer,'buyQuantity':1,'env':env,'currencyType':'CNY','productId':package['id'],
-              'goodsPrice':package['yuan']*100,'outTradeNo':jid,'attach':jid}
+        product_id=package.get('product_id') or package['id']
+        data={'offerId':offer,'buyQuantity':1,'env':env,'currencyType':'CNY','productId':product_id,
+              'goodsPrice':amount_fen(package),'outTradeNo':jid,'attach':jid}
         raw=json.dumps(data,ensure_ascii=False,separators=(',',':'))
         with self.users._lock,self.users._conn:
             self.users._conn.execute('BEGIN IMMEDIATE')
@@ -43,7 +45,7 @@ class PaymentStore:
             count=self.users._conn.execute('SELECT COUNT(*) FROM payment_orders WHERE openid=? AND created_at>?',(openid,now-60)).fetchone()[0]
             if count>=5:raise ValueError('下单过于频繁，请稍后再试')
             self.users._conn.execute('INSERT INTO payment_orders(id,openid,client_key,appid,offerid,env,package_id,amount,points,created_at,updated_at,next_sync,sign_data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
-               (jid,openid,key,app,offer,env,package['id'],data['goodsPrice'],package['points'],now,now,now+30,raw))
+               (jid,openid,key,app,offer,env,product_id,data['goodsPrice'],package['points'],now,now,now+30,raw))
             return self._one('SELECT * FROM payment_orders WHERE id=?',(jid,)),True
     def apply_verified(self,jid,wxid,paid,refund_fen=0):
         """Called ONLY after authoritative WeChat query and snapshot matching."""

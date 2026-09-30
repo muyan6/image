@@ -2,7 +2,7 @@
 import hashlib,hmac,json,threading,time
 import requests
 from payment_store import PaymentStore
-from credit_packages import PACKAGES
+from credit_packages import PACKAGES, resolve_offer  # PACKAGES remains a legacy default export.
 from wechat_auth import exchange_session,WechatAuthError
 from wechat_sec import get_access_token
 
@@ -35,16 +35,19 @@ class VirtualPayment:
         m=self.runtime();store=self.store()
         if not self.ready():raise ValueError('充值未启用或微信支付配置未齐全')
         if user.get('account_type')!='wechat' or user.get('banned'):raise ValueError('请使用正常的小程序微信账号充值')
-        package=next((p for p in PACKAGES if p['id']==package_id),None)
-        if not package:raise ValueError('充值商品不存在')
         existing=store.find(user['openid'],client_key)
         if existing:return {'existing':True,'order':public_order(existing)}
+        package=resolve_offer(m.settings.snapshot()['commerce']['packages'],package_id)
         wx=m.settings.wechat();conf=self.conf();app=str(wx['app_id']);offer=str(conf['offer_id']);env=int(conf.get('env',0))
         session=exchange_session(code,m.settings)
         if session['openid']!=user['openid']:raise ValueError('支付登录账号不一致，请重新登录')
         if not session.get('session_key'):raise ValueError('微信未返回有效支付登录态')
-        if m.settings.wechat()['app_id']!=app or self.conf()!=conf:raise ValueError('支付配置已变更，请重新下单')
-        order,new=store.create(user['openid'],client_key,app,offer,env,package)
+        # No network under this short lock. Serialize offer revalidation and
+        # order snapshot creation against administrative configuration updates.
+        with m.settings._lock:
+            if m.settings.wechat()['app_id']!=app or self.conf()!=conf:raise ValueError('支付配置已变更，请重新下单')
+            package=resolve_offer(m.settings.snapshot()['commerce']['packages'],package_id)
+            order,new=store.create(user['openid'],client_key,app,offer,env,package)
         if not new:return {'existing':True,'order':public_order(order)}
         raw=order['sign_data']
         return {'order':public_order(order),'pay_data':{'mode':'short_series_goods','signData':raw,

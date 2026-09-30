@@ -76,7 +76,9 @@ if not args.legacy:
                      ['python','-u',Path(__file__).with_name('test_virtual_payment.py').as_posix()],
                      ['node',Path(__file__).with_name('test_payment_frontend.cjs').as_posix()],
                      ['python','-u',Path(__file__).with_name('test_backend_fixes.py').as_posix()],
-                     ['node',Path(__file__).with_name('test_compare_typography.cjs').as_posix()]])
+                     ['node',Path(__file__).with_name('test_compare_typography.cjs').as_posix()],
+                     ['python','-u',Path(__file__).with_name('test_commerce.py').as_posix()],
+                     ['node',Path(__file__).with_name('test_commerce_admin.cjs').as_posix()]])
 for command in commands:
     result = subprocess.run(command, cwd=source, env=environment, capture_output=True, text=True, encoding='utf-8')
     executions.append({'command': command, 'source_root': source.as_posix(), 'exit_status': result.returncode,
@@ -112,7 +114,7 @@ errors = [r for r in rows if 'harness_error' in r]
 if not args.legacy:
     for name in ('cloud_import_results.json','job_diagnostics_results.json','web_origin_results.json','platform_frontend_results.json','platform_results.json','cloud_audit_results.json','cloud_pipeline_results.json','cloud_origin_results.json','cloud_frontend_results.json',
                  'gateway_profiles_results.json','admin_save_results.json','virtual_payment_results.json','payment_frontend_results.json',
-                 'backend_fixes_results.json','compare_typography_results.json'):
+                 'backend_fixes_results.json','compare_typography_results.json','commerce_results.json','commerce_admin_results.json'):
         rows.extend(json.loads((output/name).read_text(encoding='utf-8'))['cases'])
 failed = sum(not r['passed'] for r in rows)
 summary = {'total': len(rows), 'passed': len(rows) - failed, 'failed': failed, 'harness_errors': len(errors)}
