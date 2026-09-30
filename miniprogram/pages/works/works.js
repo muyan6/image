@@ -13,12 +13,41 @@ Page({
   },
 
   onShow() {
-    this.loadWorks();
+    this._visible = true;
+    this._pollDeadline = Date.now() + 5 * 60 * 1000;
+    return this.loadWorks().finally(() => this.schedulePendingRefresh());
+  },
+
+  onHide() {
+    this._visible = false;
+    this.clearPendingRefresh();
+  },
+
+  onUnload() {
+    this.onHide();
+  },
+
+  clearPendingRefresh() {
+    if (this._pendingTimer != null) clearTimeout(this._pendingTimer);
+    this._pendingTimer = null;
+  },
+
+  schedulePendingRefresh() {
+    this.clearPendingRefresh();
+    if (!this._visible || Date.now() >= this._pollDeadline ||
+        !this.data.works.some(w => w.status === 'processing')) return;
+    this._pendingTimer = setTimeout(async () => {
+      this._pendingTimer = null;
+      if (!this._visible) return;
+      await this.refreshPendingWorks();
+      this.schedulePendingRefresh();
+    }, 3000);
   },
 
   async onPullDownRefresh() {
     await this.loadWorks(true);
     wx.stopPullDownRefresh();
+    this.schedulePendingRefresh();
   },
 
   async loadWorks(force = false) {

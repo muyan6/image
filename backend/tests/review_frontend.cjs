@@ -33,14 +33,15 @@ function apiModule(wx, app, clock={}) {
   return sandbox.module.exports;
 }
 
-function loadPage(name, api={}, app=appFixture(), extraWx={}) {
+function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
   let page;
   const wx=Object.assign({showToast(){},showModal(o){o.success?.({confirm:true});},
     showActionSheet(){},showLoading(){},hideLoading(){},vibrateShort(){},
     stopPullDownRefresh(){},getStorageSync(){return '';},setStorageSync(){},
     navigateTo(){},redirectTo(){},switchTab(){}},extraWx);
   vm.runInNewContext(fs.readFileSync(path.join(ROOT,`miniprogram/pages/${name}/${name}.js`),'utf8'),
-    {getApp:()=>app,require:()=>api,Page:p=>page=p,wx,console:silent,setTimeout});
+    {getApp:()=>app,require:()=>api,Page:p=>page=p,wx,console:silent,
+      setTimeout:clock.setTimeout||setTimeout,clearTimeout:clock.clearTimeout||clearTimeout,Date:clock.Date||Date});
   page.data=JSON.parse(JSON.stringify(page.data || {}));
   page.setData=function(data){Object.assign(this.data,data);};
   return {page,wx,app};
@@ -283,6 +284,25 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}) {
     page.data.historyList=app.globalData.historyList;page.data.previewWorks=app.globalData.historyList;
     page._lastProfileSync=Date.now();page._lastHistoryKeys='id1';page.refreshUserData();await tick();await tick();
     return [calls===1&&page.data.previewWorks[0].preview===fresh,{calls,preview:page.data.previewWorks[0].preview}];
+  });
+
+  await test('visible_pending_work_auto_syncs_and_poll_stops_on_hide',async()=>{
+    let done=false,nextId=1;const timers=new Map();
+    const clock={setTimeout(fn){const id=nextId++;timers.set(id,fn);return id;},clearTimeout(id){timers.delete(id);}};
+    const job={id:'id1',status:'processing',quality:'light'};
+    const api={myJobs:async()=>({jobs:[job]}),absolute:x=>x,
+      request:async()=>({...job,status:done?'succeeded':'processing',result_url:done?'cos-result':''})};
+    const {page}=loadPage('works',api,appFixture(),{},clock);
+    page.onShow();await tick();await tick();
+    if(timers.size===0)return [false,{scheduled:false}];
+    const callback=[...timers.values()][0];timers.clear();done=true;await callback();await tick();
+    const synced=page.data.works[0]?.status==='succeeded';
+    done=false;page.data.works=[{jobId:'id1',status:'processing'}];
+    if(typeof page.schedulePendingRefresh==='function')page.schedulePendingRefresh();
+    const scheduledBeforeHide=timers.size;
+    if(typeof page.onHide==='function')page.onHide();
+    return [synced&&scheduledBeforeHide===1&&timers.size===0,
+      {synced,scheduledBeforeHide,scheduledAfterHide:timers.size}];
   });
 
   await test('nickname_requires_user_input_and_persists_server_reply',async()=>{
