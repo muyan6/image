@@ -21,6 +21,8 @@ import re
 import threading
 import time
 import uuid
+from urllib.parse import urlsplit
+from gateway_profiles import gateway_profile
 from typing import Any, Callable, Dict, List, Optional
 
 log = logging.getLogger("rescue.settings")
@@ -60,6 +62,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
             "price_light_cny": 0.04,
             "price_fine_cny": 0.15,
             "timeout": 180,
+            "tiers": {"light": {}, "fine": {}},
         },
         "fal": {"enabled": True, "api_key": ""},
         "baidu": {"enabled": True, "api_key": "", "secret_key": ""},
@@ -168,6 +171,29 @@ def _validate(doc: Dict[str, Any]) -> None:
     timeout = wc.get("timeout", 180)
     if not isinstance(timeout, int) or not 10 <= timeout <= 600:
         raise ValueError("worldcodes.timeout 必须是 10~600 的整数(秒)")
+
+    tiers=wc.get('tiers',{})
+    if not isinstance(tiers,dict) or any(k not in ('light','fine') for k in tiers):
+        raise ValueError('worldcodes.tiers 只支持轻量和精细两个配置')
+    for quality,tier in tiers.items():
+        if not isinstance(tier,dict):raise ValueError('档位配置必须是对象')
+        for field in ('base_url','api_key','endpoint','model'):
+            if field in tier and not isinstance(tier[field],str):raise ValueError('档位 '+field+' 必须是字符串')
+        url=tier.get('base_url','')
+        if url:
+            try:
+                parsed=urlsplit(url);port=parsed.port
+                if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or any(ch.isspace() for ch in url):raise ValueError()
+            except ValueError:raise ValueError('档位 Base URL 必须是有效的 http(s) 地址，不能包含密钥或查询参数')
+        endpoint=tier.get('endpoint','')
+        if endpoint and (not endpoint.startswith('/') or endpoint.startswith('//') or '?' in endpoint or '#' in endpoint):
+            raise ValueError('档位接口路径必须以单个 / 开头，不含查询参数')
+        if 'timeout' in tier and (type(tier['timeout']) is not int or not 10<=tier['timeout']<=600):
+            raise ValueError('档位超时必须是 10~600 秒')
+        if 'price_cny' in tier and (type(tier['price_cny']) not in (int,float) or not 0<=tier['price_cny']<=1000):
+            raise ValueError('档位供应商单价必须是 0~1000')
+        if len(tier.get('model',''))>200 or len(tier.get('base_url',''))>500 or len(endpoint)>200:
+            raise ValueError('档位配置字段过长')
 
     prices = doc.get("prices", {})
     cloud = doc.get('cloud_pipeline', {})
@@ -392,6 +418,9 @@ class SettingsStore:
     def provider_enabled(self, name: str) -> bool:
         conf = self.provider(name)
         return bool(conf.get("enabled", name == "local"))
+
+    def gateway_for(self,quality: str='light') -> Dict[str,Any]:
+        return gateway_profile(self.provider('worldcodes'),quality)
 
     def prompt_for(self, quality: str) -> str:
         prompts = self.snapshot()["prompts"]

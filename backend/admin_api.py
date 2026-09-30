@@ -24,12 +24,15 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile
 
 from settings_store import SettingsStore, AnnouncementStore
+from gateway_profiles import tier_fields
 from templates_store import covers_dir, resolve_cover, resolve_covers
 from community_store import CommunityStore, MEDIA_PREFIX
 
 # 需要打码的密钥字段: (节路径) -> 字段列表
 _MASK_SCHEMA = {
     ("providers", "worldcodes"): ("api_key",),
+    ("providers", "worldcodes", "tiers", "light"): ("api_key",),
+    ("providers", "worldcodes", "tiers", "fine"): ("api_key",),
     ("providers", "fal"): ("api_key",),
     ("providers", "baidu"): ("api_key", "secret_key"),
     ("wechat",): ("app_secret",),
@@ -151,6 +154,9 @@ def mask_secret(value: str) -> str:
 
 def _masked_settings(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     doc = json.loads(json.dumps(snapshot))  # 深拷贝
+    wc=doc.get('providers',{}).get('worldcodes')
+    if isinstance(wc,dict):
+        wc['tiers']={q:tier_fields(snapshot['providers']['worldcodes'],q) for q in ('light','fine')}
     for path, fields in _MASK_SCHEMA.items():
         node = doc
         for part in path:
@@ -179,7 +185,9 @@ def _unmask_secrets(patch: Dict[str, Any], current: Dict[str, Any]) -> Dict[str,
                 continue
             value = patch_node[field]
             if value is None or (isinstance(value, str) and value.startswith("••••")):
-                patch_node[field] = (cur_node or {}).get(field, "")
+                if len(path)==4 and path[:3]==('providers','worldcodes','tiers'):
+                    patch_node[field]=tier_fields(current['providers']['worldcodes'],path[3]).get(field,'')
+                else:patch_node[field] = (cur_node or {}).get(field, "")
     return patch
 
 
@@ -237,7 +245,7 @@ def make_admin_router(*, settings: SettingsStore,
         _guard(request)
         snapshot = settings.snapshot()
         configured = {
-            "worldcodes": bool(snapshot["providers"]["worldcodes"].get("api_key")),
+            "worldcodes": any(bool(settings.gateway_for(q).get('api_key')) for q in ('light','fine')),
             "fal": bool(snapshot["providers"]["fal"].get("api_key"))
                    or bool(os.environ.get("FAL_KEY", "").strip()),
             "baidu": bool(snapshot["providers"]["baidu"].get("api_key")

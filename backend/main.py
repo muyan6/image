@@ -305,16 +305,16 @@ def _build_client(name: str, conf: Dict[str, Any]):
     return None
 
 
-def _get_client(name: str):
+def _get_client(name: str, quality: str = 'light'):
     """按当前设置取客户端；配置指纹变化时重建。返回 None 表示不可用。
 
     构建动作很轻（只是 new 一个 HTTP 客户端对象），直接在锁内完成，
     避免两个线程同时构建互相覆盖。
     """
-    conf = settings.provider(name)
+    conf = settings.gateway_for(quality) if name=='worldcodes' else settings.provider(name)
     fp = _fingerprint(conf)
     with _clients_lock:
-        cache_key = (name, threading.get_ident())
+        cache_key = (name, quality if name=='worldcodes' else '', threading.get_ident())
         cached = _clients.get(cache_key)
         if cached is not None and cached[0] == fp:
             return cached[1]
@@ -561,7 +561,7 @@ def _register_job(openid: str, quality: str, style: str,
         template=select_template_quality(template,quality)
         aspect_ratio = ""
     if (custom_prompt and not template) or (template or {}).get("requires_prompt"):
-        prompt_client = _get_client("worldcodes")
+        prompt_client = _get_client("worldcodes", quality)
         if not settings.provider_enabled("worldcodes") or prompt_client is None or not prompt_client.configured:
             raise HTTPException(status_code=503, detail="指定成品形式或补充要求的生成引擎当前不可用，请稍后重试")
     price = _effective_price(quality, template)
@@ -1257,7 +1257,7 @@ def _run_pipeline(job_id: str, quality: str, style: str,
             if not settings.provider_enabled(name):
                 log.info("[%s] %s 已在后台停用，跳过", job_id, name)
                 continue
-            client = _get_client(name)
+            client = _get_client(name, quality)
             if client is None or not client.configured:
                 log.info("[%s] %s 未配置，跳过", job_id, name)
                 continue
@@ -1528,8 +1528,7 @@ def _admin_stats() -> Dict[str, Any]:
 @app.get("/api/health")
 def health() -> Dict[str, Any]:
     """健康检查。configured=false 说明所有 AI 后端都没配，只剩本地引擎。"""
-    wc = settings.provider("worldcodes")
-    gateway_ok = bool(wc.get("base_url") and wc.get("api_key"))
+    gateway_ok = any(bool(settings.gateway_for(q).get('base_url') and settings.gateway_for(q).get('api_key')) for q in ('light','fine'))
     fal_conf = bool(settings.provider("fal").get("api_key")) \
         or bool(os.environ.get("FAL_KEY", "").strip())
     bd = settings.provider("baidu")

@@ -16,6 +16,7 @@ import cos_store as cos
 from cloud_origin import MEDIA_HOST, IMPORT_PREFIX
 from cloud_layout import text_rule
 from gateway_async import AsyncImages, GatewayAsyncError, key_fingerprint
+from gateway_profiles import text_gateway
 from image_processing import normalization_rule
 
 
@@ -36,8 +37,8 @@ class CloudPipeline:
         return [j for j in m.jobs.list_recent(limit=m.JOB_MAX_ENTRIES)[0]
                 if j.get('cloud_pipeline') and j.get('status') == 'processing' and not j.get('deleted_at')]
 
-    def ready(self):
-        m = self.runtime(); conf = m.settings.provider('worldcodes')
+    def ready(self,quality='light'):
+        m = self.runtime(); conf = m.settings.gateway_for(quality)
         if not (m.settings.cos_ready() and m.settings.provider_enabled('worldcodes')
                 and conf.get('api_key') and urlsplit(conf.get('base_url', '')).scheme == 'https'):
             return False
@@ -79,10 +80,10 @@ class CloudPipeline:
     def admit(self, openid, quality='light', style='', source=None, template=None,
               text_values=None, aspect_ratio='', custom_prompt='', text=None):
         m=self.runtime()
-        if not self.ready():raise HTTPException(503,detail='云端生成通道未就绪：请核对 COS 限定回源规则和异步供应商配置')
+        if not self.ready(quality):raise HTTPException(503,detail='云端生成通道未就绪：请核对该档位配置和 COS 限定回源规则')
         template=m.select_template_quality(template,quality) if template else None
         if template:aspect_ratio=''
-        provider=m.settings.provider('worldcodes')
+        provider=text_gateway(m.settings) if text else m.settings.gateway_for(quality)
         model=(text or {}).get('model') or provider.get('model_'+quality)
         if not model:raise HTTPException(503,detail='生成模型尚未配置')
         prompt=(text or {}).get('prompt') or str((template or {}).get('prompt') or m.settings.prompt_for(quality))
@@ -179,7 +180,7 @@ class CloudPipeline:
         m.jobs.update(jid,cloud_phase='submit',stage='enhance')
 
     def submit(self,job):
-        m=self.runtime();p=job['cloud_request'];provider=m.settings.provider('worldcodes')
+        m=self.runtime();p=job['cloud_request'];provider=text_gateway(m.settings) if job.get('input_mode')=='text' else m.settings.gateway_for(job['quality'])
         if provider['base_url']!=p['base'] or key_fingerprint(provider)!=p['key_fingerprint']:
             raise ValueError('供应商配置已变更，本次未提交生成，请重新创建任务')
         # Persist before sending: a restart/timeout cannot repeat this paid POST.
@@ -197,7 +198,7 @@ class CloudPipeline:
         m.jobs.update(job['id'],vendor_task_id=task,cloud_phase='generating',stage='enhance',cloud_next_at=time.time()+self.config()['poll_interval'])
 
     def poll(self,job):
-        m=self.runtime();p=job['cloud_request'];provider=m.settings.provider('worldcodes')
+        m=self.runtime();p=job['cloud_request'];provider=text_gateway(m.settings) if job.get('input_mode')=='text' else m.settings.gateway_for(job['quality'])
         if provider['base_url']!=p['base'] or key_fingerprint(provider)!=p['key_fingerprint']:
             raise ValueError('供应商配置已变更，旧任务状态待核对')
         data=AsyncImages(provider).poll(job['vendor_task_id']);state=data.get('status')

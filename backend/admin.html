@@ -173,6 +173,13 @@
   .modal-section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
   .modal-head .icon-btn, .modal-head .btn-icon { min-width: 32px; min-height: 32px; }
 
+  #page-save-home { position: sticky; bottom: 16px; z-index: 30; }
+  #page-save-bar { display:flex; justify-content:flex-end; align-items:center; gap:16px;
+    padding:14px 20px; background:#fff; border:1px solid var(--border); border-radius:12px;
+    box-shadow:0 -2px 14px rgba(16,24,40,.08); }
+  #page-save-hint { flex:1; color:var(--muted); font-size:12px; }
+  [data-save-slot] { flex:1; }
+  .modal-foot #page-save-bar { border:0; box-shadow:none; padding:0; }
   /* ---------- 封面上传 ---------- */
   .cover-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
   .covers-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
@@ -396,21 +403,32 @@
       <!-- 供应商与提示词 -->
       <section id="page-prov" hidden>
         <div class="card">
-          <div class="card-head"><h2>降级链<small>从上到下依次尝试，失败自动落下一级</small></h2></div>
+          <div class="card-head"><h2>传统模式降级链<small>开启云端模式后只走对应档位的异步网关；下列开关和顺序修改后需统一保存</small></h2></div>
           <div id="chain-list"></div>
         </div>
         <div class="card">
-          <div class="card-head"><h2>中转网关（worldcodes / Sub2API 类）</h2></div>
+          <div class="card-head"><h2>轻量生成 · 独立网关配置<small>URL、密钥、接口和模型单独保存；清空密钥只停用本档网关</small></h2></div>
           <div class="form-grid">
-            <div class="field"><label>Base URL</label><input type="text" id="wc-base"></div>
-            <div class="field"><label>API Key <small>打码=未改动；清空=停用</small></label><input type="text" id="wc-key" placeholder="sk-..."></div>
-            <div class="field"><label>接口路径</label><input type="text" id="wc-endpoint"></div>
-            <div class="field"><label>请求超时（秒）</label><input type="number" id="wc-timeout" min="10" max="600"></div>
-            <div class="field"><label>轻量档模型</label><input type="text" id="wc-ml"></div>
-            <div class="field"><label>轻量档单价（¥/张）</label><input type="number" id="wc-pl" step="0.01" min="0"></div>
-            <div class="field"><label>精细档模型</label><input type="text" id="wc-mf"></div>
-            <div class="field"><label>精细档单价（¥/张）</label><input type="number" id="wc-pf" step="0.01" min="0"></div>
+            <div class="field"><label>Base URL</label><input type="url" id="wc-light-base" placeholder="https://你的供应商域名"></div>
+            <div class="field"><label>API Key<small>打码表示保持原密钥</small></label><input type="password" id="wc-light-key" autocomplete="new-password" placeholder="API Key"></div>
+            <div class="field"><label>图像编辑接口路径</label><input id="wc-light-endpoint" placeholder="/v1/images/edits"><small>云端模式会使用对应的异步接口；不要填写完整 URL。</small></div>
+            <div class="field"><label>模型名</label><input id="wc-light-model"></div>
+            <div class="field"><label>同步请求超时（秒）</label><input type="number" id="wc-light-timeout" min="10" max="600"></div>
+            <div class="field"><label>供应商成本（¥/张）<small>不影响光子扣费</small></label><input type="number" id="wc-light-price" step="0.01" min="0" max="1000"></div>
           </div>
+          <p class="muted">同步模式兼容 OpenAI Images 接口；云端模式需要供应商支持异步任务协议，结果地址仍须匹配已配置的 COS 回源域名。</p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>精细生成 · 独立网关配置<small>URL、密钥、接口和模型单独保存；清空密钥只停用本档网关</small></h2></div>
+          <div class="form-grid">
+            <div class="field"><label>Base URL</label><input type="url" id="wc-fine-base" placeholder="https://你的供应商域名"></div>
+            <div class="field"><label>API Key<small>打码表示保持原密钥</small></label><input type="password" id="wc-fine-key" autocomplete="new-password" placeholder="API Key"></div>
+            <div class="field"><label>图像编辑接口路径</label><input id="wc-fine-endpoint" placeholder="/v1/images/edits"><small>云端模式会使用对应的异步接口；不要填写完整 URL。</small></div>
+            <div class="field"><label>模型名</label><input id="wc-fine-model"></div>
+            <div class="field"><label>同步请求超时（秒）</label><input type="number" id="wc-fine-timeout" min="10" max="600"></div>
+            <div class="field"><label>供应商成本（¥/张）<small>不影响光子扣费</small></label><input type="number" id="wc-fine-price" step="0.01" min="0" max="1000"></div>
+          </div>
+          <p class="muted">同步模式兼容 OpenAI Images 接口；云端模式需要供应商支持异步任务协议，结果地址仍须匹配已配置的 COS 回源域名。</p>
         </div>
         <div class="card">
           <div class="card-head"><h2>其它供应商密钥</h2></div>
@@ -424,16 +442,16 @@
           <div class="card-head"><h2>网关修图提示词<small>基础档位兜底用；模板有自己的提示词</small></h2></div>
           <div class="field"><label>轻量档提示词</label><textarea id="prompt-light"></textarea></div>
           <div class="field" style="margin-top:12px"><label>精细档提示词</label><textarea id="prompt-fine"></textarea></div>
-          <p style="margin:16px 0 0"><button class="btn-primary" onclick="saveProviders()">保存供应商与提示词</button></p>
+
         </div>
         <div class="card">
-          <div class="card-head"><h2>文字生图<small>共用上方网关地址与密钥，模型和光子价格独立</small></h2></div>
+          <div class="card-head"><h2>文字生图<small>沿用轻量档的 URL 与密钥；文生图模型、接口和光子价格独立</small></h2></div>
           <div class="form-grid">
             <div class="field"><label><input type="checkbox" id="tg-enabled">启用文生图</label><small>需确认中转商支持无输入图片的生成接口；未配置时不接单。</small></div>
             <div class="field"><label>文生图模型名</label><input id="tg-model" placeholder="填写中转商支持的模型名"></div>
             <div class="field"><label>文生图接口路径</label><input id="tg-endpoint" placeholder="/v1/images/generations"></div>
             <div class="field"><label>文生图光子价格</label><input type="number" id="tg-price" min="0" max="9999"></div>
-          </div><button class="btn-primary" onclick="saveTextGeneration()">保存文生图配置</button>
+          </div>
         </div>
       </section>
 
@@ -441,15 +459,16 @@
       <section id="page-conf" hidden>
         <div class="card">
           <div class="card-head"><h2>计费与输出<small>修改档位价后，已有模板价格会自动同步</small></h2></div>
+          <p id="processing-mode-summary" class="muted" aria-live="polite"></p>
           <div class="form-grid">
             <div class="field"><label>轻量档价格（光子/张）</label><input type="number" id="price-light" min="0" max="9999"></div>
             <div class="field"><label>精细档价格（光子/张）</label><input type="number" id="price-fine" min="0" max="9999"></div>
             <div class="field"><label>归一化长边<small>0 = 关闭缩放；改小可省网关费用</small></label><input type="number" id="normalize" min="0" max="8192"></div>
-            <div class="field"><label><input type="checkbox" id="ci-enabled">旧链路使用腾讯云 CI 基础图片处理</label><small>下方云端模式开启时始终由 CI 处理；此开关只影响旧链路。</small></div>
-            <div class="field"><label><input type="checkbox" id="cloud-enabled">云端异步生成</label><small>COS 直传 → CI → 供应商异步生成 → COS HTTPS 镜像导入 → CI 成品与审核；图片不经过本机解码、下载或上传。首次升级默认保留旧链路；确认 CI 审核权限与供应商异步接口后启用。不自动降级为本机图片处理。</small></div>
+            <div class="field"><label><input type="checkbox" id="ci-enabled">传统模式：云端缩放、裁剪、转码</label><small>仅控制基础图片处理，不控制审核。开启云端异步模式后，这些操作始终由 CI 完成。</small></div>
+            <div class="field"><label><input type="checkbox" id="cloud-enabled" onchange="updateProcessingHint()">云端异步生成</label><small>COS 直传 → CI → 供应商异步生成 → COS HTTPS 镜像导入 → CI 成品与审核；图片不经过本机解码、下载或上传。首次升级默认保留旧链路；确认 CI 审核权限与供应商异步接口后启用。不自动降级为本机图片处理。</small></div>
             <div class="field"><label>供应商生成并发</label><input id="cloud-concurrency" type="number" min="1" max="64"><small>默认 16；独立于 4 个元数据工作线程。供应商实际额度仍需核对。</small></div>
             <div class="field"><label>等待队列上限</label><input id="cloud-queued" type="number" min="0" max="1000"></div>
-            <div class="field"><label>CI 图片审核策略 biz-type（可选）</label><input id="cloud-biz-type"><small>按「平台与安全」开启图片审核；云端模式开启审核后，CI 403 或审核异常一律停止，不以旧链路的异常放行策略跳过，可能使用内容审核额度。</small></div>
+            <div class="field"><label>CI 图片审核策略 biz-type（可选）</label><input id="cloud-biz-type" placeholder="留空使用腾讯云默认审核策略"><small>不是 API Key，也不是模型名。没有自定义审核策略就留空；有策略时填写腾讯云「数据万象 → 内容审核 → 审核策略」中的 biz-type。云端图片使用 CI 审核，审核异常停止；微信登录和文字审核配置仍保留。</small></div>
           </div>
         </div>
         <div class="card">
@@ -460,7 +479,7 @@
             <div class="field"><label>连续第 7 天额外奖励（光子）</label><input type="number" id="reward-seventh" min="0" max="100000"></div>
             <div class="field"><label>沙龙精选文案奖励（光子）<small>仅控制前端展示，精选发放由管理员操作</small></label><input type="number" id="reward-featured" min="0" max="100000"></div>
           </div>
-          <button class="btn-primary" onclick="saveConf()">保存奖励配置</button>
+
         </div>
         <div class="card">
           <div class="card-head"><h2>维护与调试</h2></div>
@@ -481,7 +500,7 @@
             <p class="muted">服务端必须独立验证广告完成事件；仅设置广告位不会开启奖励。广告桥接SDK须提供观看凭据。</p>
           </div>
           <p class="muted" style="margin:8px 0 0">只有「启用」勾上且广告位 ID 非空，小程序才会显示「看视频得光子」。</p>
-          <p style="margin:14px 0 0"><button class="btn-primary" onclick="saveConf()">保存通用设置</button></p>
+
         </div>
       </section>
 
@@ -536,7 +555,7 @@
             <div class="field"><label>每分钟上限（0=不限）</label><input type="number" id="quota-minute" min="0" max="1000"></div>
           </div>
           <p class="muted" style="margin:0 0 14px">调试模式（通用设置页）开启时每日上限不生效</p>
-          <button class="btn-primary" onclick="saveSec()">保存平台与安全设置</button>
+
         </div>
       </section>
 
@@ -578,6 +597,10 @@
           <div class="table-wrap"><table id="violations-table"></table></div>
         </div>
       </section>
+      <div id="page-save-home"><div id="page-save-bar" hidden>
+        <span id="page-save-hint">保存本页全部配置</span>
+        <button id="page-save" class="btn-primary" onclick="saveCurrentPage()">保存修改</button>
+      </div></div>
     </main>
   </div>
 </div>
@@ -589,6 +612,7 @@
 "use strict";
 let SETTINGS = null, JOBS_OFFSET = 0;
 let TPL_GROUPS = [], TPLS = [], ANNS = [];
+let CURRENT_PAGE='dash', PROVIDER_DRAFT=null, PAGE_DIRTY=false, SAVING=false, EDITOR_SAVE=null;
 
 /* ---------- 基础 ---------- */
 const $ = (id) => document.getElementById(id);
@@ -619,11 +643,53 @@ function toast(msg, type) {
 }
 
 /* ---------- 弹窗 ---------- */
+function moveSaveHome() {
+  const bar=$('page-save-bar');
+  if (bar) $('page-save-home').appendChild(bar);
+  EDITOR_SAVE=null;
+  updateSaveBar();
+}
+function updateSaveBar() {
+  const bar=$('page-save-bar');if(!bar)return;
+  bar.hidden=!EDITOR_SAVE&&!['prov','conf','sec'].includes(CURRENT_PAGE);
+  $('page-save-hint').textContent=EDITOR_SAVE?'保存当前编辑内容':(PAGE_DIRTY?'有未保存修改 · 一次保存本页全部配置':'保存本页全部配置');
+}
+function markPageDirty(){PAGE_DIRTY=true;updateSaveBar();}
+document.addEventListener('input',event=>{
+  if(event.target.closest?.('section[id^="page-"]')&&['prov','conf','sec'].includes(CURRENT_PAGE))markPageDirty();
+});
+document.addEventListener('change',event=>{
+  if(event.target.closest?.('section[id^="page-"]')&&['prov','conf','sec'].includes(CURRENT_PAGE))markPageDirty();
+});
+window.saveCurrentPage=async()=>{
+  if(SAVING)return;
+  const action=EDITOR_SAVE||({prov:window.saveProviders,conf:window.saveConf,sec:window.saveSec})[CURRENT_PAGE];
+  if(!action)return;
+  SAVING=true;const button=$('page-save');button.disabled=true;button.textContent='保存中…';
+  const region=EDITOR_SAVE?$('modal-root'):$('page-'+CURRENT_PAGE);
+  const controls=Array.from(region.querySelectorAll('input,textarea,select,button')).filter(n=>n!==button).map(n=>[n,n.disabled]);
+  controls.forEach(([node])=>node.disabled=true);
+  try{await action();}catch(e){toast(e.message,'bad');}
+  finally{SAVING=false;controls.forEach(([node,disabled])=>node.disabled=disabled);button.disabled=false;button.textContent='保存修改';updateSaveBar();if(CURRENT_PAGE==='conf')updateProcessingHint();}
+};
+async function saveSettingsPatch(body,render){
+  const updated=await api('/settings',{method:'PUT',body});
+  SETTINGS=updated;PAGE_DIRTY=false;render();updateSaveBar();toast('本页全部配置已保存');
+  return true;
+}
 function openModal(html, wide) {
+  moveSaveHome();
   $("modal-root").innerHTML =
     `<div class="modal-mask"><div class="modal ${wide ? "wide" : ""}" role="dialog" aria-modal="true">${html}</div></div>`;
+  const slot=document.querySelector('#modal-root [data-save-slot]');
+  const allowed=['saveAnnouncement','saveGroup','saveTpl','saveCommunityPost'];
+  if(slot&&allowed.includes(slot.dataset.saveFunction)){
+    const name=slot.dataset.saveFunction,id=slot.dataset.saveId||'';
+    EDITOR_SAVE=()=>window[name](id);
+    slot.appendChild($('page-save-bar'));updateSaveBar();
+  }
 }
-function closeModal() { $("modal-root").innerHTML = ""; window._purgeSummary = null; }
+function closeModal() { moveSaveHome(); $("modal-root").innerHTML = ""; window._purgeSummary = null; }
 
 /* ---------- 登录 ---------- */
 async function doLogin() {
@@ -655,13 +721,16 @@ const PAGES = {
   tpl:   { title: "模板管理",      load: loadTemplates },
   community: { title: "社区管理", load: () => loadCommunityPosts(true) },
   ann:   { title: "公告管理",      load: loadAnnouncements },
-  prov:  { title: "供应商与提示词", load: () => { renderChain(); renderProviderForm(); } },
+  prov:  { title: "供应商与提示词", load: () => { renderProviderForm(); renderChain(); } },
   conf:  { title: "通用设置",      load: renderConf },
   sec:   { title: "平台与安全",    load: renderSec },
   jobs:  { title: "任务记录",      load: loadJobs },
   users: { title: "用户管理",      load: () => { loadUsers(); loadViolationFeedback(); } },
 };
 function showPage(name) {
+  if(SAVING){toast('正在保存，请稍候');return;}
+  if(name!==CURRENT_PAGE&&PAGE_DIRTY&&!confirm('本页有未保存修改，确定放弃并切换页面？'))return;
+  CURRENT_PAGE=name;PAGE_DIRTY=false;
   document.querySelectorAll("section[id^='page-']").forEach((s) => {
     s.hidden = s.id !== "page-" + name;
   });
@@ -737,8 +806,8 @@ const PROV_NAMES = { worldcodes: "中转网关", fal: "fal.ai", baidu: "百度 A
 
 function renderChain() {
   const box = $("chain-list"); box.innerHTML = "";
-  SETTINGS.chain.forEach((name, i) => {
-    const conf = SETTINGS.providers[name] || {};
+  PROVIDER_DRAFT.chain.forEach((name, i) => {
+    const conf = PROVIDER_DRAFT.providers[name] || {};
     const row = document.createElement("div"); row.className = "line-item";
     row.innerHTML =
       `<label class="switch"><input type="checkbox" ${conf.enabled ? "checked" : ""}
@@ -746,69 +815,56 @@ function renderChain() {
        <b>${PROV_NAMES[name] || name} <code>${name}</code></b>
        <button class="btn-ghost btn-small" ${i === 0 ? "disabled" : ""}
          onclick="moveProv(${i}, -1)">↑</button>
-       <button class="btn-ghost btn-small" ${i === SETTINGS.chain.length - 1 ? "disabled" : ""}
+       <button class="btn-ghost btn-small" ${i === PROVIDER_DRAFT.chain.length - 1 ? "disabled" : ""}
          onclick="moveProv(${i}, 1)">↓</button>`;
     box.appendChild(row);
   });
 }
-window.toggleProv = async (name, box) => {
-  try {
-    SETTINGS = await api("/settings", { method: "PUT",
-      body: { providers: { [name]: { enabled: box.checked } } } });
-    renderChain(); if (!$("page-dash").hidden) loadOverview();
-  } catch (e) { box.checked = !box.checked; toast(e.message, "bad"); }
+window.toggleProv = (name,box)=>{
+  PROVIDER_DRAFT.providers[name].enabled=box.checked;markPageDirty();renderChain();
 };
-window.moveProv = async (i, dir) => {
-  const chain = [...SETTINGS.chain];
-  [chain[i], chain[i + dir]] = [chain[i + dir], chain[i]];
-  try {
-    SETTINGS = await api("/settings", { method: "PUT", body: { chain } });
-    renderChain();
-  } catch (e) { toast(e.message, "bad"); }
+window.moveProv = (i,dir)=>{
+  const chain=PROVIDER_DRAFT.chain;
+  if(i+dir<0||i+dir>=chain.length)return;
+  [chain[i],chain[i+dir]]=[chain[i+dir],chain[i]];markPageDirty();renderChain();
 };
 
 function renderProviderForm() {
+  PROVIDER_DRAFT={chain:[...SETTINGS.chain],providers:JSON.parse(JSON.stringify(SETTINGS.providers))};
   const tg=SETTINGS.text_generation||{};
   $('tg-enabled').checked=!!tg.enabled;$('tg-model').value=tg.model||'';
   $('tg-endpoint').value=tg.endpoint||'/v1/images/generations';$('tg-price').value=tg.price??40;
   const wc = SETTINGS.providers.worldcodes || {};
-  $("wc-base").value = wc.base_url || "";
-  $("wc-key").value = wc.api_key || "";
-  $("wc-endpoint").value = wc.endpoint || "";
-  $("wc-timeout").value = wc.timeout ?? 180;
-  $("wc-ml").value = wc.model_light || "";
-  $("wc-pl").value = wc.price_light_cny ?? 0.04;
-  $("wc-mf").value = wc.model_fine || "";
-  $("wc-pf").value = wc.price_fine_cny ?? 0.15;
+  for(const quality of ['light','fine']){
+    const tier=wc.tiers?.[quality]||{};
+    const legacy={base_url:wc.base_url,api_key:wc.api_key,endpoint:wc.endpoint,timeout:wc.timeout,
+      model:wc['model_'+quality],price_cny:wc['price_'+quality+'_cny']};
+    for(const [suffix,key] of Object.entries({base:'base_url',key:'api_key',endpoint:'endpoint',timeout:'timeout',model:'model',price:'price_cny'})){
+      $('wc-'+quality+'-'+suffix).value=tier[key]??legacy[key]??'';
+    }
+  }
   $("fal-key").value = SETTINGS.providers.fal?.api_key || "";
   $("bd-key").value = SETTINGS.providers.baidu?.api_key || "";
   $("bd-sk").value = SETTINGS.providers.baidu?.secret_key || "";
   $("prompt-light").value = SETTINGS.prompts?.light || "";
   $("prompt-fine").value = SETTINGS.prompts?.fine || "";
 }
-window.saveTextGeneration=async()=>{
-  try{SETTINGS=await api('/settings',{method:'PUT',body:{text_generation:{enabled:$('tg-enabled').checked,
-    model:$('tg-model').value.trim(),endpoint:$('tg-endpoint').value.trim(),price:parseInt($('tg-price').value,10)||0}}});
-    renderProviderForm();toast('文生图配置已保存');}catch(e){toast(e.message,'bad');}
-};
 window.saveProviders = async () => {
-  try {
-    SETTINGS = await api("/settings", { method: "PUT", body: { providers: {
-      worldcodes: {
-        base_url: $("wc-base").value.trim(), api_key: $("wc-key").value.trim(),
-        endpoint: $("wc-endpoint").value.trim(),
-        timeout: parseInt($("wc-timeout").value, 10) || 180,
-        model_light: $("wc-ml").value.trim(),
-        price_light_cny: parseFloat($("wc-pl").value) || 0,
-        model_fine: $("wc-mf").value.trim(),
-        price_fine_cny: parseFloat($("wc-pf").value) || 0,
-      },
-      fal: { api_key: $("fal-key").value.trim() },
-      baidu: { api_key: $("bd-key").value.trim(), secret_key: $("bd-sk").value.trim() },
-    }, prompts: { light: $("prompt-light").value, fine: $("prompt-fine").value } } });
-    renderProviderForm();
-    toast("已保存并即时生效");
-  } catch (e) { toast(e.message, "bad"); }
+  const tiers={};
+  for(const quality of ['light','fine']){
+    const get=suffix=>$('wc-'+quality+'-'+suffix).value.trim();
+    tiers[quality]={base_url:get('base'),api_key:get('key'),endpoint:get('endpoint'),model:get('model'),
+      timeout:Number(get('timeout')),price_cny:Number(get('price'))};
+  }
+  const providers={};
+  for(const name of Object.keys(PROVIDER_DRAFT.providers))providers[name]={enabled:PROVIDER_DRAFT.providers[name].enabled};
+  providers.worldcodes.tiers=tiers;
+  providers.fal.api_key=$('fal-key').value.trim();
+  providers.baidu.api_key=$('bd-key').value.trim();providers.baidu.secret_key=$('bd-sk').value.trim();
+  return saveSettingsPatch({chain:[...PROVIDER_DRAFT.chain],providers,
+    prompts:{light:$('prompt-light').value,fine:$('prompt-fine').value},
+    text_generation:{enabled:$('tg-enabled').checked,model:$('tg-model').value.trim(),
+      endpoint:$('tg-endpoint').value.trim(),price:Number($('tg-price').value)}},()=>{renderProviderForm();renderChain();});
 };
 
 /* ---------- 通用设置 ---------- */
@@ -832,10 +888,19 @@ function renderConf() {
   $("ad-unit").value = SETTINGS.ads?.rewarded_video_unit_id || "";
   $("ad-verifier-url").value = SETTINGS.ads?.rewarded_video_verifier_url || "";
   $("ad-verifier-key").value = SETTINGS.ads?.rewarded_video_verifier_key || "";
+  updateProcessingHint();
 }
-window.saveConf = async () => {
-  try {
-    SETTINGS = await api("/settings", { method: "PUT", body: {
+function updateProcessingHint(){
+  const cloud=$('cloud-enabled').checked;
+  $('ci-enabled').disabled=cloud;
+  $('cloud-biz-type').disabled=!cloud;
+  const savedCloud=SETTINGS.cloud_pipeline?.enabled===true;
+  const savedMode=savedCloud?'云端异步模式':'传统模式';
+  const audit=SETTINGS.moderation?.enabled?(savedCloud?'CI 图片审核':'微信图片审核优先，按配置使用备用审核'):'图片审核关闭';
+  $('processing-mode-summary').textContent='已保存：'+savedMode+' · '+audit+
+    (savedCloud!==cloud?'；当前草稿已切换为'+(cloud?'云端异步模式':'传统模式')+'，点击「保存修改」后生效。':'；更改配置需点击「保存修改」。');
+}
+window.saveConf = async () => saveSettingsPatch({
       prices: { light: parseInt($("price-light").value, 10) || 0,
                 fine: parseInt($("price-fine").value, 10) || 0 },
       rewards: { invite: parseInt($("reward-invite").value, 10) || 0,
@@ -853,11 +918,7 @@ window.saveConf = async () => {
       ads: { rewarded_video_enabled: $("ad-enabled").checked,
              rewarded_video_unit_id: $("ad-unit").value.trim(),
              rewarded_video_verifier_url: $("ad-verifier-url").value.trim(),
-             rewarded_video_verifier_key: $("ad-verifier-key").value.trim() } } });
-    renderConf();
-    toast("已保存并即时生效");
-  } catch (e) { toast(e.message, "bad"); }
-};
+             rewarded_video_verifier_key: $("ad-verifier-key").value.trim() } }, renderConf);
 
 /* ---------- 平台与安全 ---------- */
 function renderSec() {
@@ -894,8 +955,11 @@ function renderSec() {
   if (!modEnabled) {
     html += `<div style="color:var(--text-sub, #666);margin-top:4px">⚠️ 机审总开关已关闭，任何上传图片均直接放行（提审必被驳回）。</div>`;
   } else {
+    if(SETTINGS.cloud_pipeline?.enabled){
+      html+='<div style="margin-top:4px;color:#4f46e5"><b>当前图片审核：腾讯云 CI（云端对象审核）</b>。微信图片审核用于传统模式；微信登录、文字审核、消息推送配置继续保留。CI 审核异常时云端任务停止，不自动跳过。</div>';
+    }
     if (wxReady) {
-      html += `<div style="color:#10b981;margin-top:4px">✅ <b>微信官方免费审核已就绪</b>（mediaCheckAsync 异步推送生效）</div>`;
+      html += `<div style="color:#10b981;margin-top:4px">✅ <b>${SETTINGS.cloud_pipeline?.enabled?'传统模式微信图片审核配置已就绪（当前图片使用 CI）':'微信官方免费审核已就绪'}</b>（mediaCheckAsync 异步推送）</div>`;
     } else {
       html += `<div style="color:#ef4444;margin-top:4px">❌ <b>微信免费审核未就绪</b>：缺少 ${missing.join("、")}</div>`;
     }
@@ -904,7 +968,9 @@ function renderSec() {
     } else {
       html += `<div style="color:var(--text-sub, #666);margin-top:4px">⚪ 腾讯云 IMS 备用审核未配置（可选）</div>`;
     }
-    if (SETTINGS.moderation?.block_on_error) {
+    if(SETTINGS.cloud_pipeline?.enabled){
+      html+='<div style="margin-top:4px;color:#4f46e5">云端图片审核异常始终停止；上方异常策略开关保留给传统图片链路及文字审核。</div>';
+    } else if (SETTINGS.moderation?.block_on_error) {
       html += `<div style="color:#10b981;margin-top:4px">🛡️ <b>严格模式已开启</b>：审核异常或超时坚决拦截，保证微信审核团队无法上传敏感图。</div>`;
     } else {
       html += `<div style="color:#f59e0b;margin-top:4px">⚠️ <b>异常放行模式</b>：若接口未配好或网络超时会自动放行（提审极易被打回，建议勾选上方“审核服务异常时也拦截”）。</div>`;
@@ -932,9 +998,7 @@ window.testWechat = async () => {
   }
 };
 
-window.saveSec = async () => {
-  try {
-    SETTINGS = await api("/settings", { method: "PUT", body: {
+window.saveSec = async () => saveSettingsPatch({
       wechat: { app_id: $("wx-appid").value.trim(), app_secret: $("wx-secret").value.trim() },
       payment: { offer_id: $("pay-offer-id").value.trim(),
                  sandbox_app_key: $("pay-sandbox-key").value.trim(),
@@ -945,11 +1009,7 @@ window.saveSec = async () => {
       moderation: { enabled: $("mod-enabled").checked, block_on_error: $("mod-strict").checked,
                     wechat_push_token: $("mod-wx-token").value.trim() },
       quota: { daily: parseInt($("quota-daily").value, 10) || 0,
-               per_minute: parseInt($("quota-minute").value, 10) || 0 } } });
-    renderSec();
-    toast("已保存并即时生效");
-  } catch (e) { toast(e.message, "bad"); }
-};
+               per_minute: parseInt($("quota-minute").value, 10) || 0 } }, renderSec);
 
 /* ---------- 公告管理 ---------- */
 async function loadAnnouncements() {
@@ -1005,7 +1065,7 @@ function openAnnModal(id) {
       <label class="check"><input type="checkbox" id="m-ann-enabled" ${!a || a.enabled ? "checked" : ""}> 立即启用</label>
     </div>
     <div class="modal-foot"><span class="msg" id="m-ann-msg"></span>
-      <button class="btn-primary" onclick="saveAnnouncement('${a ? a.id : ""}')">保存</button></div>
+      <div data-save-slot data-save-function="saveAnnouncement" data-save-id="${esc(a?.id||'')}"></div></div>
   `);
 }
 window.saveAnnouncement = async (id) => {
@@ -1060,7 +1120,7 @@ function openGroupModal(id) {
       <label class="check"><input type="checkbox" id="m-grp-enabled" ${!g || g.enabled ? "checked" : ""}> 启用（小程序可见）</label>
     </div>
     <div class="modal-foot"><span class="msg" id="m-grp-msg"></span>
-      <button class="btn-primary" onclick="saveGroup('${g ? g.id : ""}')">保存</button></div>
+      <div data-save-slot data-save-function="saveGroup" data-save-id="${esc(g?.id||'')}"></div></div>
   `);
 }
 window.saveGroup = async (id) => {
@@ -1228,7 +1288,7 @@ function openTplModal(id) {
       </div>
     </div>
     <div class="modal-foot"><span class="msg" id="m-tpl-msg"></span>
-      <button class="btn-primary" onclick="saveTpl()">保存模板</button></div>
+      <div data-save-slot data-save-function="saveTpl"></div></div>
   `, true);
   (t?.text_fields || []).forEach((f) => addFieldRow(f));
 }
@@ -1449,7 +1509,7 @@ window.openCommunityEditor = async id => {
     <div class="form-grid"><div class="field"><label>展示状态</label><select id="post-status"><option value="published" ${p.status==='published'?'selected':''}>发布展示</option><option value="paused" ${p.status==='paused'?'selected':''}>暂停展示（保留帖子）</option></select></div><div class="field"><label>画质标签</label><select id="post-quality"><option value="fine" ${p.quality==='fine'?'selected':''}>精细</option><option value="light" ${p.quality==='light'?'selected':''}>标准</option></select></div></div>
     <div class="form-grid">${field('sort','排序值（越小越靠前）','number')}${field('likes','展示点赞数','number')}</div>
     <label class="check"><input id="post-pinned" type="checkbox" ${p.pinned?'checked':''}>置顶展示</label>
-    </div><div class="modal-foot"><button class="btn-primary" onclick="saveCommunityPost('${esc(id||'')}')">保存帖子</button></div>`,true);
+    </div><div class="modal-foot"><div data-save-slot data-save-function="saveCommunityPost" data-save-id="${esc(id||'')}"></div></div>`,true);
 };
 window.uploadCommunityImage = async(file,slot)=>{
   if(!file)return;const form=new FormData();form.append('file',file);

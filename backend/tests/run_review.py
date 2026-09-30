@@ -64,7 +64,9 @@ executions = []
 if not args.legacy:
     commands.extend([['python','-u',Path(__file__).with_name('test_cloud_pipeline.py').as_posix()],
                      ['python','-u',Path(__file__).with_name('test_cloud_origin.py').as_posix()],
-                     ['node',Path(__file__).with_name('test_cloud_frontend.cjs').as_posix()]])
+                     ['node',Path(__file__).with_name('test_cloud_frontend.cjs').as_posix()],
+                     ['python','-u',Path(__file__).with_name('test_gateway_profiles.py').as_posix()],
+                     ['node',Path(__file__).with_name('test_admin_save.cjs').as_posix()]])
 for command in commands:
     result = subprocess.run(command, cwd=source, env=environment, capture_output=True, text=True, encoding='utf-8')
     executions.append({'command': command, 'source_root': source.as_posix(), 'exit_status': result.returncode,
@@ -98,7 +100,8 @@ if not args.legacy and tier_test.exists():
     rows.extend(json.loads((output / 'template_tiers_results.json').read_text(encoding='utf-8'))['cases'])
 errors = [r for r in rows if 'harness_error' in r]
 if not args.legacy:
-    for name in ('cloud_pipeline_results.json','cloud_origin_results.json','cloud_frontend_results.json'):
+    for name in ('cloud_pipeline_results.json','cloud_origin_results.json','cloud_frontend_results.json',
+                 'gateway_profiles_results.json','admin_save_results.json'):
         rows.extend(json.loads((output/name).read_text(encoding='utf-8'))['cases'])
 failed = sum(not r['passed'] for r in rows)
 summary = {'total': len(rows), 'passed': len(rows) - failed, 'failed': failed, 'harness_errors': len(errors)}
