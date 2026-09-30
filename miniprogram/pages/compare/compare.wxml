@@ -41,6 +41,7 @@
          与底层结果图共用同一个 aspectFit 缩放基准，杜绝对比滑块左右错位。 -->
     <view
       class="clip-mat"
+      wx:if="{{ !textGenerated }}"
       style="width: {{ isPressingOriginal ? 100 : splitPercent }}%;"
     >
       <image
@@ -57,18 +58,19 @@
     </view>
 
     <!-- 浮动典藏标签 -->
-    <view class="floating-tag tag-before {{ isDragging ? 'tag-faded' : '' }}">
+    <view wx:if="{{ !textGenerated }}" class="floating-tag tag-before {{ isDragging ? 'tag-faded' : '' }}">
       <text class="tag-serif">BEFORE</text>
       <text class="typewriter-label">{{ originalUnavailable ? '原图已到期' : (originalCompressed ? '对比原图 · 压缩版' : '原始样张') }}</text>
     </view>
     <view class="floating-tag tag-after {{ isDragging ? 'tag-faded' : '' }}">
       <text class="tag-serif">AFTER</text>
-      <text class="typewriter-label">典藏重构</text>
+      <text class="typewriter-label">{{ textGenerated ? '文字生图成品' : '典藏重构' }}</text>
     </view>
 
     <!-- 分割线与双向金环手柄 -->
     <view
       class="slider-wire"
+      wx:if="{{ !textGenerated }}"
       style="left: {{ splitPercent }}%;"
       hidden="{{ isPressingOriginal }}"
     >
@@ -82,6 +84,7 @@
     <!-- 长按即时检视原画胶囊 -->
     <view
       class="hold-capsule {{ isPressingOriginal ? 'capsule-held' : '' }}"
+      wx:if="{{ !textGenerated }}"
       catchtouchstart="onPressOriginalStart"
       catchtouchend="onPressOriginalEnd"
     >

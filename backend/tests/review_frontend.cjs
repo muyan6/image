@@ -48,6 +48,23 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
 }
 
 (async()=>{
+  await test('text_generation_separate_page_uses_server_price_and_no_photo',async()=>{
+    let sent,route;
+    const app=appFixture();
+    const {page}=loadPage('text-generation',{config:async()=>({text_generation:{ready:true,price:75}}),
+      request:async(path,o)=>{sent={path,...o};return {code:0,job_id:'textjob123456'};}},app,{navigateTo:o=>route=o.url});
+    page.onShow();await tick();page.onInput({detail:{value:'水彩森林'}});await page.onGenerate();
+    return [page.data.price===75&&sent.path==='/api/text-generation'&&!sent.data.image&&
+      app.globalData.historyList[0].inputMode==='text'&&route==='/pages/works/works',
+      {price:page.data.price,path:sent.path,photoRequired:false,route}];
+  });
+  await test('text_generation_disabled_or_uncertain_never_reposts',async()=>{
+    let calls=0;
+    const {page}=loadPage('text-generation',{request:async()=>{calls++;const e=new Error('network');e.code='NETWORK';throw e;}});
+    await page.onGenerate();const disabledCalls=calls;
+    page.setData({ready:true,prompt:'forest'});await page.onGenerate();await page.onGenerate();
+    return [disabledCalls===0&&calls===1&&page._uncertain,{disabledCalls,calls,uncertain:!!page._uncertain}];
+  });
   await test('template_popularity_orders_success_counts_without_breaking_search',()=>{
     const {page}=loadPage('templates',{absolute:x=>x});
     page._renderData([{id:'art',name:'艺术'}],[

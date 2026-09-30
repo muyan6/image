@@ -15,6 +15,7 @@ Page({
     label: '精细修复',
     originalUnavailable: false,
     originalCompressed: false,
+    textGenerated:false,
     resultError: '',
     originalError: '',
     loadingMedia: false,
@@ -88,8 +89,8 @@ Page({
           });
         };
         const dimensions = job.width && job.height ? `${job.width} × ${job.height}` : '';
-        this.setData({originalUnavailable: !job.orig_url,originalCompressed:!!job.comparison_compressed,
-          label: (job.provider === 'local' ? '本地增强' : 'AI 修复') + (dimensions ? ' · ' + dimensions : '')});
+        this.setData({originalUnavailable: !job.orig_url,originalCompressed:!!job.comparison_compressed,textGenerated:job.input_mode==='text',
+          label: (job.input_mode === 'text' ? 'AI 文生图' : (job.provider === 'local' ? '本地增强' : 'AI 修复')) + (dimensions ? ' · ' + dimensions : '')});
         // 两侧独立更新：原图下载缓慢/故障也不能阻断成品展示。
         const outcomes = await Promise.all([
           load('result', job.result_url).then(path => {
@@ -116,7 +117,8 @@ Page({
           originalError: original.error ? original.error.message || '原图加载失败' : '',
           originalUnavailable: !job.orig_url,
           originalCompressed:!!job.comparison_compressed,
-          label: (job.provider === 'local' ? '本地增强' : 'AI 修复') + (dimensions ? ' · ' + dimensions : '') });
+          textGenerated:job.input_mode==='text',
+          label: (job.input_mode === 'text' ? 'AI 文生图' : (job.provider === 'local' ? '本地增强' : 'AI 修复')) + (dimensions ? ' · ' + dimensions : '') });
         if (result.path) this._lastMediaRefreshAt = Date.now();
         return !!result.path;
       })

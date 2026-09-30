@@ -1,0 +1,15 @@
+<view class="page-container">
+  <text class="heading">把想象变成画面</text>
+  <text class="intro">文字生图 · 不需要上传照片</text>
+  <view class="gallery-card prompt-card">
+    <text>画面描述</text>
+    <textarea value="{{ prompt }}" bindinput="onInput" maxlength="500" placeholder="例如：雨后的森林小屋，暖色灯光，水彩插画风格。" />
+    <text class="hint">写清主体、场景和风格即可。请勿输入违规内容。</text>
+  </view>
+  <view class="ratios">
+    <view wx:for="{{ ratios }}" wx:key="key" data-key="{{ item.key }}" bindtap="onRatio" class="ratio {{ ratio === item.key ? 'active' : '' }}">{{ item.label }} · {{ item.key }}</view>
+  </view>
+  <text class="hint" wx:if="{{ !ready }}">后台尚未启用文生图模型，当前不会提交或扣费。</text>
+  <button bindtap="onGenerate" disabled="{{ !ready || busy }}" loading="{{ busy }}">{{ freeMode ? '开始生成 · 体验免扣' : '开始生成 · ' + price + ' 光子' }}</button>
+  <view class="works-link" bindtap="onWorks">前往我的作品查看任务与成品 ›</view>
+</view>

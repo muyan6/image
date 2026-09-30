@@ -132,7 +132,7 @@ function authedCall(fn) {
 }
 
 function request(path, options) {
-  const protectedPath = /^\/api\/(me(?:\/|$)|my\/|jobs\/|uploads(?:\/|$)|rescue(?:\/|$))/.test(path);
+  const protectedPath = /^\/api\/(me(?:\/|$)|my\/|jobs\/|uploads(?:\/|$)|rescue(?:\/|$)|text-generation(?:\/|$))/.test(path);
   return protectedPath ? authedCall(() => rawRequest(path, options)) : rawRequest(path, options);
 }
 

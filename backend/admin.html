@@ -426,6 +426,15 @@
           <div class="field" style="margin-top:12px"><label>精细档提示词</label><textarea id="prompt-fine"></textarea></div>
           <p style="margin:16px 0 0"><button class="btn-primary" onclick="saveProviders()">保存供应商与提示词</button></p>
         </div>
+        <div class="card">
+          <div class="card-head"><h2>文字生图<small>共用上方网关地址与密钥，模型和光子价格独立</small></h2></div>
+          <div class="form-grid">
+            <div class="field"><label><input type="checkbox" id="tg-enabled">启用文生图</label><small>需确认中转商支持无输入图片的生成接口；未配置时不接单。</small></div>
+            <div class="field"><label>文生图模型名</label><input id="tg-model" placeholder="填写中转商支持的模型名"></div>
+            <div class="field"><label>文生图接口路径</label><input id="tg-endpoint" placeholder="/v1/images/generations"></div>
+            <div class="field"><label>文生图光子价格</label><input type="number" id="tg-price" min="0" max="9999"></div>
+          </div><button class="btn-primary" onclick="saveTextGeneration()">保存文生图配置</button>
+        </div>
       </section>
 
       <!-- 通用设置 -->
@@ -755,6 +764,9 @@ window.moveProv = async (i, dir) => {
 };
 
 function renderProviderForm() {
+  const tg=SETTINGS.text_generation||{};
+  $('tg-enabled').checked=!!tg.enabled;$('tg-model').value=tg.model||'';
+  $('tg-endpoint').value=tg.endpoint||'/v1/images/generations';$('tg-price').value=tg.price??40;
   const wc = SETTINGS.providers.worldcodes || {};
   $("wc-base").value = wc.base_url || "";
   $("wc-key").value = wc.api_key || "";
@@ -770,6 +782,11 @@ function renderProviderForm() {
   $("prompt-light").value = SETTINGS.prompts?.light || "";
   $("prompt-fine").value = SETTINGS.prompts?.fine || "";
 }
+window.saveTextGeneration=async()=>{
+  try{SETTINGS=await api('/settings',{method:'PUT',body:{text_generation:{enabled:$('tg-enabled').checked,
+    model:$('tg-model').value.trim(),endpoint:$('tg-endpoint').value.trim(),price:parseInt($('tg-price').value,10)||0}}});
+    renderProviderForm();toast('文生图配置已保存');}catch(e){toast(e.message,'bad');}
+};
 window.saveProviders = async () => {
   try {
     SETTINGS = await api("/settings", { method: "PUT", body: { providers: {

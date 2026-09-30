@@ -51,6 +51,11 @@
 
     <text class="generation-warning">请勿上传违规内容：审核违规不予生图并扣除本次点数；7天内累计3次将永久封禁账号，剩余点数不予退还。</text>
 
+    <view class="text-generation-entry gallery-card" bindtap="onOpenTextGeneration">
+      <text class="portal-btn-title">文字生图 →</text>
+      <text class="portal-desc">没有照片？描述你想创作的画面</text>
+    </view>
+
     <!-- 底部历史记录轻量入口 (不堆砌) -->
     <view
       class="history-entry"

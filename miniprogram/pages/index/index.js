@@ -2,6 +2,7 @@ const app = getApp();
 const api = require('../../utils/api.js');
 
 Page({
+  onOpenTextGeneration() {wx.navigateTo({url:'/pages/text-generation/text-generation'});},
   data: {
     lightPoints: 0,
     freeMode: false,

@@ -904,3 +904,4 @@
   color: var(--ink-muted);
   padding: 0 8rpx;
 }
+.text-generation-entry { padding:28rpx; margin-top:28rpx; display:flex; flex-direction:column; gap:12rpx; }

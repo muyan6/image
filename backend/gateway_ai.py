@@ -180,6 +180,19 @@ class OpenAIImagesEnhance:
     # ------------------------------------------------------------------ #
     # 内部
     # ------------------------------------------------------------------ #
+    def generate(self,output_path: str,prompt: str,model: str,size: str,endpoint: str="/v1/images/generations") -> str:
+        """Text-to-image has no input image; timeout is not retried blindly."""
+        if not self.configured or not model:raise GatewayError('文生图模型未配置',code='NOT_CONFIGURED')
+        try:
+            response=self._session.post(self.base_url+endpoint,
+                headers={'Authorization':'Bearer '+self.api_key,'Content-Type':'application/json'},
+                json={'model':model,'prompt':prompt,'size':size,'n':1},timeout=(10,self.timeout))
+        except requests.RequestException as exc:raise GatewayError('文生图请求未完成，请稍后查看作品状态',code='NETWORK') from exc
+        self._raise_for_status(response)
+        self._write_output(self._extract_image(response),output_path)
+        self.last_model=model
+        return output_path
+
     def _maybe_compress(self, path: str, limit_mb: float = 18.0) -> bytes:
         """网关普遍有 20MB 左右的请求上限,超了就压成 JPEG。"""
         with open(path, "rb") as fh:

@@ -26,6 +26,7 @@ import json
 import logging
 import mimetypes
 import os
+import sys
 import re
 import shutil
 import sqlite3
@@ -47,6 +48,7 @@ from admin_api import ensure_admin_password, make_admin_router
 from cleanup_store import CleanupStore
 from community_store import CommunityStore
 from template_output import select_template_output
+from text_generation import make_text_router, ready as text_generation_ready
 from image_processing import IMAGE_LOCK, image_limited, upload_limited, normalization_rule, BoundedExecutor, QueueFull
 from cos_store import process_image as cos_process_image
 from credit_packages import GENERATION_COST, POINTS_PER_YUAN, public_packages
@@ -1558,6 +1560,7 @@ def public_config() -> Dict[str, Any]:
         "free_mode": settings.free_mode(),
         "cos_ready": settings.cos_ready(),
         "template_output_modes": ["template", "single"],
+        "text_generation": {'ready':text_generation_ready(sys.modules[__name__]),'price':settings.snapshot()['text_generation']['price']},
         "image_processing": {"ci_enabled":settings.snapshot()["processing"]["ci_enabled"],"local_image_parallelism":1},
         "maintenance": settings.maintenance(),
         "styles": settings.styles(),
@@ -2257,6 +2260,7 @@ def query_job_status(job_id: str, request: Request):
         "template_name": job.get("template_name", ""),
         "template_output_mode": job.get("template_output_mode", "template" if job.get("template_id") else ""),
         "comparison_compressed":bool(job.get("comparison_file") or job.get("comparison_cos")),
+        "input_mode":job.get('input_mode','photo'),
         "timings":job.get("timings",{}),
         "started_at":job.get("started_at"),
         "completed_at":job.get("completed_at"),
@@ -2339,6 +2343,7 @@ def get_my_jobs(request: Request, limit: int = 30):
             "status": job["status"],
             "stage": job.get("stage"),
             "quality": job.get("quality"),
+            "input_mode":job.get('input_mode','photo'),
             "provider": job.get("provider"),
             "width": job.get("width"),
             "height": job.get("height"),
@@ -2413,6 +2418,8 @@ async def unhandled(request, exc):  # noqa: ANN001, ARG001
     log.exception("未处理异常: %s", exc)
     return JSONResponse(status_code=500, content={"detail": "服务器内部错误"})
 
+
+app.include_router(make_text_router(lambda:sys.modules[__name__]))
 
 if __name__ == "__main__":
     import uvicorn

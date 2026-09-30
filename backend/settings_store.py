@@ -73,6 +73,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "pricing_revision": 2,
     "free_mode": False,
     "processing": {"ci_enabled": True},
+    "text_generation": {"enabled":False,"model":"","endpoint":"/v1/images/generations","price":40},
     "wechat": {"app_id": "", "app_secret": ""},
     "payment": {"offer_id": "", "sandbox_app_key": "", "production_app_key": ""},
     "tencent": {"secret_id": "", "secret_key": "", "cos_bucket": "", "cos_region": "ap-guangzhou", "cos_custom_domain": ""},
@@ -114,7 +115,7 @@ def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # 误删后服务会残废的关键结构：合并后一律用默认值兜底补齐
-_DICT_SECTIONS = ("providers", "wechat", "payment", "tencent", "moderation", "quota", "processing",
+_DICT_SECTIONS = ("providers", "wechat", "payment", "tencent", "moderation", "quota", "processing", "text_generation",
                   "prompts", "prices", "rewards", "maintenance", "quality_to_style",
                   "community", "ads")
 
@@ -167,6 +168,11 @@ def _validate(doc: Dict[str, Any]) -> None:
         raise ValueError("worldcodes.timeout 必须是 10~600 的整数(秒)")
 
     prices = doc.get("prices", {})
+    tg=doc.get('text_generation',{})
+    if type(tg.get('enabled')) is not bool:raise ValueError('text_generation.enabled 必须是布尔值')
+    if not isinstance(tg.get('model'),str) or len(tg['model'])>200:raise ValueError('文生图模型名无效')
+    if not isinstance(tg.get('endpoint'),str) or not tg['endpoint'].startswith('/') or len(tg['endpoint'])>200:raise ValueError('文生图接口路径必须以 / 开头')
+    if type(tg.get('price')) is not int or not 0<=tg['price']<=9999:raise ValueError('文生图价格必须为 0~9999 光子')
     if type(doc.get('processing',{}).get('ci_enabled')) is not bool:
         raise ValueError('processing.ci_enabled 必须是布尔值')
     for tier in ("light", "fine"):
