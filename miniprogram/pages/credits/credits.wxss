@@ -455,3 +455,21 @@
 .banner-content { min-width: 0; }
 .banner-btn { flex-shrink: 0; min-width: 108rpx; }
 .checkin-day-label, .checkin-day-caption { font-size: 20rpx; }
+
+
+/* Quiet, paper-and-ink promotion treatment; no flashing sale graphics. */
+.package-promotion { background: var(--paper-card-subtle); border-left: 4rpx solid var(--accent-gold); padding-left: 26rpx; }
+.package-stale { opacity: .6; }
+.pkg-info { flex: 1; min-width: 0; padding-right: 18rpx; }
+.pkg-title-row { flex-wrap: wrap; gap: 8rpx 12rpx; }
+.pkg-promotion-tag { font-size: 19rpx; line-height: 1.5; color: var(--accent-rust); border: 1rpx solid rgba(158,75,60,.25); padding: 1rpx 9rpx; letter-spacing: 1rpx; white-space: nowrap; }
+.pkg-sub { line-height: 1.6; overflow-wrap: anywhere; }
+.pkg-countdown { display: flex; align-items: center; flex-wrap: wrap; gap: 8rpx; margin-top: 12rpx; font-size: 20rpx; color: var(--ink-muted); line-height: 1.6; }
+.pkg-countdown-dot { width: 6rpx; height: 6rpx; border-radius: 50%; background: var(--accent-gold); flex-shrink: 0; }
+.pkg-countdown-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink-body); white-space: nowrap; }
+.pkg-price-box { flex-shrink: 0; align-self: center; }
+.pkg-price-stack { display: flex; flex-direction: column; align-items: flex-end; gap: 6rpx; }
+.pkg-original-price { font-size: 21rpx; line-height: 1.2; color: var(--ink-faint); text-decoration: line-through; font-family: var(--font-serif); }
+.pkg-sale-price { color: var(--accent-rust); }
+.catalog-message { display: flex; justify-content: space-between; padding: 22rpx 28rpx; background: var(--paper-card-subtle); color: var(--accent-rust); border: 1rpx dashed var(--paper-border-dark); font-size: 23rpx; }
+.catalog-empty { padding: 36rpx 28rpx; color: var(--ink-muted); font-size: 24rpx; }

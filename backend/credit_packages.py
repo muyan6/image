@@ -125,7 +125,9 @@ def active_offers(catalog=None, now=None):
             public_id = legacy['id']
         offers.append({'id': public_id, 'product_id': row['product_id'], 'amount_fen': amount,
                        'points': points, 'bonus': bonus, 'bonus_text': description,
-                       'promotion_active': bool(active)})
+                       'promotion_active': bool(active), 'regular_amount_fen': item['amount_fen'],
+                       'regular_price_text': price_text(item['amount_fen']) if active and amount < item['amount_fen'] else '',
+                       'promotion_ends_at': promo['ends_at'] if active else 0})
     return offers
 
 
@@ -139,5 +141,14 @@ def resolve_offer(catalog, public_id, now=None):
 def public_packages(generation_cost=GENERATION_COST, catalog=None, now=None):
     return [{"id": p['id'], "yuan": p['amount_fen'] / 100, "points": p['points'], "bonus": p['bonus'],
              "price_text": price_text(p['amount_fen']), "bonus_text": p['bonus_text'],
+             "amount_fen":p["amount_fen"], "promotion_active":p["promotion_active"],
+             "regular_price_text":p["regular_price_text"], "regular_amount_fen":p["regular_amount_fen"],
+             "promotion_ends_at":p["promotion_ends_at"],
              "generations": p['points'] // generation_cost if generation_cost > 0 else 0}
             for p in active_offers(catalog, now)]
+
+
+def next_offer_change(catalog, now):
+    boundaries = [stamp for item in catalog if item['enabled'] and item['promotion']['enabled']
+                  for stamp in (item['promotion']['starts_at'], item['promotion']['ends_at']) if stamp > now]
+    return min(boundaries) if boundaries else 0

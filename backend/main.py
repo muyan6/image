@@ -1015,6 +1015,8 @@ def _cleanup_job_files(evicted_jobs: List[Dict[str, Any]]) -> None:
                 cleanup.schedule("local", name, time.time())
                 _safe_remove(os.path.join(UPLOAD_DIR, name))
         for key in _job_cos_keys(job):cleanup.schedule('cos',key,time.time())
+        if job.get('cloud_pipeline') and jobs.get(job['id']) is None:
+            cloud.audits.forget(job['id'])
 
 
 def _job_cos_keys(job):
@@ -1953,6 +1955,7 @@ class _InviteBody(BaseModel):
 
 
 class _RescueByUploadBody(BaseModel):
+    expected_price: Optional[int] = None
     upload_id: str = ""
     quality: str = ""
     style: str = ""
@@ -2318,7 +2321,7 @@ def create_rescue_job_by_upload(payload: _RescueByUploadBody,
             text_reject = _moderate_text_or_reject(combined_text, user['openid'])
             if text_reject:_reject_uploaded_content(user['openid'], 'text', text_reject, quality, tpl)
             return cloud.admit(user['openid'],quality,style,source=rec,template=tpl,
-                               text_values=text_values,aspect_ratio=payload.aspect_ratio,custom_prompt=custom_prompt)
+                               text_values=text_values,aspect_ratio=payload.aspect_ratio,custom_prompt=custom_prompt,expected_price=payload.expected_price)
         except Exception:
             with _uploads_lock:_uploads.setdefault(upload_id,rec)
             raise
@@ -2397,6 +2400,7 @@ def query_job_status(job_id: str, request: Request):
         "height": job.get("height"),
         "balance": users.get_balance(user["openid"]),
         "error": job.get("error"),
+        "violation": users.violation_for_job(user["openid"],job["id"]) if job.get("status")=="failed" else None,
         "orig_url": _job_media_url(job, "orig"),
         "result_url": _job_media_url(job, "result"),
         "created_at": job.get("created_at"),
@@ -2407,8 +2411,11 @@ def query_job_status(job_id: str, request: Request):
 def credit_packages() -> Dict[str, Any]:
     """先公开真实价格表；收款与发货未闭环前绝不由客户端加光子。"""
     cost = settings.prices().get("light", GENERATION_COST)
-    catalog = public_packages(cost, settings.snapshot()['commerce']['packages'])
+    from credit_packages import next_offer_change
+    commerce=settings.snapshot()['commerce'];now=time.time()
+    catalog = public_packages(cost, commerce['packages'], now=now)
     return {"packages": catalog, "points_per_yuan": POINTS_PER_YUAN,
+            "server_time":now,"next_change_at":next_offer_change(commerce["packages"],now),
             "generation_cost": cost, "payment_ready": payments.ready() and bool(catalog),
             "payment_env":payments.conf().get('env',0),"order_center_path":"pages/orders/orders"}
 
@@ -2461,10 +2468,12 @@ def refresh_job_media(job_id: str, request: Request, kind: str = "result"):
 
 
 @app.get("/api/my/jobs")
-def get_my_jobs(request: Request, limit: int = 30):
+def get_my_jobs(request: Request, limit: int = 30, offset: int = 0):
     """查询当前登录用户最近提交的任务历史列表（支持跨端同步与切屏恢复）。"""
     user = _current_user(request)
-    raw_list = jobs.list_for_openid(user["openid"], limit=min(max(1, limit), 100))
+    limit=min(max(1,limit),100);offset=max(0,offset)
+    page=jobs.list_for_openid(user["openid"],offset=offset,limit=limit+1)
+    more=len(page)>limit;raw_list=page[:limit]
     res = []
     for job in raw_list:
         res.append({
@@ -2480,11 +2489,12 @@ def get_my_jobs(request: Request, limit: int = 30):
             "template_id": job.get("template_id", ""),
             "template_name": job.get("template_name", ""),
             "error": job.get("error"),
+            "violation": users.violation_for_job(user["openid"],job["id"]) if job.get("status")=="failed" else None,
             "orig_url": _job_media_url(job, "orig"),
             "result_url": _job_media_url(job, "result"),
             "created_at": job.get("created_at"),
         })
-    return {"jobs": res}
+    return {"jobs": res,"has_more":more,"next_offset":offset+len(res)}
 
 
 @app.delete("/api/my/jobs/{job_id}")

@@ -47,6 +47,8 @@ Page({
     rightsOk: true,
 
     // 状态
+    priceReady: false,
+    priceError: '',
     processing: false,
     processingText: '正在提交照片…',
     currentJobId: null
@@ -104,8 +106,10 @@ Page({
       freeMode: app.globalData.freeMode
     });
 
+    this.setData({priceReady:false,priceError:''});
     api.config().then((c) => {
-      if (!c) return;
+      if(this._unloaded)return;
+      if (!c || !c.prices || !Number.isInteger(c.prices.light) || !Number.isInteger(c.prices.fine)) throw new Error('价格尚未加载');
       const free = !!c.free_mode;
       app.globalData.freeMode = free;
       const prices = c.prices || {};
@@ -113,6 +117,7 @@ Page({
       const pFine = (prices.fine != null) ? prices.fine : this.data.costFine;
 
       this.setData({
+        priceReady: true,priceError:'',
         freeMode: free,
         costLight: pLight,
         costFine: pFine,
@@ -121,7 +126,7 @@ Page({
         priceRangeText: pLight === pFine ? `${pLight} 光子` : `${pLight}~${pFine} 光子`
       });
       this.refreshCurrentCost();
-    }).catch(() => {});
+    }).catch(() => {if(!this._unloaded)this.setData({priceReady:false,priceError:'价格加载失败，点击重试'});});
 
     // 光子余额以服务端为准
     api.me().then((d) => {
@@ -327,6 +332,14 @@ Page({
     this.setData({showOutputHelp: !this.data.showOutputHelp});
   },
 
+  onSubmitViolationFeedback() {
+    const id=this.data.violationId;if(!id)return;
+    wx.showModal({title:'提交误判反馈',editable:true,placeholderText:'请描述需要复核的情况',
+      success:async r=>{if(!r.confirm||!(r.content||'').trim())return;
+        try{await api.submitViolationFeedback(id,r.content.trim());wx.showToast({title:'反馈已提交',icon:'success'});}
+        catch(e){wx.showToast({title:e.message||'提交失败，请重试',icon:'none'});}}});
+  },
+
   onAcknowledgeViolation() {
     this.setData({ showViolationNotice: false });
   },
@@ -347,6 +360,7 @@ Page({
       return;
     }
 
+    if(!this.data.priceReady){wx.showToast({title:'请先加载最新价格',icon:'none'});this.loadUserData();return;}
     if (!this.data.rightsOk) {
       wx.showToast({
         title: '请先确认照片使用权',
@@ -427,7 +441,7 @@ Page({
 
     try {
       const formData = {
-        quality: this.data.quality
+        quality: this.data.quality, expected_price:this.data.freeMode?0:this.data.currentQualityCost
       };
       if (tpl && tpl.id) {
         formData.template_id = tpl.id;
@@ -560,6 +574,7 @@ Page({
         return;
       }
 
+      if(err&&err.status===409){this.loadUserData();}
       // 402 = 服务端判定光子不足（余额是服务端记账，客户端预判可能过期）
       if (err && err.status === 402) {
         wx.showModal({

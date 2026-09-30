@@ -84,7 +84,14 @@ Page({
     if (!this.data.works.length) this.setWorks((app.globalData.historyList || []).map(w =>
       Object.assign({}, w, {preview: this.safePreview(w)})));
     try {
-      const res = await api.myJobs(100);
+      let res = await api.myJobs(100);
+      const pages=[...((res&&res.jobs)||[])];let offset=0;
+      while(res&&res.has_more){
+        if(this._loadVersion!==version)return;
+        const next=Number(res.next_offset);if(!Number.isInteger(next)||next<=offset)throw new Error('作品分页异常');
+        offset=next;res=await api.myJobs(100,offset);pages.push(...((res&&res.jobs)||[]));
+      }
+      res={jobs:pages};
       if (this._loadVersion !== version) return;
       const list = app.globalData.historyList || [];
       const deleted = this._deletedIds || new Set();
@@ -98,7 +105,7 @@ Page({
         const work = Object.assign({}, old, {
           jobId: cj.id, original: api.absolute(cj.orig_url || ''),
           result: cj.status === 'succeeded' ? api.absolute(cj.result_url || '') : '',
-          status: cj.status, error: cj.error || '', quality: cj.quality,
+          status: cj.status, error: cj.error || '', violation:cj.violation||null, quality: cj.quality,
           provider: cj.provider, width: cj.width, height: cj.height,
           templateName: cj.template_name || '', createdAt: cj.created_at || old.createdAt || 0,
           time: cj.created_at ? this.formatTime(new Date(cj.created_at * 1000)) : old.time || '近期'
@@ -219,7 +226,7 @@ Page({
           changed = true;
         } else if (job.status === 'failed') {
           fresh.status = 'failed';
-          fresh.error = job.error || '生成失败';
+          fresh.error = job.error || '生成失败';fresh.violation=job.violation||null;
           changed = true;
         }
         if (changed) {
@@ -242,9 +249,10 @@ Page({
     if (!item) return;
     if (item.status === 'failed') {
       wx.showActionSheet({
-        itemList: ['查看失败原因', '删除此件作品'],
+        itemList: ['查看失败原因', '删除此件作品'].concat(item.violation?['提交误判反馈']:[]),
         success: (r) => {
-          if (r.tapIndex === 1) this.deleteSingleWork(index);
+          if (r.tapIndex === 1) this.deleteSingleWork(index,item);
+          else if(r.tapIndex===2)this.submitWorkFeedback(item);
           else wx.showModal({title: '生成未完成', content: item.error || '生成失败，光子已按扣款流水核对', showCancel: false});
         }
       });
@@ -329,13 +337,24 @@ Page({
             url: `/pages/compare/compare?result=${encodeURIComponent(item.result)}&original=${encodeURIComponent(item.original || '')}&job=${encodeURIComponent(item.jobId || '')}`
           });
         } else if (res.tapIndex === 2) {
-          this.deleteSingleWork(index);
+          this.deleteSingleWork(index,item);
         }
       }
     });
   },
 
-  deleteSingleWork(index) {
+  submitWorkFeedback(item) {
+    const v=item.violation;if(!v)return;
+    if(v.feedback_submitted){wx.showToast({title:'反馈已提交，等待复核',icon:'none'});return;}
+    wx.showModal({title:'提交误判反馈',editable:true,placeholderText:'请描述需要复核的情况',success:async r=>{
+      if(!r.confirm||!(r.content||'').trim())return;
+      try{await api.submitViolationFeedback(v.violation_id,r.content.trim());v.feedback_submitted=true;wx.showToast({title:'反馈已提交',icon:'success'});}
+      catch(e){wx.showToast({title:e.message||'提交失败',icon:'none'});}}});
+  },
+
+  deleteSingleWork(index, selected) {
+    const item=selected||this.data.works[index]||(app.globalData.historyList||[])[index];
+    if(!item)return;
     wx.showModal({
       title: '删除作品',
       content: '确定要从典藏列表中移除这件作品吗？',
@@ -344,8 +363,6 @@ Page({
       cancelText: '保留',
       success: async (res) => {
         if (!res.confirm) return;
-        const item = this.data.works[index] || (app.globalData.historyList || [])[index];
-        if (!item) return;
         this._loadVersion = (this._loadVersion || 0) + 1;
         try {
           const deletion = item.jobId ? await api.deleteJob(item.jobId) : null;

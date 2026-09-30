@@ -45,6 +45,12 @@ class CloudAudit:
             self.db.commit()
             return [r[0] for r in rows if r[0]]
 
+    def forget(self,jid):
+        # Only the primary job retention/eviction path calls this after cleanup registration.
+        with self.lock,self.db:
+            self.db.execute('DELETE FROM audits WHERE jid=?',(jid,))
+            self.db.execute('DELETE FROM early WHERE created<?',(time.time()-300,))
+
     def row(self, jid, stage):
         with self.lock:
             row = self.db.execute('SELECT * FROM audits WHERE jid=? AND stage=?', (jid, stage)).fetchone()

@@ -8,7 +8,7 @@ const xml=name=>fs.readFileSync(path.join(root,`miniprogram/pages/${name}/${name
 function page(name,api={},wx={},payment={}){
  let p;const app={globalData:{historyList:[],freeMode:false,mediaCache:{}},persist(){},setBalance(){}};
  vm.runInNewContext(fs.readFileSync(path.join(root,`miniprogram/pages/${name}/${name}.js`),'utf8'),{
-  Page:x=>p=x,getApp:()=>app,require:n=>n.includes('/payment')?payment:api,
+  Page:x=>p=x,getApp:()=>app,require:n=>n.includes('/commerce')?require(path.join(root,'miniprogram/utils/commerce.js')):n.includes('/payment')?payment:api,
   wx:{getStorageSync:()=>null,setStorageSync(){},showToast(){},showModal(){},showLoading(){},hideLoading(){},vibrateShort(){},...wx},
   console:{log(){},warn(){},error(){}},setTimeout,clearTimeout});
  p.data=JSON.parse(JSON.stringify(p.data));p.setData=d=>Object.assign(p.data,d);return p;

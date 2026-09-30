@@ -6,7 +6,9 @@ import requests
 import http_transport
 
 class GatewayAsyncError(RuntimeError):
-    def __init__(self,message,uncertain=False):super().__init__(message);self.uncertain=uncertain
+    def __init__(self,message,uncertain=False,*,status=None):
+        super().__init__(message);self.uncertain=uncertain;self.status=status
+        self.retryable=status is None or status in (408,429,500,502,503,504)
 
 def key_fingerprint(conf):return hashlib.sha256(str(conf.get('api_key') or '').encode()).hexdigest()
 
@@ -56,14 +58,11 @@ class AsyncImages:
                     if count>256*1024:raise GatewayAsyncError('异步接口返回超过元数据上限',uncertain=method=='POST')
                     chunks.append(chunk)
                 import json
+                if response.status_code>=400:
+                    raise GatewayAsyncError('供应商异步接口拒绝请求：HTTP '+str(response.status_code),
+                        uncertain=method=='POST' and response.status_code>=500,status=response.status_code)
                 data=json.loads(b''.join(chunks))
                 if not isinstance(data,dict):raise GatewayAsyncError('供应商未返回对象元数据',uncertain=method=='POST')
-                if response.status_code>=400:
-                    error=data.get('error') or {}
-                    if not isinstance(error,dict):error={}
-                    code=error.get('code') or error.get('type') or str(response.status_code)
-                    code=str(code).replace(self.conf['api_key'],'[redacted]')[:100]
-                    raise GatewayAsyncError('供应商异步接口拒绝请求：'+code,uncertain=method=='POST' and response.status_code>=500)
                 return response.status_code,data
         except requests.RequestException:raise GatewayAsyncError('供应商请求结果待核对',uncertain=method=='POST')
         except (ValueError,TypeError):raise GatewayAsyncError('供应商未返回有效元数据',uncertain=method=='POST')

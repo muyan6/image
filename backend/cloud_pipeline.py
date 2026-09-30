@@ -95,7 +95,7 @@ class CloudPipeline:
             self.wake_event.wait(.25)
 
     def admit(self, openid, quality='light', style='', source=None, template=None,
-              text_values=None, aspect_ratio='', custom_prompt='', text=None):
+              text_values=None, aspect_ratio='', custom_prompt='', text=None, expected_price=None):
         m=self.runtime()
         if not self.ready(quality,text=bool(text)):raise HTTPException(503,detail='云端生成通道未就绪：请核对所选生成网关配置和 COS 限定回源规则')
         template=m.select_template_quality(template,quality) if template else None
@@ -107,6 +107,8 @@ class CloudPipeline:
         if custom_prompt and not template:prompt+='\n用户修复需求：'+custom_prompt
         price=text['price'] if text else m._effective_price(quality,template)
         jid=uuid.uuid4().hex[:12];free=m.settings.free_mode();charged=0 if free else price
+        if expected_price is not None and expected_price!=charged:
+            raise HTTPException(409,detail='生成价格已更新，请刷新价格后重新确认')
         # Admission and queue capacity are checked together before reserving balance.
         with self.lock:
             cfg=self.config()
@@ -325,6 +327,17 @@ class CloudPipeline:
             try:m.templates.inc_usage(job['template_id'])
             except Exception:m.log.exception('模板热度写入失败')
 
+    def retry_cloud_step(self,job,phase,exc):
+        # Only idempotent COS steps are retried; never the paid supplier POST.
+        if phase not in ('prepare','finalize') or not isinstance(exc,cos.CosError):return False
+        if exc.status not in (408,429,500,502,503,504) and exc.code!='NETWORK':return False
+        now=time.time();counts=dict(job.get('phase_retry_counts') or {});attempt=counts.get(phase,0)+1
+        if attempt>3 or now>=job['deadline']:return False
+        counts[phase]=attempt
+        self.runtime().jobs.update(job['id'],phase_retry_counts=counts,last_phase_error=str(exc)[:300],
+                                   cloud_next_at=min(job['deadline'],now+min(15,2**attempt)))
+        return True
+
     def fail(self,job,message):
         m=self.runtime()
         if not m.jobs.fail_cloud_job(job['id'],stage='failed',cloud_phase='failed',error=message[:500],
@@ -352,13 +365,16 @@ class CloudPipeline:
                 pass  # A late vendor response cannot refund or revive a cancelled job.
             elif exc.uncertain:
                 m.jobs.update(jid,cloud_phase='unknown',stage='submission_unknown',cloud_next_at=time.time()+30)
-            elif job and job.get('cloud_phase')=='generating':
+            elif job and job.get('cloud_phase')=='generating' and exc.retryable:
                 m.jobs.update(jid,cloud_next_at=time.time()+15,last_poll_error=str(exc)[:200])
-            elif job:self.fail(job,str(exc))
+            elif job:
+                m.jobs.update(jid,last_poll_error=str(exc)[:200],vendor_http_status=exc.status)
+                self.fail(job,str(exc))
         except Exception as exc:
             current=m.jobs.get(jid)
             if current and current.get('status')=='processing' and not current.get('deleted_at'):
-                self.fail(current,str(exc) if isinstance(exc,(ValueError,cos.CosError,RuntimeError)) else '云端处理未完成，本次光子退回')
+                if not self.retry_cloud_step(current,phase,exc):
+                    self.fail(current,str(exc) if isinstance(exc,(ValueError,cos.CosError,RuntimeError)) else '云端处理未完成，本次光子退回')
             elif current and (current.get('deleted_at') or current.get('status')=='failed'):
                 # A delete may race a cloud copy; delete unique targets after that copy finishes.
                 for key in (current.get('result_cos'),current.get('norm_cos'),current.get('orig_cos')):

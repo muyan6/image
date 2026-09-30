@@ -281,6 +281,15 @@ class UserStore:
                                (time.time(), openid, "violation_feedback", "id=" + violation_id))
             return True
 
+    def violation_for_job(self, openid, job_id):
+        with self._lock:
+            row=self._conn.execute('SELECT id,reason,charged,status,feedback FROM violations WHERE id=? AND openid=?',(job_id,openid)).fetchone()
+            if not row:return None
+            count=self._conn.execute("SELECT COUNT(*) FROM violations WHERE openid=? AND status IN ('active','upheld') AND created_at>=? AND created_at>(SELECT ban_reset_at FROM users WHERE openid=?)",(openid,time.time()-7*86400,openid)).fetchone()[0]
+            banned=self._conn.execute('SELECT banned FROM users WHERE openid=?',(openid,)).fetchone()[0]
+        return {'code':'CONTENT_VIOLATION','violation_id':row[0],'message':row[1],'charged':row[2],
+                'status':row[3],'feedback_submitted':bool(row[4]),'weekly_count':count,'banned':bool(banned)}
+
     def list_violations(self, limit: int = 100) -> List[Dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute("SELECT id,openid,created_at,kind,reason,charged,status,feedback "

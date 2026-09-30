@@ -38,7 +38,9 @@ class ImportTests(CloudTests):
 
     def test_backfill_timeout_fails_without_delivering(self):
         jid=self.importing();m.jobs.update(jid,cloud_import_started_at=time.time()-121)
-        self.cloud.step(jid);j=m.jobs.get(jid)
+        with patch.object(cp.cos,'object_metadata',side_effect=cp.cos.CosError('missing',status=404)):
+            self.cloud.step(jid)
+        j=m.jobs.get(jid)
         self.assertEqual(j['status'],'failed');self.assertEqual(j['failed_phase'],'import')
         self.assertIn('等待超时',j['error']);self.assertIsNone(m._job_media_url(j,'result'))
 

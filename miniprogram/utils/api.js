@@ -365,6 +365,7 @@ async function waitForJob(jobId, options) {
       if (job.status === 'failed') {
         const err = new Error(job.error || '修图失败，请重试');
         err.code = 'JOB_FAILED';
+        if(job.violation)err.detail=job.violation;
         throw err;
       }
     } catch (e) {
@@ -392,8 +393,8 @@ async function waitForJob(jobId, options) {
 }
 
 /** 查询当前用户云端最近提交的任务历史列表 */
-function myJobs(limit = 30) {
-  return request('/api/my/jobs?limit=' + limit, { timeout: 8000 });
+function myJobs(limit = 30, offset = 0) {
+  return request('/api/my/jobs?limit=' + limit + (offset ? '&offset=' + offset : ''), { timeout: 8000 });
 }
 
 /** 后端连通性探测 */
@@ -516,7 +517,7 @@ async function _submitViaCos(filePath, formData) {
   await completeUpload(up.upload_id);
 
   const body = {};
-  ['quality', 'style', 'template_id', 'text_fields', 'aspect_ratio', 'custom_prompt', 'template_output_mode'].forEach((k) => {
+  ['quality', 'style', 'template_id', 'text_fields', 'aspect_ratio', 'custom_prompt', 'template_output_mode', 'expected_price'].forEach((k) => {
     if (formData && formData[k] !== undefined && formData[k] !== '') {
       body[k] = formData[k];
     }
@@ -542,6 +543,10 @@ async function submitJob(filePath, formData) {
   const [, cfg] = await Promise.all([ensureLogin(), config()]);
   if(form.template_id&&(!cfg||!Array.isArray(cfg.template_quality_options)||!cfg.template_quality_options.includes('light')||!cfg.template_quality_options.includes('fine'))){
     const e=new Error('模板双档需更新后端后启用');e.status=503;throw e;
+  }
+  if(form.expected_price!==undefined){
+    const price=cfg.free_mode?0:cfg.prices&&cfg.prices[form.quality||'light'];
+    if(!Number.isInteger(price)||Number(form.expected_price)!==price){const e=new Error('生成价格已更新，请刷新价格后重新确认');e.status=409;throw e;}
   }
   if (cfg && cfg.cos_ready) {
       try { return await _submitViaCos(filePath, form); }

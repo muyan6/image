@@ -116,7 +116,7 @@ async function test(name,fn) {
   await test('adjust_unload_before_file_info_stops_new_submission',async()=>{
     let fileInfo,submits=0;
     const p=page('adjust',{submitJob:async()=>{submits++;throw new Error('stop');}},app(),{getFileInfo:o=>fileInfo=o});
-    p.data.lightPoints=200;p.data.imagePath='fixture.jpg';await p.onStartGenerate();p.onUnload();fileInfo.success({size:4});await tick();
+    p.data.priceReady=true;p.data.lightPoints=200;p.data.imagePath='fixture.jpg';await p.onStartGenerate();p.onUnload();fileInfo.success({size:4});await tick();
     assert.equal(submits,0);return {submissions:submits};
   });
   await test('work_list_reuses_authoritative_status_without_per_job_refetch',async()=>{

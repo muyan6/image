@@ -238,6 +238,11 @@
     .sidebar-backdrop.show { display: block; }
     .content { padding: 16px 14px 60px; }
   }
+#jobs-table { min-width: 1100px; }
+#jobs-table th, #jobs-table td { word-break: normal; }
+#jobs-table td:nth-child(4) { min-width: 120px; }
+#jobs-table td:nth-child(8) { min-width: 160px; }
+#jobs-table td:last-child { min-width: 250px; max-width: 420px; overflow-wrap: anywhere; }
 </style>
 </head>
 <body>
@@ -1559,7 +1564,7 @@ async function loadJobs() {
         `<td>${esc(j.quality)}</td><td>${esc(j.template_name || "—")}</td>` +
         `<td>${esc(j.provider || (j.vendor_task_id?'worldcodes':'—'))}</td><td>${badge}</td>` +
         `<td>${esc(jobPhaseText(j))}</td><td class="muted">${esc(jobTimingText(j))}</td>` +
-        `<td>${cost}</td><td class="muted">${esc(j.error || j.import_last_error || "")}</td>`;
+        `<td>${cost}</td><td class="muted">${esc(j.error || (j.status==='processing' ? (j.import_last_error ? "等待存图，正在重试：" + j.import_last_error : j.last_phase_error || "") : ""))}</td>`;
       tbody.appendChild(tr);
     });
     if (!data.items.length) tbody.innerHTML = '<tr><td colspan="10" class="empty">暂无任务</td></tr>';

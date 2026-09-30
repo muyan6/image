@@ -81,6 +81,8 @@ if not args.legacy:
                      ['python','-u',Path(__file__).with_name('test_commerce.py').as_posix()],
                      ['node',Path(__file__).with_name('test_commerce_admin.cjs').as_posix()]])
     for script, report in (
+        ('test_pending_fixes.py', 'pending_fixes_results.json'),
+        ('test_commerce_display.cjs', 'commerce_display_results.json'),
         ('test_drawing_flow.py', 'drawing_flow_results.json'),
         ('test_frontend_polish.cjs', 'frontend_polish_results.json'),
         ('test_review_main_integrity.py', 'review_main_integrity_results.json'),

@@ -25,18 +25,23 @@
   <view class="section-box">
     <view class="section-head">
       <text class="section-title">充值光子</text>
-      <text class="section-tip">{{ paymentBusy ? '订单处理中…' : (paymentReady ? '选择套餐充值' : '充值暂未启用') }}</text>
+      <text class="section-tip">{{ paymentBusy ? '订单处理中…' : (catalogLoading || catalogStale ? '正在更新套餐…' : (paymentReady ? '选择套餐充值' : '充值暂未启用')) }}</text>
     </view>
 
+    <view class="catalog-message" wx:if="{{ catalogError }}" bindtap="refreshCatalog"><text>{{ catalogError }}</text><text>↻</text></view>
     <view class="package-list gallery-card">
+      <view class="catalog-empty" wx:if="{{ !packages.length }}">{{ catalogLoading ? '正在读取最新套餐…' : '暂无可购买套餐' }}</view>
       <block wx:for="{{ packages }}" wx:key="id">
-      <view class="package-item" bindtap="onSelectPackage" data-id="{{ item.id }}">
+      <view class="package-item {{ item.promotionVisible ? 'package-promotion' : '' }} {{ catalogStale ? 'package-stale' : '' }}" bindtap="onSelectPackage" data-id="{{ item.id }}">
         <view class="pkg-info">
-          <text class="pkg-name">{{ item.points }} 光子</text>
+          <view class="pkg-title-row"><text class="pkg-name">{{ item.points }} 光子</text>
+            <text class="pkg-promotion-tag" wx:if="{{ item.promotionVisible }}">{{ item.promotionLabel }}</text></view>
           <text class="pkg-sub">{{ item.bonus_text }} · 约 {{ item.generations }} 张</text>
+          <view class="pkg-countdown" wx:if="{{ item.promotionVisible }}"><text class="pkg-countdown-dot"></text><text>距结束</text><text class="pkg-countdown-value">{{ item.countdownText }}</text></view>
         </view>
         <view class="pkg-price-box">
-          <text class="pkg-price">{{ item.price_text }}</text>
+          <view class="pkg-price-stack"><text class="pkg-original-price" wx:if="{{ item.originalPrice }}">{{ item.originalPrice }}</text>
+            <text class="pkg-price {{ item.promotionVisible ? 'pkg-sale-price' : '' }}">{{ item.price_text }}</text></view>
           <text class="pkg-arrow">›</text>
         </view>
       </view>

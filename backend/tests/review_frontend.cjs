@@ -41,7 +41,7 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     stopPullDownRefresh(){},getStorageSync(){return '';},setStorageSync(){},
     navigateTo(){},redirectTo(){},switchTab(){}},extraWx);
   vm.runInNewContext(fs.readFileSync(path.join(ROOT,`miniprogram/pages/${name}/${name}.js`),'utf8'),
-    {getApp:()=>app,require:()=>api,Page:p=>page=p,wx,console:silent,
+    {getApp:()=>app,require:n=>n.includes('commerce.js')?require(path.join(ROOT,'miniprogram/utils/commerce.js')):api,Page:p=>page=p,wx,console:silent,
       setTimeout:clock.setTimeout||setTimeout,clearTimeout:clock.clearTimeout||clearTimeout,Date:clock.Date||Date});
   page.data=JSON.parse(JSON.stringify(page.data || {}));
   page.setData=function(data){Object.assign(this.data,data);};

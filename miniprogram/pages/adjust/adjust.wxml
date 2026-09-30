@@ -1,4 +1,5 @@
 <view class="container">
+  <view class="ui-state" wx:if="{{ priceError }}" bindtap="loadUserData"><text>{{ priceError }}</text></view>
   <scroll-view class="scroll-content" scroll-y enable-flex>
     <!-- 顶部输出预览大图 (截图2) -->
     <view class="preview-stage-wrap">
@@ -232,7 +233,8 @@
       </view>
       <text class="violation-explain">{{ violationDetail.banned ? '账号已永久封禁，剩余点数不予退还。' : '一周内累计 3 次将永久封禁账号。若有误判，请联系在线客服。' }}</text>
       <view class="violation-actions">
-        <button class="violation-secondary" open-type="contact" session-from="violation-{{ violationId }}">误判反馈</button>
+        <button class="violation-secondary" bindtap="onSubmitViolationFeedback">误判反馈</button>
+        <button class="violation-secondary" open-type="contact" session-from="violation-{{ violationId }}">联系客服</button>
         <button class="violation-primary" bindtap="onAcknowledgeViolation">我知道了</button>
       </view>
     </view>

@@ -19,13 +19,18 @@ def text_rule(width, height, template, values):
         text = roles.get(role, '')
         for line in text.splitlines():
             if line.strip(): lines.append((role, line.strip()))
-    rules = []
-    for index, (role, line) in enumerate(lines):
+    rules = []; measured=[]
+    for role, line in lines:
         units = sum(1 if unicodedata.east_asian_width(ch) in 'WF' else .65 for ch in line)
         size = max(8, min(int(width * (.032 if role == 'title' else .020)),
                           int(width * .85 / max(1, units) * .65)))
+        measured.append((role,line,size))
+    offset=int(height*.04)
+    ordered=measured if layout=='stamp_corner' else list(reversed(measured))
+    for role,line,size in ordered:
         gravity = 'NorthEast' if layout == 'stamp_corner' else ('South' if layout == 'poster_center' else 'SouthWest')
-        dy = int(height * .04) + (index if layout == 'stamp_corner' else len(lines)-1-index) * (size*2 + 8)
+        dy=offset
+        offset+=size*2+8
         if dy > height*.45: raise ValueError('文字过多，超出云端排版区域')
         color = '#FFFFFF' if layout == 'poster_center' else '#1F2937'
         rules.append(f'watermark/2/text/{encoded(line)}/font/{encoded("simhei.ttf")}'
