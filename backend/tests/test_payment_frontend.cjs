@@ -39,6 +39,29 @@ async function test(name,f){try{await f();rows.push({case:name,passed:true});}ca
  await test('pay_old_ios_is_blocked_before_order_creation',async()=>{
   const t=setup({wx:{getSystemInfoSync:()=>({platform:'ios',system:'iOS 14.0',version:'8.0.60'})}});await assert.rejects(t.p.buy(pkg));assert.equal(t.calls.length,0);
  });
+ await test('pay_supported_ios_uses_same_virtual_sdk_and_discloses_apple_refund',async()=>{
+  let content='';const t=setup({wx:{getSystemInfoSync:()=>({platform:'ios',system:'iOS 15.0',version:'8.0.68'}),
+    showModal:o=>{content=o.content;o.success({confirm:true});}}});
+  await t.p.buy({...pkg,amount_fen:600});assert.equal(t.sdk(),1);
+  assert(content.includes('官方虚拟支付'));assert(content.includes('Apple'));assert(content.includes('App Store'));
+  assert(t.calls.some(x=>x.url.endsWith('/sync')));assert.equal(t.storage(),null);
+ });
+ await test('pay_ios_below_one_yuan_never_creates_order_or_calls_sdk',async()=>{
+  const t=setup({wx:{getSystemInfoSync:()=>({platform:'ios',system:'iOS 18.0',version:'8.0.70'})}});
+  await assert.rejects(t.p.buy({...pkg,amount_fen:99}),/最低金额为 1 元/);assert.equal(t.calls.length,0);assert.equal(t.sdk(),0);
+ });
+ await test('pay_android_small_offer_stays_available_and_discloses_refund',async()=>{
+  let content='';const t=setup({wx:{showModal:o=>{content=o.content;o.success({confirm:true});}}});
+  await t.p.buy({...pkg,amount_fen:99});assert.equal(t.sdk(),1);
+  assert(content.includes('官方虚拟支付'));assert(content.includes('联系客服'));assert(!content.includes('App Store'));
+ });
+ await test('pay_personal_rules_visible_and_admin_cannot_select_sandbox',()=>{
+  const xml=fs.readFileSync(path.join(root,'miniprogram/pages/credits/credits.wxml'),'utf8');
+  for(const term of ['10 万元','1%','12%','T+3','45–60 天','App Store','不另加收'])assert(xml.includes(term),term);
+  const admin=fs.readFileSync(path.join(root,'backend/admin.html'),'utf8');
+  const select=admin.match(/<select id="pay-env"[^>]*>([\s\S]*?)<\/select>/);assert(select);assert(!select[1].includes('value="1"'));
+  assert(admin.includes('env:0'));assert(admin.includes('开启苹果 IAP'));assert(!admin.includes('id="pay-sandbox-key"'));
+ });
  await test('pay_order_center_path_exists_and_is_registered',()=>{
   const app=JSON.parse(fs.readFileSync(path.join(root,'miniprogram/app.json')));assert(app.pages.includes('pages/orders/orders'));
   for(const ext of ['js','json','wxml','wxss'])assert(fs.existsSync(path.join(root,'miniprogram/pages/orders/orders.'+ext)));

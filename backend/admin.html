@@ -547,12 +547,13 @@
           <div class="card-head"><h2>微信虚拟支付配置<small>凭证仅保存在服务端；商品上架与验单发货完成前不开放收款</small></h2></div>
           <div class="form-grid">
             <div class="field"><label><input type="checkbox" id="pay-enabled">启用光子充值</label><small>确认商品、发货推送及新版小程序已部署后开启；由用户主动确认付款。</small></div>
-            <div class="field"><label>支付环境</label><select id="pay-env"><option value="0">现网（个人主体使用）</option><option value="1">沙箱（仅平台支持的主体）</option></select></div>
+            <div class="field"><label>支付环境</label><select id="pay-env" disabled><option value="0">现网（个人主体固定 env=0）</option></select></div>
             <div class="field"><label>OfferID（支付应用 ID）</label><input type="text" id="pay-offer-id" placeholder="微信虚拟支付基础配置中的 OfferID"></div>
-            <div class="field"><label>沙箱 AppKey <small>打码代表已保存</small></label><input type="password" id="pay-sandbox-key" autocomplete="new-password"></div>
             <div class="field"><label>现网 AppKey <small>打码代表已保存</small></label><input type="password" id="pay-production-key" autocomplete="new-password"></div>
           </div>
           <p class="muted" style="margin:0">微信消息推送继续使用 <code>/api/wxpush</code>，明文 XML/JSON 均支持，勾选道具发货和退款事件。订单中心 path：<code>pages/orders/orders</code>。支付开关默认关闭；支付成功回调不会直接加光子。</p>
+          <p class="muted">个人主体需已认证、备案且含工具类目；全终端月支付限额 10 万元。费率：Android 等 1%、iOS 12%；结算：Android 等 T+3、iOS 约 45–60 天。iOS 退款由用户向 App Store 申请并由 Apple 决定。</p>
+          <p class="muted" style="margin:0">本页开启充值不代表微信已开通苹果 IAP。请在微信公众平台「账号设置 → 基本信息」配置小程序简称，再到「虚拟支付 → 基本配置」开启苹果 IAP；道具需发布到现网并与这里的商品 ID、价格一致。iPhone 小额真单通过后再确认全终端验收。</p>
         </div>
         <div class="card">
           <div class="card-head"><h2>腾讯云<small>内容审核 + COS 对象存储共用</small></h2></div>
@@ -1025,8 +1026,7 @@ function renderSec() {
   $("wx-secret").value = SETTINGS.wechat?.app_secret || "";
   $("pay-offer-id").value = SETTINGS.payment?.offer_id || "";
   $("pay-enabled").checked = SETTINGS.payment?.enabled === true;
-  $("pay-env").value = SETTINGS.payment?.env ?? 0;
-  $("pay-sandbox-key").value = SETTINGS.payment?.sandbox_app_key || "";
+  $("pay-env").value = 0;
   $("pay-production-key").value = SETTINGS.payment?.production_app_key || "";
   $("tc-id").value = SETTINGS.tencent?.secret_id || "";
   $("tc-key").value = SETTINGS.tencent?.secret_key || "";
@@ -1100,8 +1100,7 @@ window.testWechat = async () => {
 
 window.saveSec = async () => saveSettingsPatch({
       wechat: { app_id: $("wx-appid").value.trim(), app_secret: $("wx-secret").value.trim() },
-      payment: {enabled:$("pay-enabled").checked,env:Number($("pay-env").value), offer_id: $("pay-offer-id").value.trim(),
-                 sandbox_app_key: $("pay-sandbox-key").value.trim(),
+      payment: {enabled:$("pay-enabled").checked,env:0, offer_id: $("pay-offer-id").value.trim(),
                  production_app_key: $("pay-production-key").value.trim() },
       tencent: { secret_id: $("tc-id").value.trim(), secret_key: $("tc-key").value.trim(),
                  cos_bucket: $("tc-bucket").value.trim(), cos_region: $("tc-region").value.trim(),

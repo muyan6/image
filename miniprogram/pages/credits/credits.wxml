@@ -107,6 +107,22 @@
       <view class="notice-row">
         <view class="notice-icon info-icon">i</view>
         <view class="notice-text">
+          <text class="notice-h">官方虚拟支付与订单退款</text>
+          <text class="notice-p">光子是图片生成权益，使用官方虚拟支付道具直购；iOS 由 Apple 收款，其他终端由微信收款。iOS 订单退款请向 App Store 申请，由 Apple 决定；其他终端请联系客服核对后通过微信平台处理。退款完成后按比例回收对应光子。</text>
+        </view>
+      </view>
+      <view class="item-divider"></view>
+      <view class="notice-row">
+        <view class="notice-icon info-icon">i</view>
+        <view class="notice-text">
+          <text class="notice-h">个人主体支付规则</text>
+          <text class="notice-p">个人主体全终端月支付限额为 10 万元，以微信平台统计为准。商户承担支付服务费：Android 等终端 1%，iOS 12%，用户以收银台金额为准，不另加收此费用。Android 等终端通常 T+3 结算，iOS 约 45–60 天，结算周期不影响已核实订单的光子到账。</text>
+        </view>
+      </view>
+      <view class="item-divider"></view>
+      <view class="notice-row">
+        <view class="notice-icon info-icon">i</view>
+        <view class="notice-text">
           <text class="notice-h">生成效果退款规则</text>
           <text class="notice-p">明显技术异常可申诉；仅因主观不喜欢不支持退款。</text>
         </view>

@@ -147,6 +147,62 @@ class PaymentTests(WorkflowTests):
    r=self.client.post('/api/wxpush?timestamp='+ts+'&nonce='+nonce+'&signature='+sig,json=body)
   self.assertNotEqual(r.json()['ErrCode'],0);self.assertEqual(m.users.get_balance('sample_user'),100)
 
+ def test_pay_personal_sandbox_blocks_new_orders_before_login(self):
+  m.settings.update({'payment':{'env':1,'sandbox_app_key':'fixture-sandbox'}})
+  self.assertFalse(m.payments.ready())
+  with patch.object(vp,'exchange_session') as exchange:
+   with self.assertRaisesRegex(ValueError,'现网环境'):m.payments.create(self.user,'points_600','code','client_fixture_1234')
+   exchange.assert_not_called()
+  self.assertEqual(m.payments.store().list('sample_user'),[])
+
+ def test_pay_personal_contract_fields_and_unique_business_ids(self):
+  a=self.create();b=self.create(key='client_fixture_5678')
+  data=json.loads(a['pay_data']['signData'])
+  self.assertEqual(a['pay_data']['mode'],'short_series_goods')
+  self.assertEqual(set(data),{'offerId','buyQuantity','env','currencyType','productId','goodsPrice','outTradeNo','attach'})
+  self.assertEqual((data['env'],data['currencyType'],data['buyQuantity']),(0,'CNY',1))
+  self.assertEqual(data['attach'],data['outTradeNo']);self.assertRegex(data['outTradeNo'],r'^[A-Za-z0-9]{8,32}$')
+  self.assertNotEqual(a['order']['id'],b['order']['id'])
+
+ def test_pay_environment_change_after_preflight_blocks_new_checkout(self):
+  def changed():
+   m.settings.update({'payment':{'env':1,'sandbox_app_key':'fixture-sandbox'}});return True
+  with patch.object(m.payments,'ready',side_effect=changed),patch.object(vp,'exchange_session') as exchange:
+   with self.assertRaisesRegex(ValueError,'现网环境'):m.payments.create(self.user,'points_600','code','client_fixture_1234')
+   exchange.assert_not_called()
+  self.assertEqual(m.payments.store().list('sample_user'),[])
+
+ def test_pay_signed_xml_repeated_delivery_acknowledges_only_once_credit(self):
+  o=m.payments.store().get(self.create()['order']['id'])
+  raw=('<xml><Event>xpay_goods_deliver_notify</Event><OpenId>sample_user</OpenId><OutTradeNo>'+o['id']+
+       '</OutTradeNo><Env>0</Env><WeChatPayInfo><MchOrderNo>WX'+o['id']+
+       '</MchOrderNo></WeChatPayInfo><GoodsInfo><ProductId>points_600</ProductId><Quantity>1</Quantity>'+
+       '<OrigPrice>600</OrigPrice><ActualPrice>600</ActualPrice></GoodsInfo></xml>')
+  ts='123';nonce='fixture';sig=hashlib.sha1(''.join(sorted(['fixture-token',ts,nonce])).encode()).hexdigest()
+  url='/api/wxpush?timestamp='+ts+'&nonce='+nonce+'&signature='+sig
+  with self.call(self.remote(o)):
+   for _ in range(2):
+    r=self.client.post(url,content=raw.encode(),headers={'Content-Type':'application/xml'})
+    self.assertEqual(r.status_code,200);self.assertEqual(parse_message(r.content)['ErrCode'],'0')
+  self.assertEqual(m.users.get_balance('sample_user'),700)
+  self.assertEqual(m.payments.store().get(o['id'])['provided'],1)
+  self.assertEqual(m.users._conn.execute("SELECT COUNT(*) FROM payment_ledger WHERE action='credit'").fetchone()[0],1)
+
+ def test_pay_ios_delivery_without_wechat_pay_info_is_verified(self):
+  o=m.payments.store().get(self.create()['order']['id']);remote=self.remote(o);remote['order']['order_type']=7
+  body={'Event':'xpay_goods_deliver_notify','OpenId':o['openid'],'OutTradeNo':o['id'],'Env':0,
+        'GoodsInfo':{'ProductId':o['package_id'],'Quantity':1,'OrigPrice':600,'ActualPrice':600}}
+  with self.call(remote):m.payments.notification(body)
+  self.assertEqual(m.users.get_balance('sample_user'),700)
+  self.assertEqual(m.payments.store().get(o['id'])['provided'],1)
+
+ def test_pay_historical_sandbox_order_remains_reconcilable(self):
+  o,_=m.payments.store().create('sample_user','legacy_sandbox_key','wxfixture','1450665368',1,vp.PACKAGES[0])
+  m.settings.update({'payment':{'env':1,'sandbox_app_key':'fixture-sandbox'}})
+  with self.call(self.remote(o)):m.payments.sync(o['id'],True)
+  self.assertEqual(m.users.get_balance('sample_user'),700)
+  self.assertEqual(m.payments.store().get(o['id'])['env'],1)
+
 if __name__=='__main__':
  suite=unittest.TestSuite(PaymentTests(n) for n in PaymentTests.__dict__ if n.startswith('test_pay_'))
  names=[t._testMethodName for t in suite];result=unittest.TextTestRunner(verbosity=2).run(suite)

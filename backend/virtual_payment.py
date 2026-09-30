@@ -28,17 +28,21 @@ class VirtualPayment:
     def conf(self):return self.runtime().settings.snapshot()['payment']
     def ready(self):
         m=self.runtime();c=self.conf();wx=m.settings.wechat()
-        return bool(c.get('enabled') and c.get('offer_id') and self.key(c,c.get('env',0)) and
+        # Personal mini-program checkout is production-only. Historical sandbox
+        # orders retain their snapshot/environment and may still be reconciled.
+        return bool(c.get('enabled') and c.get('env',0)==0 and c.get('offer_id') and self.key(c,0) and
                     wx.get('app_id') and wx.get('app_secret') and m.settings.moderation().get('wechat_push_token'))
     def key(self,conf,env):return str(conf.get('production_app_key' if env==0 else 'sandbox_app_key') or '')
     def create(self,user,package_id,code,client_key):
         m=self.runtime();store=self.store()
+        if self.conf().get('env',0)!=0:raise ValueError('个人主体虚拟支付仅使用现网环境，请将支付环境设置为 0')
         if not self.ready():raise ValueError('充值未启用或微信支付配置未齐全')
         if user.get('account_type')!='wechat' or user.get('banned'):raise ValueError('请使用正常的小程序微信账号充值')
         existing=store.find(user['openid'],client_key)
         if existing:return {'existing':True,'order':public_order(existing)}
         package=resolve_offer(m.settings.snapshot()['commerce']['packages'],package_id)
         wx=m.settings.wechat();conf=self.conf();app=str(wx['app_id']);offer=str(conf['offer_id']);env=int(conf.get('env',0))
+        if env!=0:raise ValueError('个人主体虚拟支付仅使用现网环境，请将支付环境设置为 0')
         session=exchange_session(code,m.settings)
         if session['openid']!=user['openid']:raise ValueError('支付登录账号不一致，请重新登录')
         if not session.get('session_key'):raise ValueError('微信未返回有效支付登录态')

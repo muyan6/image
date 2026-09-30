@@ -11,16 +11,19 @@ function supported(){
   const info=wx.getSystemInfoSync?.()||{};
   if(info.platform==='devtools')throw new Error('请在手机微信验证支付，开发者工具仅用于构建与模拟测试');
   if(info.platform==='ios'&&(version(info.version||'0','8.0.68')<0||Number((info.system||'').match(/\d+/)?.[0]||0)<15))throw new Error('iOS 支付需要 iOS 15 及微信 8.0.68 或更新版本');
+  return info;
 }
-function confirm(pkg){return new Promise(resolve=>wx.showModal({title:'确认购买光子权益',content:pkg.price_text+' · '+pkg.points+' 光子。到账以服务端核实为准。',success:r=>resolve(!!r.confirm),fail:()=>resolve(false)}));}
+function confirm(pkg,info){return new Promise(resolve=>wx.showModal({title:'确认购买光子权益',content:pkg.price_text+' · '+pkg.points+' 光子。通过官方虚拟支付购买图片生成权益，到账以服务端核实为准。'+(info.platform==='ios'?'iOS 由 Apple 收款，退款需向 App Store 申请。':'退款请联系客服核对订单，由开发者通过微信平台处理。'),success:r=>resolve(!!r.confirm),fail:()=>resolve(false)}));}
 function invoke(data){return new Promise((resolve,reject)=>wx.requestVirtualPayment({...data,success:resolve,fail:e=>{
   const error=new Error(e.errMsg||'支付未完成');error.canceled=e.errCode===-2||/cancel/i.test(e.errMsg||'');reject(error);
 }}));}
 async function buy(pkg){
-  supported();await api.ensureLogin(true);
+  const info=supported();
+  if(info.platform==='ios'&&Number.isInteger(pkg.amount_fen)&&pkg.amount_fen<100)throw new Error('Apple 支付最低金额为 1 元，请选择其他套餐');
+  await api.ensureLogin(true);
   const previous=pending();
   if(previous){const e=new Error('已有订单需要确认，请到充值订单中查看，核对后再购买');e.orderId=previous.id;throw e;}
-  if(!await confirm(pkg))return {canceled:true};
+  if(!await confirm(pkg,info))return {canceled:true};
   const code=await loginCode();const client_key='C'+Date.now().toString(36)+Math.random().toString(36).slice(2,14);
   remember({client_key,created:Date.now()});
   let created;
