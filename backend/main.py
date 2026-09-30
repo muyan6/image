@@ -583,9 +583,6 @@ def _register_job(openid: str, quality: str, style: str,
 
         result_file = "result_%s.jpg" % job_id
 
-        if template:
-            templates.inc_usage(template["id"])
-
         orig_cos = result_cos = None
         if settings.cos_ready():
             # 原图存储失败也不应跳过独立的结果上传。
@@ -1376,6 +1373,9 @@ def _run_pipeline(job_id: str, quality: str, style: str,
         if not current or current.get("deleted_at"):
             raise RuntimeError("作品已删除，停止交付")
         users.complete_charge(job_id)
+        if template.get('id'):
+            try:templates.inc_usage(template['id'])
+            except Exception:log.exception('作品已交付，模板热度写入稍后需核对')
         cleanup.schedule("local", job["result_file"], current["completed_at"] + JOB_TTL_SECONDS)
         if current.get("result_cos"):
             cleanup.schedule("cos", current["result_cos"], current["completed_at"] + JOB_TTL_SECONDS)

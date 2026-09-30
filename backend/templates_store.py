@@ -659,7 +659,7 @@ class TemplateStore:
             self._save_locked()
 
     def inc_usage(self, tpl_id: str) -> None:
-        """任务提交时累计使用次数（后台看数据决定推哪个、砍哪个）。"""
+        """成功交付后累计一次；历史累计基数保留，失败和排队不再增加。"""
         with self._lock:
             for t in self._templates:
                 if t["id"] == tpl_id:
@@ -731,6 +731,7 @@ class TemplateStore:
                 "covers": resolved_list,
                 "engine": t["engine"],
                 "price": int(t.get("price", 0)),
+                "usage_count": max(0,int(t.get('usage_count',0))),
                 "layout": t.get("layout", ""),
                 "text_fields": t.get("text_fields", []),
                 "guide": _norm_guide(t.get("guide")),

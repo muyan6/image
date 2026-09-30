@@ -48,6 +48,17 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
 }
 
 (async()=>{
+  await test('template_popularity_orders_success_counts_without_breaking_search',()=>{
+    const {page}=loadPage('templates',{absolute:x=>x});
+    page._renderData([{id:'art',name:'艺术'}],[
+      {id:'old',name:'水彩一',group_id:'art',usage_count:2},
+      {id:'hot',name:'水彩二',group_id:'art',usage_count:9},
+      {id:'tie',name:'胶片',group_id:'art',usage_count:9}]);
+    const order=page.data.allTemplates.map(t=>t.id).join();
+    page.onSearchInput({detail:{value:'水彩'}});
+    return [order==='hot,tie,old'&&page.data.filteredTemplates.map(t=>t.id).join()==='hot,old',
+      {order,search:page.data.filteredTemplates.map(t=>t.id)}];
+  });
   await test('template_search_combines_category_and_keyword_and_clears',()=>{
     const {page}=loadPage('templates',{absolute:x=>x});
     page._renderData([{id:'art',name:'艺术'},{id:'portrait',name:'人像'}],

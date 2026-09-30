@@ -22,7 +22,7 @@
       bindtap="onSelectCategory"
       data-id="{{ item.id }}"
     >
-      <text class="cat-chip-text">{{ item.name }}</text>
+      <text class="cat-chip-text">{{ item.id === 'all' ? '全部 · 热门优先' : item.name }}</text>
       <text class="cat-chip-count" wx:if="{{ item.count > 0 }}">({{ item.count }})</text>
     </view>
   </scroll-view>

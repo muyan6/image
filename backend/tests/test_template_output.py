@@ -92,6 +92,21 @@ class OutputTests(WorkflowTests):
     def test_output_config_advertises_capability(self):
         self.assertEqual(self.client.get('/api/config').json()['template_output_modes'],['template','single'])
 
+    def test_output_popularity_counts_only_success_once(self):
+        jid=self.job();m.jobs.update(jid,status='processing')
+        m.settings.update({'providers':{'worldcodes':{'enabled':True}}})
+        def enhance(src,out,**kw):Path(out).write_bytes(self.image((90,160)))
+        client=SimpleNamespace(configured=True,enhance=enhance)
+        tpl=select_template_output(self.template(),'single')
+        with patch.object(m,'_get_client',return_value=client),patch.object(m.templates,'inc_usage') as count:
+            m._run_pipeline(jid,'fine','clear',tpl)
+            m._run_pipeline(jid,'fine','clear',tpl)
+            count.assert_called_once_with('poster')
+        failed=self.job();m.jobs.update(failed,status='processing')
+        client.enhance=lambda *a,**kw:(_ for _ in ()).throw(RuntimeError('fixture failure'))
+        with patch.object(m,'_get_client',return_value=client),patch.object(m.templates,'inc_usage') as count:
+            m._run_pipeline(failed,'fine','clear',tpl);count.assert_not_called()
+
 
 if __name__=='__main__':
     rows=[]

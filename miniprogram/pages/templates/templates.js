@@ -126,6 +126,8 @@ Page({
       categories: cats,
       activeCategory: category
     });
+    // Stable sort keeps the existing curated order when popularity is tied.
+    items.sort((a,b) => (Number(b.usage_count)||0) - (Number(a.usage_count)||0));
 
     this.filterByCategory(category);
   },
