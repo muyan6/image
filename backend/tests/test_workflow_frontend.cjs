@@ -114,7 +114,7 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
     p._jobId=job.id;const pending=p.refreshUrls();p.onUnload();resolve(job);await pending;assert.equal(p.data.resultUrl,'');
   });
   await test('new_pending_photo_defaults_to_light_and_light_price',async()=>{
-    const p=page('adjust');assert.equal(p.data.quality,'light');assert.equal(p.data.currentQualityCost,1);
+    const p=page('adjust');assert.equal(p.data.quality,'light');assert.equal(p.data.currentQualityCost,40);
     p.data.costLight=2;p.refreshCurrentCost();assert.equal(p.data.currentQualityCost,2);
   });
   await test('style_detail_hero_uses_each_cover_natural_ratio',async()=>{
@@ -147,13 +147,12 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
     await p.executeUpload('photo.jpg');assert.equal(sent.custom_prompt,p.data.customPrompt);
   });
   await test('violation_modal_offers_feedback_and_syncs_charged_balance',async()=>{
-    let modal,submitted;
+    let submitted;
     const violation={code:'CONTENT_VIOLATION',violation_id:'event123',message:'图片内容未通过安全审核',charged:1,weekly_count:2,banned:false};
     const p=page('adjust',{submitJob:async()=>{const e=new Error(violation.message);e.detail=violation;throw e;},
-      submitViolationFeedback:async(id,msg)=>{submitted=[id,msg];}},
-      {showModal:o=>{modal=o;}});
-    p._foreground=true;await p.executeUpload('photo.jpg');assert.equal(modal.confirmText,'我知道了');
-    assert.equal(modal.cancelText,'误判反馈');modal.success({cancel:true});
+      submitViolationFeedback:async(id,msg)=>{submitted=[id,msg];}});
+    p._foreground=true;await p.executeUpload('photo.jpg');assert.equal(p.data.showViolationNotice,true);
+    p.onOpenViolationFeedback();assert.equal(p.data.showViolationNotice,false);
     assert.equal(p.data.showViolationFeedback,true);p.data.feedbackText='误判说明';
     await p.onSubmitViolationFeedback();assert.deepEqual(submitted,['event123','误判说明']);
   });

@@ -9,8 +9,8 @@ Page({
     ],
     activeCategory: 'all',
     freeMode: false,
-    priceLight: 1,
-    priceFine: 3,
+    priceLight: 40,
+    priceFine: 40,
     allTemplates: [],
     filteredTemplates: [],
     selectedItem: null

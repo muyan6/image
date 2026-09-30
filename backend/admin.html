@@ -475,6 +475,15 @@
           <p class="muted" style="margin:0">填好后小程序才能正常登录，且才能调用微信官方免费内容安全审核接口（mediaCheckAsync）</p>
         </div>
         <div class="card">
+          <div class="card-head"><h2>微信虚拟支付配置<small>凭证仅保存在服务端；商品上架与验单发货完成前不开放收款</small></h2></div>
+          <div class="form-grid">
+            <div class="field"><label>OfferID（支付应用 ID）</label><input type="text" id="pay-offer-id" placeholder="微信虚拟支付基础配置中的 OfferID"></div>
+            <div class="field"><label>沙箱 AppKey <small>打码代表已保存</small></label><input type="password" id="pay-sandbox-key" autocomplete="new-password"></div>
+            <div class="field"><label>现网 AppKey <small>打码代表已保存</small></label><input type="password" id="pay-production-key" autocomplete="new-password"></div>
+          </div>
+          <p class="muted" style="margin:0">先在微信后台按套餐表创建商品并开启道具发货推送；不要把 AppKey 填到小程序或发到聊天中。这里保存凭证不会自动开通支付。</p>
+        </div>
+        <div class="card">
           <div class="card-head"><h2>腾讯云<small>内容审核 + COS 对象存储共用</small></h2></div>
           <div class="form-grid">
             <div class="field"><label>SecretId</label><input type="text" id="tc-id"></div>
@@ -538,6 +547,11 @@
           </div>
           <p class="muted">单行“移出列表”仅隐藏管理记录；“删除全部账号”会永久删除微信与网页账号、余额流水及作品，不是封禁。</p>
           <div class="table-wrap"><table id="users-table"></table></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>误判反馈<small>用户提交后存入服务端违规记录，人工复核在这里处理</small></h2>
+            <button class="btn-ghost btn-small" onclick="loadViolationFeedback()">刷新反馈</button></div>
+          <div class="table-wrap"><table id="violations-table"></table></div>
         </div>
       </section>
     </main>
@@ -621,7 +635,7 @@ const PAGES = {
   conf:  { title: "通用设置",      load: renderConf },
   sec:   { title: "平台与安全",    load: renderSec },
   jobs:  { title: "任务记录",      load: loadJobs },
-  users: { title: "用户管理",      load: loadUsers },
+  users: { title: "用户管理",      load: () => { loadUsers(); loadViolationFeedback(); } },
 };
 function showPage(name) {
   document.querySelectorAll("section[id^='page-']").forEach((s) => {
@@ -800,6 +814,9 @@ window.saveConf = async () => {
 function renderSec() {
   $("wx-appid").value = SETTINGS.wechat?.app_id || "";
   $("wx-secret").value = SETTINGS.wechat?.app_secret || "";
+  $("pay-offer-id").value = SETTINGS.payment?.offer_id || "";
+  $("pay-sandbox-key").value = SETTINGS.payment?.sandbox_app_key || "";
+  $("pay-production-key").value = SETTINGS.payment?.production_app_key || "";
   $("tc-id").value = SETTINGS.tencent?.secret_id || "";
   $("tc-key").value = SETTINGS.tencent?.secret_key || "";
   $("tc-bucket").value = SETTINGS.tencent?.cos_bucket || "";
@@ -870,6 +887,9 @@ window.saveSec = async () => {
   try {
     SETTINGS = await api("/settings", { method: "PUT", body: {
       wechat: { app_id: $("wx-appid").value.trim(), app_secret: $("wx-secret").value.trim() },
+      payment: { offer_id: $("pay-offer-id").value.trim(),
+                 sandbox_app_key: $("pay-sandbox-key").value.trim(),
+                 production_app_key: $("pay-production-key").value.trim() },
       tencent: { secret_id: $("tc-id").value.trim(), secret_key: $("tc-key").value.trim(),
                  cos_bucket: $("tc-bucket").value.trim(), cos_region: $("tc-region").value.trim(),
                  cos_custom_domain: $("tc-domain").value.trim() },
@@ -1420,6 +1440,38 @@ async function loadUsers() {
     });
     if (!data.items.length) tbody.innerHTML = '<tr><td colspan="9" class="empty">该来源下还没有账号</td></tr>';
   } catch (e) { console.error(e); }
+}
+
+async function loadViolationFeedback() {
+  try {
+    const data = await api('/violations?limit=100');
+    const items = (data.items || []).filter(v => v.feedback);
+    const table = $('violations-table');
+    table.innerHTML = '<thead><tr><th>提交时间</th><th>账号</th><th>审核原因</th><th>误判说明</th><th>状态</th><th>复核</th></tr></thead><tbody></tbody>';
+    const tbody = table.tBodies[0];
+    for (const v of items) {
+      const tr = document.createElement('tr');
+      const oid = String(v.openid || '');
+      const masked = oid.slice(0, 6) + '…' + oid.slice(-4);
+      const status = v.status === 'overturned' ? '误判已撤销' : v.status === 'upheld' ? '维持违规' : '待复核';
+      tr.innerHTML = `<td>${fmtTime(v.created_at)}</td><td title="${esc(oid)}">${esc(masked)}</td>` +
+        `<td>${esc(v.reason || '—')}</td><td style="max-width:340px;white-space:pre-wrap">${esc(v.feedback)}</td>` +
+        `<td><span class="badge ${v.status === 'active' ? 'amber' : v.status === 'overturned' ? 'green' : 'red'}">${status}</span></td>` +
+        `<td>${v.status === 'active' ? `<div class="row-actions"><button class="btn-ghost btn-small" onclick="reviewViolation('${esc(v.id)}',true)">确认为误判</button><button class="btn-danger btn-small" onclick="reviewViolation('${esc(v.id)}',false)">维持违规</button></div>` : '—'}</td>`;
+      tbody.appendChild(tr);
+    }
+    if (!items.length) tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无误判反馈</td></tr>';
+  } catch (err) { toast(err.message, 'bad'); }
+}
+
+async function reviewViolation(id, accepted) {
+  if (!confirm(accepted ? '确认这是误判？系统将退回本次扣点并重新计算封禁状态。' : '确认维持本次违规判定？')) return;
+  try {
+    await api('/violations/' + encodeURIComponent(id) + '/review', {method:'POST', body:{accepted}});
+    toast(accepted ? '误判已撤销，扣点已退回' : '已维持违规判定');
+    await loadViolationFeedback();
+    await loadUsers();
+  } catch (err) { toast(err.message, 'bad'); }
 }
 
 /* ---------- 用户操作：改光子 / 封禁 / 清理管理列表 / 永久删除全部 ---------- */

@@ -95,7 +95,7 @@
             <text class="showcase-name">{{ item.name }}</text>
             <text class="showcase-desc">{{ item.subtitle }}</text>
             <view class="showcase-foot">
-              <text class="showcase-cost">{{ item.costText || (item.price > 0 ? '✦ ' + item.price + ' 光子' : '✦ 1 光子') }}</text>
+              <text class="showcase-cost">{{ item.costText || (item.price > 0 ? '✦ ' + item.price + ' 光子' : '✦ 40 光子') }}</text>
               <text class="showcase-action">使用风格 ›</text>
             </view>
           </view>

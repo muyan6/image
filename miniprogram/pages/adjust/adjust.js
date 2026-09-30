@@ -24,17 +24,20 @@ Page({
 
     // 档位与价格：与后端口径一致（价格就是光子数，不再另行折算）
     quality: 'light',
-    costLight: 1,
-    costFine: 3,
-    currentQualityCost: 1,
-    priceRangeText: '1~3 光子',
+    costLight: 40,
+    costFine: 40,
+    currentQualityCost: 40,
+    priceRangeText: '40 光子',
 
     // 模板文字排版字段（模板非空时展示，值随任务提交给后端排版引擎）
     textValues: {},
     customPrompt: '',
+    showViolationNotice: false,
+    violationDetail: {},
     showViolationFeedback: false,
     violationId: '',
     feedbackText: '',
+    feedbackSubmitting: false,
 
     // 用户与权益
     lightPoints: 0,
@@ -111,7 +114,7 @@ Page({
         freeMode: free,
         costLight: pLight,
         costFine: pFine,
-        priceRangeText: `${pLight}~${pFine} 光子`
+        priceRangeText: pLight === pFine ? `${pLight} 光子` : `${pLight}~${pFine} 光子`
       });
       this.refreshCurrentCost();
     }).catch(() => {});
@@ -310,18 +313,30 @@ Page({
   },
 
   onCloseViolationFeedback() {
-    this.setData({ showViolationFeedback: false });
+    this.setData({ showViolationFeedback: false, feedbackText: '' });
+  },
+
+  onAcknowledgeViolation() {
+    this.setData({ showViolationNotice: false });
+  },
+
+  onOpenViolationFeedback() {
+    this.setData({ showViolationNotice: false, showViolationFeedback: true });
   },
 
   async onSubmitViolationFeedback() {
+    if (this.data.feedbackSubmitting) return;
     const message = this.data.feedbackText.trim();
     if (!message) { wx.showToast({title: '请填写误判说明', icon: 'none'}); return; }
+    this.setData({ feedbackSubmitting: true });
     try {
       await api.submitViolationFeedback(this.data.violationId, message);
       this.setData({ showViolationFeedback: false, feedbackText: '' });
       wx.showToast({title: '反馈已提交', icon: 'success'});
     } catch (err) {
       wx.showToast({title: err.message || '提交失败', icon: 'none'});
+    } finally {
+      this.setData({ feedbackSubmitting: false });
     }
   },
 
@@ -551,13 +566,11 @@ Page({
       }
       if (err && err.detail && err.detail.code === 'CONTENT_VIOLATION') {
         const detail = err.detail;
-        this.setData({ violationId: detail.violation_id || '', lightPoints: app.globalData.lightPoints });
-        wx.showModal({
-          title: detail.banned ? '账号已被封禁' : '内容违规，未生成',
-          content: `${detail.message}。本次扣除 ✦${detail.charged}，近7天违规 ${detail.weekly_count}/3 次。${detail.banned ? '账号已永久封禁，剩余点数不予退还。' : '一周内累计3次将永久封禁。'}`,
-          confirmText: '我知道了',
-          cancelText: '误判反馈',
-          success: (r) => { if (r.cancel) this.setData({showViolationFeedback: true}); }
+        this.setData({
+          violationId: detail.violation_id || '',
+          violationDetail: detail,
+          showViolationNotice: true,
+          lightPoints: app.globalData.lightPoints
         });
         return;
       }

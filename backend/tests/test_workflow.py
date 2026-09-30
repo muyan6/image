@@ -52,6 +52,48 @@ class WorkflowTests(unittest.TestCase):
         return jid
     def test_default_quality_is_light_and_template_engine_wins(self):
         self.assertEqual(m._chosen_quality('',''),'light');self.assertEqual(m._chosen_quality('light','fine'),'fine')
+
+    def test_new_economy_and_credit_package_catalog(self):
+        self.assertEqual(m.users.get_balance('sample_user'),100)
+        self.assertEqual(m.settings.prices(),{'light':40,'fine':40})
+        r=self.client.get('/api/credits/packages');self.assertEqual(r.status_code,200)
+        items=r.json()['packages']
+        self.assertEqual([(x['yuan'],x['points']) for x in items],[(6,600),(30,3300),(68,8160),(128,16640)])
+        self.assertFalse(r.json()['payment_ready'])
+
+    def test_old_pricing_migrates_once_without_changing_other_settings(self):
+        old=self.d/'old-pricing';old.mkdir()
+        legacy=SettingsStore(str(old))
+        legacy.update({'prices':{'light':1,'fine':3},'free_mode':True})
+        path=old/'settings.json';doc=json.loads(path.read_text(encoding='utf-8'))
+        doc.pop('pricing_revision',None);path.write_text(json.dumps(doc),encoding='utf-8')
+        migrated=SettingsStore(str(old))
+        self.assertEqual(migrated.prices(),{'light':40,'fine':40})
+        self.assertTrue(migrated.free_mode())
+        self.assertEqual(SettingsStore(str(old)).prices(),{'light':40,'fine':40})
+
+    def test_existing_template_prices_migrate_to_unified_40(self):
+        directory=self.d/'old-templates';directory.mkdir()
+        with patch.object(templates_store.TemplateStore,'ensure_placeholder_covers'):
+            store=templates_store.TemplateStore(str(directory))
+            path=directory/'templates.json';doc=json.loads(path.read_text(encoding='utf-8'))
+            doc['version']=2
+            for item in doc['templates']:item['price']=4
+            path.write_text(json.dumps(doc,ensure_ascii=False),encoding='utf-8')
+            migrated=templates_store.TemplateStore(str(directory))
+        self.assertTrue(all(item['price']==40 for item in migrated.list_templates()))
+        self.assertEqual(json.loads(path.read_text(encoding='utf-8'))['version'],3)
+
+    def test_payment_credentials_remain_admin_only_and_masked(self):
+        saved=self.admin.put('/admin/api/settings',json={'payment':{
+            'offer_id':'fixture-offer','sandbox_app_key':'sandbox-secret-1234',
+            'production_app_key':'production-secret-5678'}})
+        self.assertEqual(saved.status_code,200,saved.text)
+        self.assertEqual(saved.json()['payment']['production_app_key'],'••••5678')
+        self.assertEqual(m.settings.snapshot()['payment']['production_app_key'],'production-secret-5678')
+        public=self.client.get('/api/config').json()
+        self.assertNotIn('payment',public)
+        self.assertNotIn('production-secret-5678',json.dumps(public))
     def test_multipart_default_quality(self):
         with patch.object(m.pool,'submit'):
             r=self.client.post('/api/rescue',headers=self.headers,files={'image':('x.jpg',self.image(),'image/jpeg')})
@@ -147,7 +189,7 @@ class WorkflowTests(unittest.TestCase):
              patch.object(m,'_moderate_or_reject',return_value=None):
             m._run_pipeline(jid,'light','')
         self.assertEqual(m.jobs.get(jid)['status'],'failed');self.assertIn('结果保存到 COS 失败',m.jobs.get(jid)['error'])
-        self.assertEqual(m.users.get_balance('sample_user'),90)
+        self.assertEqual(m.users.get_balance('sample_user'),100)
         self.assertEqual(len([c for c in put.call_args_list if c.args[1].startswith('results/')]),2)
         self.assertIsNone(m._job_media_url(m.jobs.get(jid),'result'))
     def test_origin_upload_failure_does_not_skip_result_key(self):
@@ -173,11 +215,11 @@ class WorkflowTests(unittest.TestCase):
         r=self.admin.delete('/admin/api/users/sample_user');self.assertEqual(r.status_code,200,r.text)
         self.assertNotIn('sample_user',[u['openid'] for u in m.users.list_users()])
         self.assertEqual(m.users.stats()['users_total'],1)
-        u=m.users.get_user('sample_user');self.assertFalse(u['banned']);self.assertEqual(u['balance'],97)
+        u=m.users.get_user('sample_user');self.assertFalse(u['banned']);self.assertEqual(u['balance'],107)
         self.assertEqual(u['invite_code'],before['invite_code']);self.assertIsNotNone(m.jobs.get(jid))
         self.assertEqual(self.client.get('/api/me',headers=self.headers).status_code,200)
         self.assertIn('sample_user',[u['openid'] for u in m.users.list_users()]);self.assertEqual(m.users.stats()['users_total'],2)
-        self.assertEqual(m.users.get_user('sample_user')['balance'],97)
+        self.assertEqual(m.users.get_user('sample_user')['balance'],107)
     def test_hidden_user_login_preserves_identity_and_no_second_gift(self):
         old=m.users.get_user('sample_user');m.users.set_balance('sample_user',12);m.users.set_banned('sample_user',True)
         self.assertEqual(self.admin.delete('/admin/api/users/sample_user').status_code,200)
@@ -211,7 +253,7 @@ class WorkflowTests(unittest.TestCase):
         ids = [r.json()['detail']['violation_id'] for r in results]
         self.assertEqual([r.json()['detail']['weekly_count'] for r in results], [1, 2, 3])
         self.assertTrue(results[-1].json()['detail']['banned'])
-        self.assertEqual(m.users.get_balance('sample_user'), 87)
+        self.assertEqual(m.users.get_balance('sample_user'), 0)
         self.assertEqual(m.users.get_user('sample_user')['blocked'], 3)
         refused = self.client.post('/api/rescue', headers=self.headers,
             files={'image': ('photo.jpg', self.image(), 'image/jpeg')})
@@ -223,7 +265,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(listed[0]['feedback'], '照片误判，请复核')
         reviewed = self.admin.post('/admin/api/violations/' + ids[-1] + '/review',
                                    json={'accepted': True})
-        self.assertEqual(reviewed.json()['balance'], 88)
+        self.assertEqual(reviewed.json()['balance'], 20)
         self.assertFalse(m.users.get_user('sample_user')['banned'])
 
     def test_custom_prompt_and_template_text_moderated_before_registration(self):
@@ -248,13 +290,35 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(result.status_code, 503)
         self.assertEqual(m.users.get_balance('sample_user'), before)
 
+    def test_user_delete_immediately_removes_own_cos_objects(self):
+        jid=self.job(orig_cos='origins/sample/photo.jpg',result_cos='results/sample/photo.jpg',
+                     norm_cos='norms/sample/photo.jpg')
+        with patch.object(m.settings,'cos_ready',return_value=True), \
+             patch('cleanup_store.delete_object',return_value=None) as delete:
+            result=self.client.delete('/api/my/jobs/'+jid,headers=self.headers)
+        self.assertEqual(result.status_code,200,result.text)
+        self.assertEqual((result.json()['cos_deleted'],result.json()['cos_pending']),(3,0))
+        self.assertEqual(delete.call_count,3)
+        self.assertEqual(m.cleanup._conn.execute("SELECT COUNT(*) FROM cleanup WHERE kind='cos' AND target LIKE '%sample/%'").fetchone()[0],0)
+        self.assertFalse(Path(m.UPLOAD_DIR,'result_'+jid+'.jpg').exists())
+
+    def test_user_delete_cos_failure_keeps_durable_retry(self):
+        jid=self.job(result_cos='results/sample/retry.jpg')
+        with patch.object(m.settings,'cos_ready',return_value=True), \
+             patch('cleanup_store.delete_object',side_effect=RuntimeError('offline')):
+            result=self.client.delete('/api/my/jobs/'+jid,headers=self.headers)
+        self.assertEqual(result.status_code,200)
+        self.assertEqual(result.json()['cos_pending'],1)
+        self.assertEqual(m.cleanup._conn.execute(
+            "SELECT COUNT(*) FROM cleanup WHERE kind='cos' AND target='results/sample/retry.jpg'").fetchone()[0],1)
+
     def test_text_violation_and_service_failure_have_different_billing(self):
         with patch.object(m, '_moderate_text_or_reject', return_value='文字内容未通过安全审核'):
             blocked = self.client.post('/api/rescue', headers=self.headers,
                 files={'image': ('photo.jpg', self.image(), 'image/jpeg')},
                 data={'custom_prompt': '测试文字'})
         self.assertEqual(blocked.status_code, 422)
-        self.assertEqual(blocked.json()['detail']['charged'], 1)
+        self.assertEqual(blocked.json()['detail']['charged'], 40)
         before = m.users.get_balance('sample_user')
         with patch.object(m, '_moderate_text_or_reject', side_effect=m.HTTPException(503, '审核服务不可用')):
             failed = self.client.post('/api/rescue', headers=self.headers,

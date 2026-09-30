@@ -46,6 +46,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from admin_api import ensure_admin_password, make_admin_router
 from cleanup_store import CleanupStore
 from community_store import CommunityStore
+from credit_packages import GENERATION_COST, POINTS_PER_YUAN, public_packages
 from cos_store import (CosError, get_object as cos_get,
                        head_exists as cos_head, presign as cos_presign,
                        put_object as cos_put)
@@ -2160,6 +2161,13 @@ def query_job_status(job_id: str, request: Request):
     }
 
 
+@app.get("/api/credits/packages")
+def credit_packages() -> Dict[str, Any]:
+    """先公开真实价格表；收款与发货未闭环前绝不由客户端加光子。"""
+    return {"packages": public_packages(), "points_per_yuan": POINTS_PER_YUAN,
+            "generation_cost": GENERATION_COST, "payment_ready": False}
+
+
 @app.post("/api/jobs/{job_id}/refresh-media")
 def refresh_job_media(job_id: str, request: Request, kind: str = "result"):
     """404 修复只返回新 COS 地址，图片补存仅走 COS 内网，不走客户端图片代理。"""
@@ -2241,8 +2249,11 @@ def delete_my_job(job_id: str, request: Request):
     if job.get("status") == "failed":
         users.refund_job(user["openid"], job_id)
     _cleanup_job_files([job])
+    cos_keys = [job.get(field) for field in ("orig_cos", "result_cos", "norm_cos") if job.get(field)]
+    cos_deleted = cleanup.delete_cos_now(settings, cos_keys)
     users.audit(user["openid"], "deleted", "job=" + job_id)
-    return {"ok": True, "balance": users.get_balance(user["openid"])}
+    return {"ok": True, "balance": users.get_balance(user["openid"]),
+            "cos_deleted": cos_deleted, "cos_pending": len(cos_keys) - cos_deleted}
 
 
 @app.delete("/api/my/jobs")

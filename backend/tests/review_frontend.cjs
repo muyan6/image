@@ -190,9 +190,22 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}) {
       html.includes("confirmation:'删除全部账号'") &&
       html.includes('input[type=url]') &&
       html.includes('.form-grid > .field > label') &&
+      html.includes('loadViolationFeedback()') &&
       /\.dock-btn\s*\{[^}]*flex:\s*1/.test(wxss) &&
       /\.dock-btn-save\s*\{[^}]*flex:\s*1/.test(wxss);
     return [ok,{modal_backdrop_closes:false,bulk_delete_control:html.includes('openPurgeUsersModal()'),equal_compare_buttons:ok}];
+  });
+
+  await test('credit_packages_and_custom_violation_dialog_are_rendered',async()=>{
+    const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/adjust/adjust.wxml'),'utf8');
+    const css=fs.readFileSync(path.join(ROOT,'miniprogram/pages/adjust/adjust.wxss'),'utf8');
+    const {page}=loadPage('credits',{config:async()=>({free_mode:false}),me:async()=>({balance:100,earn:{}}),
+      request:async()=>({generation_cost:40,payment_ready:false,packages:[{id:'points_600',yuan:6,points:600,generations:15}]})});
+    page.onLoad();await tick();await tick();
+    return [page.data.costPerGeneration===40&&page.data.estimatedGenerations===2&&
+      page.data.packages[0].points===600&&xml.includes('showViolationNotice')&&
+      css.includes('.violation-mask')&&!xml.includes('class="feedback-sheet"'),
+      {cost:page.data.costPerGeneration,images:page.data.estimatedGenerations,custom_dialog:true}];
   });
 
   await test('works_repair_old_server_media_without_loading_photo_bytes_from_api',async()=>{

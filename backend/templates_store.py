@@ -65,7 +65,7 @@ def _seed_templates() -> List[Dict[str, Any]]:
     now = time.time()
 
     def tpl(tid: str, group: str, name: str, subtitle: str, prompt: str,
-            engine: str = "light", price: int = 0, sort: int = 1,
+            engine: str = "light", price: int = 40, sort: int = 1,
             output_size: int = 0, gateway_size: str = "",
             model_override: str = "", layout: str = "",
             text_fields: Optional[List[Dict[str, Any]]] = None,
@@ -253,7 +253,7 @@ def _seed_templates() -> List[Dict[str, Any]]:
             "把这张照片转绘成复古旅行明信片的画面：浓郁而通透的版画风配色，"
             "细腻的印刷纹理，轻微暗角，构图干净适合排版。"
             "保持主体与场景可辨识。画面本身绝对不要包含任何文字或邮戳。",
-            engine="fine", price=4, sort=1, output_size=2048,
+            engine="fine", price=40, sort=1, output_size=2048,
             layout="postcard_bottom",
             text_fields=[
                 {"key": "title", "label": "问候语", "role": "title",
@@ -445,6 +445,11 @@ class TemplateStore:
             # Persisted templates are authoritative: deletion is not a migration.
             # Future seed additions must have an explicit, one-time versioned migration.
             migrated = loaded.get("version", 1) < 2
+            if loaded.get("version", 1) < 3:
+                # 新计费规则：现有全部模板的价格一次性统一为 40 光子。
+                for t in templates:
+                    t["price"] = 40
+                migrated = True
 
             # 旧版本数据没有 guide 字段：读入时统一补齐并归一化；
             # 种子模板指南为空的回填种子内容（一次性迁移），自建模板不动
@@ -477,7 +482,7 @@ class TemplateStore:
 
     def _save_locked(self) -> None:
         tmp = self._path + ".tmp"
-        doc = {"version": 2, "groups": self._groups, "templates": self._templates}
+        doc = {"version": 3, "groups": self._groups, "templates": self._templates}
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, ensure_ascii=False, indent=2)
             fh.write("\n")

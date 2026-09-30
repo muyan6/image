@@ -5,8 +5,8 @@ Page({
   data: {
     lightPoints: 0,
     freeMode: false,
-    priceLight: 1,
-    priceFine: 3,
+    priceLight: 40,
+    priceFine: 40,
     notice: null,
     featuredTemplates: [
       { id: "t_anime_dots", name: "日漫错彩网点", subtitle: "复古日漫彩页肖像，荧光波普风格", engine: "fine", price: 0, coverUrl: "/images/logo.jpg" },
@@ -89,8 +89,8 @@ Page({
 
   _renderFeatured(items) {
     const free = !!this.data.freeMode;
-    const pFine = this.data.priceFine || 3;
-    const pLight = this.data.priceLight || 1;
+    const pFine = this.data.priceFine || 40;
+    const pLight = this.data.priceLight || 40;
     const featured = items.slice(0, 6).map((t) => {
       let cost = free ? '免扣费' : (t.price > 0 ? ('✦ ' + t.price + ' 光子') : (t.engine === 'fine' ? ('✦ ' + pFine + ' 光子') : ('✦ ' + pLight + ' 光子')));
       return Object.assign({}, t, {

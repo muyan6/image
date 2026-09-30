@@ -20,7 +20,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 # 光子经济常量
-WELCOME_BALANCE = 90
+WELCOME_BALANCE = 100
 INVITE_REWARD = 30
 ACCOUNT_TYPES = ("wechat", "web")
 

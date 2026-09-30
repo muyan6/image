@@ -67,9 +67,11 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     },
     "chain": ["worldcodes", "fal", "baidu", "local"],
     "prompts": {"light": DEFAULT_LIGHT_PROMPT, "fine": DEFAULT_FINE_PROMPT},
-    "prices": {"light": 1, "fine": 3},
+    "prices": {"light": 40, "fine": 40},
+    "pricing_revision": 2,
     "free_mode": False,
     "wechat": {"app_id": "", "app_secret": ""},
+    "payment": {"offer_id": "", "sandbox_app_key": "", "production_app_key": ""},
     "tencent": {"secret_id": "", "secret_key": "", "cos_bucket": "", "cos_region": "ap-guangzhou", "cos_custom_domain": ""},
     "moderation": {"enabled": False, "block_on_error": False, "wechat_push_token": ""},
     "quota": {"daily": 20, "per_minute": 3},
@@ -109,7 +111,7 @@ def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # 误删后服务会残废的关键结构：合并后一律用默认值兜底补齐
-_DICT_SECTIONS = ("providers", "wechat", "tencent", "moderation", "quota",
+_DICT_SECTIONS = ("providers", "wechat", "payment", "tencent", "moderation", "quota",
                   "prompts", "prices", "maintenance", "quality_to_style",
                   "community", "ads")
 
@@ -177,6 +179,10 @@ def _validate(doc: Dict[str, Any]) -> None:
     for field in ("app_id", "app_secret"):
         if not isinstance(wx.get(field, ""), str) or len(wx.get(field, "")) > 128:
             raise ValueError("wechat.%s 必须是不超过 128 字的文本" % field)
+    payment = doc.get("payment", {})
+    for field in ("offer_id", "sandbox_app_key", "production_app_key"):
+        if not isinstance(payment.get(field, ""), str) or len(payment.get(field, "")) > 200:
+            raise ValueError("payment.%s 必须是不超过 200 字的文本" % field)
     tc = doc.get("tencent", {})
     for field in ("secret_id", "secret_key", "cos_bucket", "cos_region", "cos_custom_domain"):
         if not isinstance(tc.get(field, ""), str) or len(tc.get(field, "")) > 200:
@@ -306,6 +312,11 @@ class SettingsStore:
             return
         # 深合并:文件里缺的新字段用默认补齐,未知字段保留
         self._data = _deep_merge(defaults, loaded)
+        if int(loaded.get("pricing_revision") or 0) < 2:
+            # 一次性将旧站 1/3 光子档位统一切到 40，保留其他运行设置。
+            self._data["prices"] = {"light": 40, "fine": 40}
+            self._data["pricing_revision"] = 2
+            self._save_locked(self._data)
         log.info("设置已加载: %s", self._path)
 
     def _save_locked(self, doc: Dict[str, Any]) -> None:

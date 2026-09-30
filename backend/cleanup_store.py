@@ -6,6 +6,7 @@ import os
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from cos_store import delete_object
 
@@ -77,6 +78,28 @@ class CleanupStore:
             return removed
         finally:
             self._run_lock.release()
+
+    def delete_cos_now(self, settings, keys) -> int:
+        """用户删作品时只立即处理该作品 COS 对象；失败项保留在持久队列重试。"""
+        targets = list(dict.fromkeys(k for k in keys if k))
+        if not targets or not settings.cos_ready():
+            return 0
+        removed = 0
+        with self._run_lock:
+            with ThreadPoolExecutor(max_workers=min(3, len(targets))) as pool:
+                future_keys = {pool.submit(delete_object, settings, key, timeout=(3, 5)): key
+                               for key in targets}
+                for future in as_completed(future_keys):
+                    key = future_keys[future]
+                    try:
+                        future.result()
+                    except Exception:
+                        log.warning("COS 立即删除未完成，后台队列继续重试 key=%s", key)
+                    else:
+                        with self._lock, self._conn:
+                            self._conn.execute("DELETE FROM cleanup WHERE kind='cos' AND target=?", (key,))
+                        removed += 1
+        return removed
 
     def close(self) -> None:
         self._conn.close()

@@ -146,11 +146,12 @@ def head_exists(settings: SettingsStore, key: str) -> bool:
     return False
 
 
-def delete_object(settings: SettingsStore, key: str) -> None:
+def delete_object(settings: SettingsStore, key: str,
+                  timeout: tuple = (6, 15)) -> None:
     """Idempotent delete: a missing object is already cleaned up."""
     for internal in (True, False):
         try:
-            response = requests.delete(presign(settings, "delete", key, internal=internal), timeout=(6, 15))
+            response = requests.delete(presign(settings, "delete", key, internal=internal), timeout=timeout)
             if response.status_code in (200, 204, 404):
                 return
             if not internal:

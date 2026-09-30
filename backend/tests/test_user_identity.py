@@ -78,7 +78,7 @@ class IdentityTests(unittest.TestCase):
         self.log({'account_rows': rows, 'unique_display_ids':len(set(identities)), 'balance':m.users.get_balance('o-fixed-wechat-identity')})
         self.assertTrue(all(r.status_code == 200 for r in responses))
         self.assertEqual(rows, 1)
-        self.assertEqual(m.users.get_balance('o-fixed-wechat-identity'), 90)
+        self.assertEqual(m.users.get_balance('o-fixed-wechat-identity'), 100)
         self.assertTrue(identities[0] and identities[0].startswith('WX-'))
         self.assertEqual(len(set(identities)), 1)
 

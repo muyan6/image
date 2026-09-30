@@ -251,14 +251,14 @@ Page({
         if (!item) return;
         this._loadVersion = (this._loadVersion || 0) + 1;
         try {
-          if (item.jobId) await api.deleteJob(item.jobId);
+          const deletion = item.jobId ? await api.deleteJob(item.jobId) : null;
           this._deletedIds = this._deletedIds || new Set();
           if (item.jobId) this._deletedIds.add(item.jobId);
           app.globalData.historyList = (app.globalData.historyList || []).filter(w => w !== item && w.jobId !== item.jobId);
           app.persist();
           this.setData({works: app.globalData.historyList});
           await this.loadWorks();
-          wx.showToast({title: '已删除作品', icon: 'success'});
+          wx.showToast({title: deletion && deletion.cos_pending ? '云端清理中' : '已删除作品', icon: 'success'});
         } catch (err) { wx.showToast({title: err.message || '删除失败，请重试', icon: 'none'}); }
       }
     });

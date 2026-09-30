@@ -136,8 +136,8 @@ Page({
     const freeMode = typeof conf.free_mode === 'boolean' ? conf.free_mode : !!app.globalData.freeMode;
     if (freeMode) return '免扣费';
     const prices = conf.prices || {};
-    const fallback = tpl.engine === 'fine' ? (prices.fine != null ? prices.fine : 3)
-      : (prices.light != null ? prices.light : 1);
+    const fallback = tpl.engine === 'fine' ? (prices.fine != null ? prices.fine : 40)
+      : (prices.light != null ? prices.light : 40);
     return `✦ ${tpl.price > 0 ? tpl.price : fallback} 光子`;
   },
 

@@ -4,13 +4,13 @@
     <view class="washi-tape"></view>
     <view class="balance-head">
       <text class="balance-label">可用光子</text>
-      <text class="rate-badge">轻量生成 · ✦1/张</text>
+      <text class="rate-badge">生成 · ✦{{ costPerGeneration }}/张</text>
     </view>
     <view class="balance-main">
       <text class="balance-number">✦ {{ lightPoints }}</text>
       <text class="balance-unit">光子</text>
     </view>
-    <text class="balance-desc">按轻量生成计算，当前约可拯救 {{ lightPoints }} 张照片</text>
+    <text class="balance-desc">当前余额约可生成 {{ estimatedGenerations }} 张照片</text>
 
     <view class="checkin-row" bindtap="onCheckIn">
       <view class="checkin-status">
@@ -25,47 +25,23 @@
   <view class="section-box">
     <view class="section-head">
       <text class="section-title">充值光子</text>
-      <text class="section-tip">支付通道即将开放</text>
+      <text class="section-tip">{{ paymentReady ? '选择套餐充值' : '商品上架与支付配置中' }}</text>
     </view>
 
     <view class="package-list gallery-card">
-      <view class="package-item" bindtap="onSelectPackage" data-name="600 光子" data-price="6.9">
+      <block wx:for="{{ packages }}" wx:key="id">
+      <view class="package-item" bindtap="onSelectPackage" data-id="{{ item.id }}">
         <view class="pkg-info">
-          <text class="pkg-name">600 光子</text>
-          <text class="pkg-sub">按轻量生成约可生成 600 张</text>
+          <text class="pkg-name">{{ item.points }} 光子</text>
+          <text class="pkg-sub">{{ item.bonus_text }} · 约 {{ item.generations }} 张</text>
         </view>
         <view class="pkg-price-box">
-          <text class="pkg-price">¥6.9</text>
+          <text class="pkg-price">{{ item.price_text }}</text>
           <text class="pkg-arrow">›</text>
         </view>
       </view>
-      <view class="item-divider"></view>
-
-      <view class="package-item" bindtap="onSelectPackage" data-name="2000 光子" data-price="19.9">
-        <view class="pkg-info">
-          <view class="pkg-title-row">
-            <text class="pkg-name">2000 光子</text>
-            <text class="badge-rec">推荐</text>
-          </view>
-          <text class="pkg-sub">按轻量生成约可生成 2000 张</text>
-        </view>
-        <view class="pkg-price-box">
-          <text class="pkg-price">¥19.9</text>
-          <text class="pkg-arrow">›</text>
-        </view>
-      </view>
-      <view class="item-divider"></view>
-
-      <view class="package-item" bindtap="onSelectPackage" data-name="4500 光子" data-price="39.9">
-        <view class="pkg-info">
-          <text class="pkg-name">4500 光子</text>
-          <text class="pkg-sub">按轻量生成约可生成 4500 张</text>
-        </view>
-        <view class="pkg-price-box">
-          <text class="pkg-price">¥39.9</text>
-          <text class="pkg-arrow">›</text>
-        </view>
-      </view>
+      <view class="item-divider" wx:if="{{ index < packages.length - 1 }}"></view>
+      </block>
     </view>
   </view>
 
@@ -108,7 +84,7 @@
         <view class="notice-icon">✓</view>
         <view class="notice-text">
           <text class="notice-h">失败不扣光子</text>
-          <text class="notice-p">技术失败、超时或内容审核未通过，预扣的光子会自动退回。</text>
+          <text class="notice-p">技术失败或超时会退回预扣光子；明确违规内容不予生成，本次点数不退。</text>
         </view>
       </view>
       <view class="item-divider"></view>

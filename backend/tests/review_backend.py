@@ -97,9 +97,13 @@ def reset(name):
     m.jobs = m.JobStore(2592000, 5000, db_path=str(d / 'jobs.db'))
     m.users.ensure_user('sample_user')
     m.users.ensure_user('sample_inviter')
+    # 旧账本专项用固定 90/1/3 夹具；新用户正式默认值由独立测试覆盖。
+    m.users.set_balance('sample_user', 90)
+    m.users.set_balance('sample_inviter', 90)
     m._uploads.clear()
     m.cleanup = CleanupStore(str(d), m.UPLOAD_DIR)
-    m.settings.update({'normalize_long_side': 96, 'chain': ['local']})
+    m.settings.update({'normalize_long_side': 96, 'chain': ['local'],
+                       'prices': {'light': 1, 'fine': 3}})
     return d
 
 

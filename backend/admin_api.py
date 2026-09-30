@@ -33,6 +33,7 @@ _MASK_SCHEMA = {
     ("providers", "fal"): ("api_key",),
     ("providers", "baidu"): ("api_key", "secret_key"),
     ("wechat",): ("app_secret",),
+    ("payment",): ("sandbox_app_key", "production_app_key"),
     ("tencent",): ("secret_id", "secret_key"),
     ("ads",): ("rewarded_video_verifier_key",),
 }
