@@ -96,7 +96,7 @@
       >
         <image class="work-thumb" src="{{ item.preview }}" mode="aspectFill" binderror="onPreviewError" data-job-id="{{ item.jobId }}"></image>
         <view class="work-tag">
-          <text>{{ item.quality === 'fine' ? '2K精细' : '1.5K' }}</text>
+          <text>{{ item.quality === 'fine' ? '精细生成' : '轻量生成' }}</text>
         </view>
       </view>
     </view>
@@ -150,8 +150,8 @@
 
   <!-- 底部微标 -->
   <view class="dossier-footer">
-    <text class="dossier-brand">废片新生所 · 典藏个人档案</text>
-    <text class="dossier-ver">VERSION 2.4 · 艺术策展引擎</text>
+    <text class="dossier-brand">废片新生所</text>
+    <text class="dossier-ver">照片修复 · 风格创作</text>
   </view>
 
   <view class="profile-mask" wx:if="{{ showProfileEditor }}" bindtap="onCloseProfile">

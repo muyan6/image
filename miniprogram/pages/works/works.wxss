@@ -22,7 +22,7 @@
 
 .header-eyebrow {
   font-family: var(--font-mono);
-  font-size: 20rpx;
+  font-size: 22rpx;
   letter-spacing: 2rpx;
   color: var(--accent-gold);
 }
@@ -86,7 +86,7 @@
   left: 12rpx;
   background: rgba(26, 25, 23, 0.78);
   color: #f7f4ed;
-  font-size: 18rpx;
+  font-size: 22rpx;
   padding: 2rpx 10rpx;
   border-radius: 2rpx;
   backdrop-filter: blur(4px);
@@ -102,7 +102,7 @@
 
 .work-date {
   font-family: var(--font-mono);
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: var(--ink-muted);
 }
 
@@ -158,7 +158,7 @@
   right: 12rpx;
   background: rgba(22, 22, 24, 0.85);
   color: #ffb74d;
-  font-size: 18rpx;
+  font-size: 22rpx;
   padding: 4rpx 14rpx;
   border-radius: 20rpx;
   display: flex;
@@ -177,3 +177,12 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0.2; }
 }
+
+.work-filters { display: flex; gap: 10rpx; }
+.work-filter { flex: 1; min-width: 0; border: 1rpx solid var(--paper-border); background: var(--paper-card-subtle);
+  padding: 18rpx 4rpx; min-height: 80rpx; display: flex; align-items: center; justify-content: center; gap: 6rpx; font-size: 24rpx; color: var(--ink-body); }
+.work-filter-active { border-color: var(--ink-title); background: var(--ink-title); color: var(--paper-bg); }
+.work-filter-count { font-size: 22rpx; opacity: .8; }
+.work-more-btn { min-width: 72rpx; min-height: 72rpx; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; }
+.work-info { gap: 8rpx; padding: 8rpx 16rpx; }
+.work-date { min-width: 0; font-family: var(--font-sans); line-height: 1.5; }

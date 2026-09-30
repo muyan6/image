@@ -34,6 +34,7 @@ Page({
     customPrompt: '',
     showCustomPrompt: false,
     templateOutputMode: 'template',
+    showOutputHelp: false,
     singleOutputAvailable: false,
     templateTiersAvailable: false,
     showViolationNotice: false,
@@ -322,6 +323,10 @@ Page({
     this.setData({templateOutputMode: mode});
   },
 
+  onToggleOutputHelp() {
+    this.setData({showOutputHelp: !this.data.showOutputHelp});
+  },
+
   onAcknowledgeViolation() {
     this.setData({ showViolationNotice: false });
   },
@@ -474,7 +479,7 @@ Page({
       if (this._foreground === false || this._unloaded || this._generation !== generation) return;
       this.setData({
         currentJobId: jobId,
-        processingText: `正在进行${tpl ? tpl.name : 'AI'}风格重构…`
+        processingText: '任务已提交，等待生成…'
       });
 
       // 2. 轮询等待任务（用户若停留在本页等待则轮询；随时可关闭或切屏）
@@ -483,9 +488,9 @@ Page({
         job = await api.waitForJob(jobId, {
           isCanceled: inactive,
           onTick: (j) => {
-            if (j.stage === 'enhance') {
-              this.setData({ processingText: 'AI 深度重构光影与细节中…' });
-            }
+            const labels={queued:'任务排队中…',normalize:'正在准备照片…',enhance:'正在生成图片…',
+              finalize:'正在整理生成结果…',store_cos:'正在保存图片…',submission_unknown:'正在确认生成任务状态…'};
+            this.setData({processingText:labels[j.stage]||'任务处理中，可稍后到作品页查看'});
           }
         });
       } catch (waitErr) {

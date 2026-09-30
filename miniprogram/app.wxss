@@ -13,7 +13,9 @@ page {
   --ink-title: #1a1917;
   --ink-body: #3c3933;
   --ink-muted: #787368;
-  --ink-faint: #aba496;
+  --ink-faint: #8b8478;
+  --text-caption: 22rpx;
+  --text-body: 26rpx;
 
   --accent-gold: #b38b4d;
   --accent-indigo: #27384e;
@@ -34,6 +36,18 @@ page {
 view, text, image, button, input {
   box-sizing: border-box;
 }
+
+/* 跨页面共用的加载、错误与空状态。 */
+.ui-state { padding: 48rpx 32rpx; text-align: center; background: var(--paper-card-subtle);
+  border: 1rpx solid var(--paper-border); display: flex; flex-direction: column; align-items: center; gap: 16rpx; }
+.ui-state-title { font-family: var(--font-serif); font-size: 30rpx; font-weight: 600; color: var(--ink-title); }
+.ui-state-desc { font-size: 24rpx; line-height: 1.6; color: var(--ink-muted); }
+.ui-state-action { margin: 8rpx 0 0; padding: 0 28rpx; min-height: 80rpx; line-height: 80rpx;
+  font-size: 24rpx; border-radius: 0; border: 1rpx solid var(--paper-border-dark); background: var(--paper-card); color: var(--ink-title); }
+.ui-state-action::after { border: none; }
+.ui-inline-state { padding: 20rpx 24rpx; display: flex; align-items: center; justify-content: space-between;
+  gap: 20rpx; border: 1rpx solid var(--paper-border); background: var(--paper-card-subtle); font-size: 24rpx; color: var(--ink-muted); line-height: 1.5; }
+.ui-inline-state .ui-state-action { margin: 0; flex-shrink: 0; }
 
 /* 艺术画框卡片 (Museum Mat Board) */
 .gallery-card {

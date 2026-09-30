@@ -45,7 +45,7 @@ page {
 
 .spec-label {
   font-family: var(--font-mono);
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: #deb87b;
   letter-spacing: 2rpx;
 }
@@ -203,13 +203,14 @@ page {
 
 /* 底部操作坞 */
 .gallery-dock {
-  height: 128rpx;
+  min-height: calc(128rpx + env(safe-area-inset-bottom));
+  flex-shrink: 0;
   background: rgba(23, 22, 20, 0.98);
   border-top: 1rpx solid rgba(255, 255, 255, 0.1);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24rpx 16rpx;
+  padding: 16rpx 24rpx calc(16rpx + env(safe-area-inset-bottom));
   gap: 16rpx;
   z-index: 100;
 }
@@ -244,7 +245,7 @@ page {
 
 .dock-save-text {
   font-family: var(--font-serif);
-  font-size: 22rpx;
+  font-size: 28rpx;
   font-weight: 700;
   letter-spacing: 1rpx;
   line-height: 1.25;
@@ -267,3 +268,6 @@ page {
 .media-notice-result { right: 2%; }
 .media-notice-original { left: 2%; }
 .media-loading { position: absolute; top: 42%; width: 100%; text-align: center; color: #dfcfb0; z-index: 14; }
+
+.gallery-nav .typewriter-label, .dock-btn .typewriter-label { font-size: 26rpx; letter-spacing: 0; color: #f5f2eb; }
+.floating-tag .typewriter-label, .hold-capsule .typewriter-label { font-size: 22rpx; letter-spacing: 0; color: #dfcfb0; }

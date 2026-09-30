@@ -73,7 +73,7 @@ page {
   color: #ffffff;
   border-radius: 24rpx;
   padding: 6rpx 14rpx;
-  font-size: 20rpx;
+  font-size: 22rpx;
   pointer-events: none;
 }
 
@@ -290,7 +290,7 @@ page {
 }
 
 .bar-hint {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: #92929a;
   margin-top: 4rpx;
   line-height: 1.35;
@@ -313,3 +313,10 @@ page {
 .btn-create:active {
   opacity: 0.88;
 }
+
+/* 模板详情与列表使用同一纸本主题。 */
+page { background-color: var(--paper-bg); color: var(--ink-title); font-family: var(--font-sans); }
+.banner-card, .feature-card { border-radius: 4rpx; }
+.feature-card { border: 1rpx solid var(--paper-border); }
+.fixed-bar { border-color: var(--paper-border); background: var(--paper-card-subtle); }
+.btn-create { border-radius: 0; background: var(--ink-title); }

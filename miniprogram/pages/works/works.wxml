@@ -2,9 +2,9 @@
   <!-- 顶部导语 -->
   <view class="works-header">
     <view class="header-left">
-      <text class="header-eyebrow">STUDIO ARCHIVE · 典藏作品集</text>
-      <text class="header-headline">我的拯救作品</text>
-      <text class="header-sub">共装裱留存 {{ works.length }} 件作品</text>
+      <text class="header-eyebrow">照片与创作记录</text>
+      <text class="header-headline">我的作品</text>
+      <text class="header-sub">共 {{ works.length }} 件作品</text>
     </view>
     <view wx:if="{{ works.length > 0 }}" class="header-actions">
       <text class="clear-all-btn" bindtap="onClearAllWorks">清空</text>
@@ -12,39 +12,49 @@
   </view>
 
   <!-- 作品网格 (双列画廊装裱框) -->
-  <view wx:if="{{ works.length > 0 }}" class="works-waterfall">
+  <view class="work-filters">
+    <view wx:for="{{workFilters}}" wx:key="id" class="work-filter {{activeStatus === item.id ? 'work-filter-active' : ''}}" bindtap="onFilterStatus" data-id="{{item.id}}">
+      <text>{{item.name}}</text><text class="work-filter-count">{{item.count}}</text>
+    </view>
+  </view>
+  <view wx:if="{{loadError}}" class="ui-inline-state"><text>{{works.length ? '更新失败，当前展示已缓存的作品' : loadError}}</text><button class="ui-state-action" bindtap="onRetryWorks">重试</button></view>
+  <view wx:if="{{loading && !works.length}}" class="ui-state"><text class="ui-state-title">正在读取作品…</text></view>
+  <view wx:if="{{ filteredWorks.length > 0 }}" class="works-waterfall">
     <view
-      wx:for="{{ works }}"
+      wx:for="{{ filteredWorks }}"
       wx:key="jobId"
       class="work-card gallery-card"
       bindtap="onTapWork"
-      data-index="{{ index }}"
+      data-index="{{ item.sourceIndex }}"
     >
       <view class="work-photo-box">
-        <image class="work-img" src="{{ item.preview }}" mode="aspectFill" lazy-load binderror="onWorkImageError" data-index="{{ index }}"></image>
+        <image class="work-img" src="{{ item.preview }}" mode="aspectFit" lazy-load binderror="onWorkImageError" data-index="{{ item.sourceIndex }}"></image>
         <view class="work-processing-badge" wx:if="{{ item.status === 'succeeded' && !item.preview }}"><text>{{ item.error || '图片正在恢复…' }}</text></view>
         <view class="work-quality-tag" wx:if="{{ item.status !== 'processing' && item.result }}">
           <text>{{ item.width && item.height ? item.width + '×' + item.height : (item.quality === 'fine' ? '精细修复' : '标准修复') }}</text>
         </view>
         <view class="work-processing-badge" wx:if="{{ item.status === 'processing' }}">
           <text class="processing-dot">●</text>
-          <text>云端重构中</text>
+          <text>生成中</text>
         </view>
         <view class="work-processing-badge" wx:if="{{ item.status === 'failed' }}"><text>生成失败 · 光子已核对</text></view>
       </view>
       <view class="work-info">
         <text class="work-date">{{ item.time || '近期拯救' }}</text>
-        <view class="work-more-btn">···</view>
+        <view class="work-more-btn" catchtap="onMoreWork" data-index="{{ item.sourceIndex }}" aria-label="更多操作">···</view>
       </view>
     </view>
   </view>
 
   <!-- 空状态 -->
-  <view wx:else class="empty-state gallery-card">
+  <view wx:if="{{!filteredWorks.length && works.length && !loading && !loadError}}" class="ui-state">
+    <text class="ui-state-title">当前筛选下暂无作品</text><text class="ui-state-desc">切换到其他状态查看。</text>
+  </view>
+  <view wx:if="{{!works.length && loaded && !loading && !loadError}}" class="empty-state gallery-card">
     <view class="washi-tape"></view>
     <text class="empty-symbol">◌</text>
-    <text class="empty-title">暂无留存作品</text>
-    <text class="empty-desc">在创作页完成一次拯救或风格重绘后，作品将自动装裱典藏在此展厅中。</text>
+    <text class="empty-title">还没有作品</text>
+    <text class="empty-desc">完成一次照片修复或风格创作后，就能在这里查看和保存。</text>
     <button class="btn-ink empty-btn" bindtap="onGoCreate">
       去创作第一张照片 →
     </button>

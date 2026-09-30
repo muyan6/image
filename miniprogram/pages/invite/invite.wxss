@@ -21,7 +21,7 @@
 
 .card-eyebrow {
   font-family: var(--font-mono);
-  font-size: 20rpx;
+  font-size: 22rpx;
   letter-spacing: 2rpx;
   color: #aba496;
 }
@@ -77,7 +77,7 @@
 }
 
 .code-copy-btn {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: #deb87b;
   padding: 2rpx 8rpx;
 }
@@ -172,7 +172,7 @@
 }
 
 .inv-date {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: var(--ink-faint);
 }
 
@@ -182,7 +182,7 @@
 }
 
 .rule-hint {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: var(--ink-faint);
   line-height: 1.5;
   padding: 0 6rpx;

@@ -39,9 +39,8 @@
     <view class="upload-portal gallery-card" bindtap="onPickImage">
       <view class="washi-tape"></view>
       <view class="portal-body">
-        <image class="portal-emblem" src="/images/logo.jpg" mode="aspectFit"></image>
         <view class="portal-btn">
-          <text class="portal-btn-title">选择待拯救照片</text>
+          <text class="portal-btn-title">选择照片</text>
           <text class="portal-btn-arrow">→</text>
         </view>
         <text class="portal-desc">点击从手机相册选择，或现场拍照</text>

@@ -4,6 +4,9 @@ const api = require('../../utils/api.js');
 Page({
   data: {
     loading: false,
+    loadError: '',
+    loaded: false,
+    skeletonItems: [0, 1, 2, 3],
     categories: [
       { id: 'all', name: '全部风格', count: 0 }
     ],
@@ -32,6 +35,7 @@ Page({
   },
 
   fetchTemplates(callback, force = false) {
+    this.setData({ loadError: '' });
     if (!force && this._lastFetchedAt && Date.now() - this._lastFetchedAt < 30000 &&
         this.data.allTemplates.length) {
       if (typeof callback === 'function') callback();
@@ -49,6 +53,7 @@ Page({
       const cached = wx.getStorageSync('cached_templates_data');
       if (!this.data.allTemplates.length && cached && Array.isArray(cached.items) && cached.items.length > 0) {
         this._renderData(cached.groups || [], cached.items);
+        this.setData({ loaded: true });
       }
     } catch (e) {}
 
@@ -74,7 +79,7 @@ Page({
         const rawItems = (data && data.items) || [];
         try { wx.setStorageSync('cached_templates_data', data); } catch (e) {}
         this._renderData(groups, rawItems);
-        this.setData({ loading: false });
+        this.setData({ loading: false, loaded: true, loadError: '' });
         this._lastFetchedAt = Date.now();
         if (typeof callback === 'function') callback();
       })
@@ -84,7 +89,7 @@ Page({
           return;
         }
         console.warn('获取模板列表失败', err);
-        this.setData({ loading: false });
+        this.setData({ loading: false, loadError: '模板加载失败，请检查网络后重试' });
         if (typeof callback === 'function') callback();
       });
   },
@@ -148,6 +153,10 @@ Page({
       return words.every(word => text.includes(word));
     });
     this.setData({ filteredTemplates: list });
+  },
+
+  onRetryTemplates() {
+    this.fetchTemplates(null, true);
   },
 
   onSearchInput(e) {

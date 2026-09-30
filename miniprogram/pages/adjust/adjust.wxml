@@ -82,19 +82,23 @@
         <text class="section-title">成品形式</text>
         <text class="section-headline">是否在成品中保留原图对比</text>
       </view>
-      <view class="tier-grid">
+      <view class="tier-grid output-grid">
         <view class="tier-card {{ templateOutputMode === 'template' ? 'tier-card-active' : '' }}"
           bindtap="onSelectTemplateOutput" data-mode="template">
+          <view class="output-diagram output-diagram-pair" aria-hidden="true"><view>原图</view><view>效果</view></view>
           <text class="tier-name">按模板生成</text>
           <text class="tier-desc">遵循模板；有原图对比时保留拼接</text>
         </view>
         <view class="tier-card {{ templateOutputMode === 'single' ? 'tier-card-active' : '' }} {{ !singleOutputAvailable ? 'output-unavailable' : '' }}"
           bindtap="onSelectTemplateOutput" data-mode="single">
+          <view class="output-diagram output-diagram-single" aria-hidden="true"><view>效果</view></view>
           <text class="tier-name">仅生成后图</text>
           <text class="tier-desc">{{ singleOutputAvailable ? '省略原图对比区域，保留生成后的画面' : '后端更新后启用' }}</text>
         </view>
       </view>
-      <text class="section-hint">不含原图对比的模板，两项效果通常相同，保留原有构图、文字与装饰。这是生成时的要求，不会自动裁切，也不是从已有拼图中精确提取。生成档位与光子费用不受此选项影响。</text>
+      <text class="section-hint">示意仅用于区分原图对比，不代表每个模板都会拼接。此选项不影响费用。</text>
+      <view class="output-help-toggle" bindtap="onToggleOutputHelp">{{ showOutputHelp ? '收起说明 ∧' : '两种形式有什么区别？ ›' }}</view>
+      <text wx:if="{{ showOutputHelp }}" class="section-hint">不含原图对比的模板，两项效果通常相同，保留原有构图、文字与装饰。这是生成时的要求，不会自动裁切，也不是从已有拼图中精确提取，实际效果仍取决于模型。</text>
     </view>
 
     <!-- 卡片 3：生成档位 / 选择这次的生成方式 -->
@@ -271,7 +275,7 @@
       <view class="loading-ring"></view>
       <text class="processing-title">AI 重构进行中</text>
       <text class="processing-sub">{{ processingText }}</text>
-      <text class="processing-tip">已提交云端处理，运算约需 15~25 秒</text>
+      <text class="processing-tip">生成时间随模型和排队情况变化；提交后可到「作品」查看进度。</text>
 
       <!-- 快捷离开按钮（拿到任务ID后即可转后台） -->
       <view class="processing-actions" wx:if="{{ currentJobId }}">

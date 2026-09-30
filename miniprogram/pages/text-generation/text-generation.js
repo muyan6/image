@@ -1,16 +1,38 @@
 const api=require('../../utils/api.js');
 const app=getApp();
 Page({
-  data:{prompt:'',ratio:'1:1',ready:false,price:40,busy:false,freeMode:false,
+  data:{prompt:'',ratio:'1:1',ready:false,price:40,busy:false,freeMode:false,configLoading:true,configError:'',
+    examples:[{label:'水彩风景',prompt:'雨后的森林小屋，暖色灯光，水彩插画风格。'},
+      {label:'简约壁纸',prompt:'暖白色背景，一枝浅绿色植物，柔和自然光，简约手机壁纸。'},
+      {label:'旅行插画',prompt:'海边小镇的午后，蓝白房屋与橘色屋顶，清新旅行插画。'}],
     ratios:[{key:'1:1',label:'方形'},{key:'3:2',label:'横图'},{key:'2:3',label:'竖图'}]},
   onShow(){
     this._visible=true;
-    api.config().then(c=>this.setData({ready:!!(c.text_generation&&c.text_generation.ready),
-      price:c.text_generation?c.text_generation.price:40,freeMode:!!c.free_mode})).catch(()=>this.setData({ready:false}));
+    return this.loadConfig();
+  },
+  loadConfig(){
+    const version=(this._configVersion||0)+1;this._configVersion=version;
+    this.setData({configLoading:true,configError:'',ready:false});
+    return api.config().then(c=>{
+      if(this._unloaded||version!==this._configVersion)return;
+      if(!c)throw new Error('empty config');
+      this.setData({ready:!!(c.text_generation&&c.text_generation.ready),
+        price:c.text_generation?c.text_generation.price:40,freeMode:!!c.free_mode});
+    }).catch(()=>{if(!this._unloaded&&version===this._configVersion)this.setData({ready:false,configError:'生成配置加载失败，请重试'});})
+      .finally(()=>{if(!this._unloaded&&version===this._configVersion)this.setData({configLoading:false});});
   },
   onHide(){this._visible=false;},
   onUnload(){this._visible=false;this._unloaded=true;},
   onInput(e){this.setData({prompt:(e.detail.value||'').slice(0,500)});},
+  onUseExample(e){
+    if(this.data.busy)return;
+    const example=this.data.examples[e.currentTarget.dataset.index];if(!example)return;
+    if(this.data.prompt.trim()){
+      wx.showModal({title:'使用示例描述',content:'将替换当前描述，填入后仍可修改。',confirmText:'替换',
+        success:r=>{if(r.confirm&&!this.data.busy&&!this._unloaded)this.setData({prompt:example.prompt});}});
+    }else this.setData({prompt:example.prompt});
+  },
+  onClearPrompt(){if(!this.data.busy)this.setData({prompt:''});},
   onRatio(e){if(!this.data.busy)this.setData({ratio:e.currentTarget.dataset.key});},
   onWorks(){wx.navigateTo({url:'/pages/works/works'});},
   async onGenerate(){

@@ -14,7 +14,7 @@
 .salon-eyebrow {
   display: block;
   font-family: var(--font-mono);
-  font-size: 20rpx;
+  font-size: 22rpx;
   letter-spacing: 2rpx;
   text-transform: uppercase;
   color: var(--accent-gold);
@@ -145,7 +145,7 @@
 }
 
 .author-time {
-  font-size: 18rpx;
+  font-size: 22rpx;
   color: var(--ink-faint);
 }
 
@@ -159,13 +159,13 @@
 }
 
 .recipe-tag {
-  font-size: 18rpx;
+  font-size: 22rpx;
   color: var(--accent-gold);
   font-weight: 600;
 }
 
 .recipe-name {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: var(--ink-title);
   font-weight: 500;
 }
@@ -200,7 +200,7 @@
   position: absolute;
   bottom: 12rpx;
   left: 12rpx;
-  font-size: 18rpx;
+  font-size: 22rpx;
   padding: 4rpx 12rpx;
   border-radius: 2rpx;
   backdrop-filter: blur(4px);
@@ -302,7 +302,7 @@
 }
 
 .footer-note {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: var(--ink-muted);
   letter-spacing: 1rpx;
 }

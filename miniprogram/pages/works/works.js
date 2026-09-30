@@ -5,8 +5,25 @@ const reusablePreview = url => !!url &&
 
 Page({
   data: {
-    works: []
+    works: [], filteredWorks: [], activeStatus: 'all', loading: false, loaded: false, loadError: '',
+    workFilters: [{id:'all',name:'全部',count:0},{id:'processing',name:'生成中',count:0},
+      {id:'succeeded',name:'已完成',count:0},{id:'failed',name:'失败',count:0}]
   },
+
+  setWorks(works) {
+    const status=w=>w.status || (w.result ? 'succeeded' : 'processing');
+    this.setData({works,
+      filteredWorks:works.map((w,index)=>Object.assign({},w,{sourceIndex:index})).filter(w=>this.data.activeStatus==='all'||status(w)===this.data.activeStatus),
+      workFilters:this.data.workFilters.map(f=>Object.assign({},f,{count:f.id==='all'?works.length:works.filter(w=>status(w)===f.id).length}))});
+  },
+
+  onFilterStatus(e) {
+    const id=e.currentTarget.dataset.id;
+    if(!this.data.workFilters.some(f=>f.id===id))return;
+    this.setData({activeStatus:id});this.setWorks(this.data.works);
+  },
+
+  onRetryWorks() { return this.loadWorks(true); },
 
   onLoad() {
     // 首次及之后返回本页均由 onShow 加载，避免相同请求并发两次。
@@ -59,8 +76,9 @@ Page({
         !this.data.works.some(w => w.preview && !reusablePreview(w.preview))) return;
     const version = (this._loadVersion || 0) + 1;
     this._loadVersion = version;
-    if (!this.data.works.length) this.setData({ works: (app.globalData.historyList || []).map(w =>
-      Object.assign({}, w, {preview: this.safePreview(w)})) });
+    this.setData({loading:true,loadError:''});
+    if (!this.data.works.length) this.setWorks((app.globalData.historyList || []).map(w =>
+      Object.assign({}, w, {preview: this.safePreview(w)})));
     try {
       const res = await api.myJobs(100);
       if (this._loadVersion !== version) return;
@@ -106,9 +124,12 @@ Page({
       }
       app.globalData.historyList = merged;
       app.persist();
-      this.setData({works: merged});
+      this.setWorks(merged);
       this._lastLoadedAt = Date.now();
-    } catch (e) { /* keep local cache for a transient network failure */ }
+    } catch (e) {
+      if(this._loadVersion===version)this.setData({loadError:'作品加载失败，请检查网络后重试'});
+    }
+    if(this._loadVersion===version)this.setData({loading:false,loaded:true});
     if (this._loadVersion === version) await this.refreshPendingWorks();
   },
 
@@ -139,11 +160,11 @@ Page({
     api.repairJobMedia(item.jobId, 'result').then(url => {
       const works = this.data.works.map(w => w.jobId === item.jobId ?
         Object.assign({}, w, {result:url, preview:url, error:''}) : w);
-      this.setData({works});
+      this.setWorks(works);
     }).catch(err => {
       const works = this.data.works.map(w => w.jobId === item.jobId ?
         Object.assign({}, w, {result:'', preview:'', error:err.message || '结果图暂不可用'}) : w);
-      this.setData({works});
+      this.setWorks(works);
     });
   },
 
@@ -160,7 +181,7 @@ Page({
       } catch (err) {}
     }
     if (hasUpdate) {
-      this.setData({ works: app.globalData.historyList || [] });
+      this.setWorks(app.globalData.historyList || []);
     }
   },
 
@@ -201,7 +222,7 @@ Page({
           if (idx >= 0) {
             list[idx] = fresh;
             app.persist();
-            this.setData({ works: list });
+            this.setWorks(list);
           }
         }
         return fresh;
@@ -230,7 +251,7 @@ Page({
       this.refreshWork(item).then((fresh) => {
         wx.hideLoading();
         if (fresh && fresh.result && fresh.status === 'succeeded') {
-          this.showWorkActions(fresh, index);
+          this.openWorkPreview(fresh);
         } else if (fresh && fresh.status === 'failed') {
           wx.showModal({
             title: '生成未完成',
@@ -246,7 +267,31 @@ Page({
       return;
     }
 
-    this.refreshWork(item).then(fresh => this.showWorkActions(fresh, index));
+    this.refreshWork(item).then(fresh => this.openWorkPreview(fresh));
+  },
+
+  onMoreWork(e) {
+    const index=Number(e.currentTarget.dataset.index),item=this.data.works[index];
+    if(!item)return;
+    if(item.status==='failed'){this.onTapWork(e);return;}
+    if(item.status==='processing'||!item.result){this.onTapWork(e);return;}
+    this.showWorkActions(item,index);
+  },
+
+  openWorkPreview(item) {
+    if(!item||!item.result)return;
+    if(!item.jobId){
+      if(typeof api.isJobCosUrl==='function'&&!api.isJobCosUrl(item.result)&&/^https?:|^\/api\//i.test(item.result)){
+        wx.showModal({title:'图片暂不可用',content:'旧记录的图片链接已失效，请查看其他作品。',showCancel:false});return;
+      }
+      wx.previewImage({current:item.result,urls:[item.result]});return;
+    }
+    if(this._openingPreview)return;
+    this._openingPreview=true;wx.showLoading({title:'正在读取作品…'});
+    return api.downloadJobMedia(item.jobId,'result',item.result).then(path=>{
+      if(this._visible!==false)wx.previewImage({current:path,urls:[path]});
+    }).catch(err=>wx.showModal({title:'图片暂不可用',content:err.message||'请稍后重试',showCancel:false}))
+      .finally(()=>{this._openingPreview=false;wx.hideLoading();});
   },
 
   showWorkActions(item, index) {
@@ -303,7 +348,7 @@ Page({
           if (item.jobId && app.globalData.mediaCache) delete app.globalData.mediaCache[item.jobId];
           app.globalData.historyList = (app.globalData.historyList || []).filter(w => w !== item && w.jobId !== item.jobId);
           app.persist();
-          this.setData({works: app.globalData.historyList});
+          this.setWorks(app.globalData.historyList);
           await this.loadWorks();
           wx.showToast({title: deletion && deletion.cos_pending ? '云端清理中' : '已删除作品', icon: 'success'});
         } catch (err) { wx.showToast({title: err.message || '删除失败，请重试', icon: 'none'}); }
@@ -321,7 +366,7 @@ Page({
         try {
           await api.deleteAllJobs();
           app.clearHistory();
-          this.setData({works: []});
+          this.setWorks([]);
           await this.loadWorks();
           wx.showToast({title: '作品集已清空', icon: 'success'});
         } catch (err) { wx.showToast({title: err.message || '清空失败，请重试', icon: 'none'}); }

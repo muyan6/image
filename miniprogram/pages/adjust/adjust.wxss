@@ -140,7 +140,7 @@ page {
 }
 
 .pill-tag {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: #666670;
   background-color: #f0f0f3;
   padding: 4rpx 14rpx;
@@ -194,7 +194,7 @@ page {
 }
 
 .pill-rec {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: #942a27;
   background-color: #fdeeee;
   padding: 2rpx 10rpx;
@@ -296,6 +296,8 @@ page {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10rpx;
+  flex-wrap: wrap;
+  gap: 8rpx;
 }
 
 .tier-name {
@@ -311,7 +313,7 @@ page {
 }
 
 .tier-desc {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: #7b7b84;
   line-height: 1.35;
   display: block;
@@ -366,7 +368,7 @@ page {
 }
 
 .rights-sub {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: #8c8c94;
   margin-top: 4rpx;
   line-height: 1.35;
@@ -379,7 +381,7 @@ page {
 }
 
 .link-item {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: #942a27;
   text-decoration: underline;
 }
@@ -419,7 +421,7 @@ page {
 }
 
 .bar-deduct {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: #8a8a92;
   margin-top: 4rpx;
 }
@@ -520,7 +522,7 @@ page {
 }
 
 .option-badge {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: #942a27;
   background-color: #fdeeee;
   padding: 4rpx 12rpx;
@@ -706,7 +708,7 @@ page {
 .violation-eyebrow {
   display: block;
   color: #9e4b3c;
-  font-size: 20rpx;
+  font-size: 22rpx;
   letter-spacing: 3rpx;
   font-weight: 700;
   margin-bottom: 12rpx;
@@ -763,3 +765,28 @@ page {
 .violation-primary { background: #1a1917; color: #fff; border: 1rpx solid #1a1917; }
 .prompt-toggle { padding-bottom:12rpx; }
 .output-unavailable { opacity:0.55; }
+
+/* 成品形式用示意图区分，模型档位保留参数卡片。 */
+.output-grid .tier-card { border-radius: 4rpx; background: var(--paper-card-subtle); border-color: var(--paper-border); min-width: 0; }
+.output-grid .tier-card-active { border-color: var(--ink-title); background: var(--paper-card); }
+.output-diagram { height: 120rpx; margin-bottom: 20rpx; display: flex; gap: 8rpx; }
+.output-diagram view { display: flex; align-items: center; justify-content: center; font-size: 22rpx;
+  border: 1rpx solid var(--paper-border-dark); color: var(--ink-muted); background: #eee8dc; flex: 1; }
+.output-diagram-pair { flex-direction: column; }
+.output-diagram-pair view:last-child, .output-diagram-single view { background: #e6ece6; color: #435c49; border-color: #bfcbbc; }
+.output-help-toggle { min-height: 76rpx; display: flex; align-items: center; font-size: 24rpx; color: var(--ink-body); margin-top: 8rpx; }
+.section-hint { line-height: 1.65; font-size: 24rpx; color: var(--ink-muted); }
+.tier-card { min-width: 0; }
+.tier-desc { font-size: 24rpx; line-height: 1.5; }
+
+/* 生成页沿用全站纸本色与小直角，保留独立的选中态。 */
+page { background-color: var(--paper-bg); color: var(--ink-title); font-family: var(--font-sans); }
+.card-section { border-radius: 4rpx; border: 1rpx solid var(--paper-border); }
+.preview-stage { border-radius: 4rpx; background-color: #e9e4da; }
+.style-item, .style-cover-wrap, .tier-card { border-radius: 4rpx; }
+.tier-card { background-color: var(--paper-card-subtle); border-color: var(--paper-border); }
+.tier-card-active { background-color: var(--paper-card); border-color: var(--ink-title); }
+.section-title, .bar-deduct { color: var(--ink-muted); }
+.section-headline { font-family: var(--font-serif); }
+.fixed-bar { border-color: var(--paper-border); background: var(--paper-card-subtle); }
+.btn-generate { border-radius: 0; background: var(--ink-title); }

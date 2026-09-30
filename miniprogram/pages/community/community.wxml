@@ -2,8 +2,8 @@
   <!-- 顶部策展栏 -->
   <view class="salon-header">
     <text class="salon-eyebrow">废片新生所 · 灵感沙龙</text>
-    <text class="salon-headline">见证照片的第二生</text>
-    <text class="salon-desc">来自真实用户的修护印记 · 点亮每一张被遗忘的旧相</text>
+    <text class="salon-headline">看看大家的作品</text>
+    <text class="salon-desc">发现喜欢的效果，试试同款风格</text>
   </view>
 
   <!-- 展区筛选胶囊：没有展品时不显示筛选条 -->
@@ -65,7 +65,7 @@
       <view class="compare-frame">
         <view class="frame-photo-box" bindtap="onPreviewExhibit" data-item="{{ item }}" data-type="result">
           <image class="frame-photo" src="{{ item.resultUrl }}" mode="aspectFill" lazy-load></image>
-          <view class="frame-tag frame-tag-after">新生 · {{ item.quality === 'fine' ? '2K精细' : '1.5K' }}</view>
+          <view class="frame-tag frame-tag-after">{{ item.quality === 'fine' ? '精细生成' : '轻量生成' }}</view>
         </view>
         <view class="frame-photo-box frame-photo-before" bindtap="onPreviewExhibit" data-item="{{ item }}" data-type="original">
           <image class="frame-photo" src="{{ item.origUrl }}" mode="aspectFill" lazy-load></image>

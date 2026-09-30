@@ -2,8 +2,8 @@
   <!-- 顶部策展导语 -->
   <view class="catalog-header">
     <text class="catalog-eyebrow">废片新生所 · 风格图鉴</text>
-    <text class="catalog-headline">探索照片的第二种可能</text>
-    <text class="catalog-desc">从微米级画质超分，到跨越时空的画风重构</text>
+    <text class="catalog-headline">选一个喜欢的风格</text>
+    <text class="catalog-desc">上传照片即可使用 · 生成前可选轻量或精细档位</text>
   </view>
 
   <view class="template-search">
@@ -28,6 +28,15 @@
   </scroll-view>
 
   <!-- 模板展柜卡片流 (双列艺术画框网格) -->
+  <view wx:if="{{ loadError }}" class="ui-inline-state">
+    <text>{{ allTemplates.length ? '更新失败，当前展示已缓存的模板' : loadError }}</text>
+    <button class="ui-state-action" bindtap="onRetryTemplates">重试</button>
+  </view>
+  <view wx:if="{{ loading && !allTemplates.length }}" class="templates-grid skeleton-grid" aria-label="正在加载模板">
+    <view class="skeleton-card" wx:for="{{ skeletonItems }}" wx:key="*this">
+      <view class="skeleton-cover"></view><view class="skeleton-line"></view><view class="skeleton-line skeleton-short"></view>
+    </view>
+  </view>
   <view class="templates-grid">
     <view
       wx:for="{{ filteredTemplates }}"
@@ -43,26 +52,19 @@
           mode="aspectFit"
           lazy-load
         ></image>
-        <view class="card-badge card-engine-badge">
-          <text>双档可选</text>
-        </view>
         <view class="card-multi-badge" wx:if="{{ item.covers && item.covers.length > 1 }}">
           <text>{{ item.covers.length }}图</text>
-        </view>
-        <view class="card-group-tag" wx:if="{{ item.group_name }}">
-          <text>{{ item.group_name }}</text>
         </view>
       </view>
 
       <view class="card-content">
         <view class="card-name-row">
           <text class="card-name">{{ item.name }}</text>
-          <text class="card-cost">{{ item.costText || '按档位' }}</text>
         </view>
         <text class="card-subtitle">{{ item.subtitle }}</text>
         
         <view class="card-action-bar">
-          <text class="card-action-label">装裱创作</text>
+          <text class="card-cost">{{ item.costText || '按档位' }}</text>
           <text class="card-action-arrow">→</text>
         </view>
       </view>
@@ -70,17 +72,16 @@
   </view>
 
   <!-- 空状态 (当分类下无模板时) -->
-  <view wx:if="{{ filteredTemplates.length === 0 && !loading }}" class="empty-state">
+  <view wx:if="{{ filteredTemplates.length === 0 && !loading && !loadError && loaded }}" class="empty-state">
     <text class="empty-icon">◌</text>
-    <text class="empty-title">{{ searchQuery ? '没有找到匹配模板' : '该展区暂无风格' }}</text>
-    <text class="empty-sub">{{ searchQuery ? '试试更短的关键词，或切换到全部风格' : '策展人正在调制全新的光影配方…' }}</text>
+    <text class="empty-title">{{ searchQuery ? '没有找到匹配模板' : '当前分类暂无模板' }}</text>
+    <text class="empty-sub">{{ searchQuery ? '试试更短的关键词，或切换到全部风格' : '试试其他分类，或稍后再来看看' }}</text>
   </view>
 
   <!-- 底部风格说明注记 -->
   <view class="catalog-footer">
     <view class="footer-divider"></view>
-    <text class="footer-note">废片新生所 · 每一张模板均基于真实影调深度微调</text>
-    <text class="footer-sub">保留面部特征与原图光影骨架 · 杜绝假人与塑料感</text>
+    <text class="footer-note">示例供风格参考，生成效果因原图而异</text>
     <text class="footer-sub">请勿上传违规内容；审核违规不予生图并扣点，7天内累计3次将永久封禁，剩余点数不退还。</text>
   </view>
 

@@ -1,16 +1,33 @@
 <view class="orders-page">
- <view class="summary"><text>充值订单</text><text>当前余额 ✦ {{balance}}</text></view>
- <text class="hint">到账以服务端核实为准。支付成功但未到账时，请点击核对；不会再次扣款。</text>
- <button bindtap="loadOrders" disabled="{{busy}}" loading="{{busy}}">刷新订单</button>
- <text wx:if="{{error}}" class="error">{{error}}</text>
- <view wx:if="{{!items.length && !busy}}" class="empty">暂无充值订单</view>
- <view class="order-card" wx:for="{{items}}" wx:key="id">
-  <view class="row"><text>{{item.points}} 光子</text><text>{{item.priceText}}</text></view>
-  <text class="status">{{item.statusLabel}}{{item.env === 1 ? ' · 沙箱订单' : ''}}</text>
-  <text class="small">{{item.timeText}}</text><text class="small">订单号：{{item.id}}</text>
-  <text wx:if="{{item.refunded_fen}}" class="small">已退款 {{item.refundText}} · 回收 {{item.reversed_points}} 光子</text>
-  <text wx:if="{{item.error}}" class="hint">订单等待服务端核对，请稍后刷新</text>
-  <button wx:if="{{item.status !== 'closed' && item.status !== 'refunded'}}" data-id="{{item.id}}" bindtap="onCheckOrder" disabled="{{busy}}">核对到账 / 退款</button>
- </view>
- <button bindtap="onGoCredits">返回光子中心</button>
+  <view class="orders-header">
+    <view><text class="orders-eyebrow">光子中心</text><text class="orders-title">充值订单</text></view>
+    <button class="orders-refresh" bindtap="loadOrders" disabled="{{busy}}" loading="{{busy}}">刷新</button>
+  </view>
+  <view class="orders-balance gallery-card">
+    <text class="orders-balance-label">当前可用光子</text><text class="orders-balance-value">{{ loaded ? '✦ ' + balance : '—' }}</text>
+  </view>
+  <text class="orders-hint">支付成功后如未到账，可核对订单状态；此操作不会再次扣款。</text>
+  <view wx:if="{{error}}" class="ui-state">
+    <text class="ui-state-title">订单加载失败</text><text class="ui-state-desc">{{error}}</text>
+    <button class="ui-state-action" bindtap="loadOrders" disabled="{{busy}}">重新加载</button>
+  </view>
+  <view wx:elif="{{busy && !items.length}}" class="ui-state">
+    <text class="ui-state-title">正在读取订单</text><text class="ui-state-desc">正在核对最新到账状态…</text>
+  </view>
+  <view wx:elif="{{loaded && !items.length}}" class="ui-state">
+    <text class="ui-state-title">还没有充值订单</text><text class="ui-state-desc">完成充值后，可在这里查看到账记录。</text>
+    <button class="ui-state-action" bindtap="onGoCredits">查看光子套餐</button>
+  </view>
+  <view class="order-card gallery-card" wx:for="{{items}}" wx:key="id">
+    <view class="order-head"><text class="order-points">{{item.points}} 光子</text><text class="order-price">{{item.priceText}}</text></view>
+    <view class="order-status-row"><text class="order-status order-status-{{item.statusTone}}">{{item.statusLabel}}</text><text wx:if="{{item.env === 1}}" class="order-sandbox">测试订单</text></view>
+    <text class="order-time">{{item.timeText}}</text>
+    <view class="order-id-row"><text class="order-id">订单号 {{item.id}}</text><button class="order-copy" data-id="{{item.id}}" bindtap="onCopyOrder">复制</button></view>
+    <text wx:if="{{item.refunded_fen}}" class="order-refund">已退款 {{item.refundText}} · 回收 {{item.reversed_points}} 光子</text>
+    <text wx:if="{{item.error}}" class="orders-hint">订单正在等待核对，可稍后刷新。</text>
+    <view class="order-foot" wx:if="{{item.status !== 'closed' && item.status !== 'refunded'}}">
+      <button class="order-check" data-id="{{item.id}}" bindtap="onCheckOrder" disabled="{{busy}}">核对状态</button>
+    </view>
+  </view>
+  <button class="orders-back" bindtap="onGoCredits">返回光子中心 ›</button>
 </view>

@@ -28,7 +28,7 @@
 }
 
 .rate-badge {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: var(--ink-faint);
   background: var(--paper-bg);
   padding: 4rpx 14rpx;
@@ -85,7 +85,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20rpx;
+  font-size: 22rpx;
 }
 
 .check-text {
@@ -121,7 +121,7 @@
 }
 
 .section-tip {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: var(--ink-faint);
 }
 
@@ -195,7 +195,7 @@
 }
 
 .orders-entry-desc {
-  font-size: 20rpx;
+  font-size: 22rpx;
   line-height: 1.5;
   color: var(--ink-muted);
 }
@@ -222,7 +222,7 @@
 }
 
 .badge-rec {
-  font-size: 18rpx;
+  font-size: 22rpx;
   background: var(--accent-rust);
   color: #ffffff;
   padding: 2rpx 10rpx;
@@ -231,7 +231,7 @@
 }
 
 .pkg-sub {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: var(--ink-muted);
   margin-top: 4rpx;
   display: block;
@@ -296,7 +296,7 @@
 }
 
 .banner-desc {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: var(--ink-muted);
   line-height: 1.35;
 }
@@ -337,7 +337,7 @@
 }
 
 .hist-time {
-  font-size: 18rpx;
+  font-size: 22rpx;
   color: var(--ink-faint);
 }
 
@@ -370,7 +370,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20rpx;
+  font-size: 22rpx;
   flex-shrink: 0;
   margin-top: 4rpx;
 }
@@ -394,13 +394,13 @@
 }
 
 .notice-p {
-  font-size: 20rpx;
+  font-size: 22rpx;
   color: var(--ink-muted);
   line-height: 1.4;
 }
 
 .disclaimer-text {
-  font-size: 18rpx;
+  font-size: 22rpx;
   color: var(--ink-faint);
   text-align: center;
   display: block;
@@ -447,3 +447,11 @@
 .checkin-claim { width: 100%; height: 82rpx; line-height: 82rpx; border-radius: 18rpx;
   background: #1a1917; color: #fff; font-size: 27rpx; font-weight: 700; }
 .checkin-claim[disabled] { background: #d7d3cc; color: #777168; }
+
+.pkg-sub, .banner-desc, .orders-entry-desc, .notice-p { font-size: 24rpx; line-height: 1.55; }
+.pkg-info { min-width: 0; }
+.pkg-price-box { flex-shrink: 0; }
+.package-item { gap: 20rpx; }
+.banner-content { min-width: 0; }
+.banner-btn { flex-shrink: 0; min-width: 108rpx; }
+.checkin-day-label, .checkin-day-caption { font-size: 20rpx; }
