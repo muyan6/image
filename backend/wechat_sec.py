@@ -91,14 +91,15 @@ def check_text(settings: SettingsStore, content: str, openid: str) -> Tuple[str,
 def get_access_token(settings: SettingsStore, force_refresh: bool = False) -> str:
     """取小程序全局 access_token（stable_token，缓存到过期前 5 分钟）。"""
     with _token_lock:
-        if not force_refresh and _token_cache["token"] and time.time() < _token_cache["expires_at"]:
-            return _token_cache["token"]
-
         conf = settings.wechat()
         appid = str(conf.get("app_id") or "").strip()
         secret = str(conf.get("app_secret") or "").strip()
         if not appid or not secret:
             raise WechatSecError("未配置微信 AppID 或 AppSecret", code="NO_CREDENTIALS")
+        credentials = hashlib.sha256((appid + '\0' + secret).encode('utf-8')).hexdigest()
+        if (not force_refresh and _token_cache.get('credentials') == credentials
+                and _token_cache["token"] and time.time() < _token_cache["expires_at"]):
+            return _token_cache["token"]
 
         try:
             resp = requests.post(_TOKEN_URL, json={
@@ -122,6 +123,7 @@ def get_access_token(settings: SettingsStore, force_refresh: bool = False) -> st
         if not token:
             raise WechatSecError("微信未返回 access_token", code="BAD_RESPONSE")
         _token_cache["token"] = token
+        _token_cache['credentials'] = credentials
         _token_cache["expires_at"] = time.time() + max(60, int(data.get("expires_in", 7200)) - 300)
         return token
 

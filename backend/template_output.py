@@ -25,6 +25,7 @@ def select_template_output(template, mode="template"):
         return None
     result = copy.deepcopy(template)
     result["output_mode"] = mode
+    result["layout_prompt"] = str(result.get("prompt") or "")
     if mode == "single":
         result["prompt"] = str(result.get("prompt") or "") + SINGLE_OUTPUT_RULE
         # This preference removes input-photo comparison only, not the artwork's layout/text.

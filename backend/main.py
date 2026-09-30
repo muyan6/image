@@ -2208,24 +2208,28 @@ def create_rescue_job(
         _safe_remove(job_tmp)
         raise
 
-    text_reject = _moderate_text_or_reject(combined_text, user["openid"])
-    if text_reject:
-        _safe_remove(job_tmp)
-        _reject_uploaded_content(user["openid"], "text", text_reject, quality, tpl)
-    # 上传侧内容审核：AI 调用之前拦，省钱也合规
-    with open(job_tmp, "rb") as fh:
-        reject = _moderate_or_reject(fh.read(), "upload", user["openid"])
-    if reject:
-        _safe_remove(job_tmp)
-        _reject_uploaded_content(user["openid"], "image", reject, quality, tpl)
-
     try:
-        return _register_job(user["openid"], quality, style, job_tmp, ext,
-                             template=tpl, text_values=text_values,
-                             aspect_ratio=aspect_ratio, custom_prompt=custom_prompt)
-    except Exception:
-        _safe_remove(job_tmp)  # 含 402 光子不足等失败路径，别留下孤儿临时文件
-        raise
+        text_reject = _moderate_text_or_reject(combined_text, user["openid"])
+        if text_reject:
+            _safe_remove(job_tmp)
+            _reject_uploaded_content(user["openid"], "text", text_reject, quality, tpl)
+        # 上传侧内容审核：AI 调用之前拦，省钱也合规
+        with open(job_tmp, "rb") as fh:
+            reject = _moderate_or_reject(fh.read(), "upload", user["openid"])
+        if reject:
+            _safe_remove(job_tmp)
+            _reject_uploaded_content(user["openid"], "image", reject, quality, tpl)
+
+        try:
+            return _register_job(user["openid"], quality, style, job_tmp, ext,
+                                 template=tpl, text_values=text_values,
+                                 aspect_ratio=aspect_ratio, custom_prompt=custom_prompt)
+        except Exception:
+            _safe_remove(job_tmp)  # 含 402 光子不足等失败路径，别留下孤儿临时文件
+            raise
+    finally:
+        # Registration moves the file; every earlier failure still owns and removes it.
+        _safe_remove(job_tmp)
 
 
 @app.post("/api/rescue/by-upload")
@@ -2281,23 +2285,27 @@ def create_rescue_job_by_upload(payload: _RescueByUploadBody,
     finally:
         cleanup.schedule("cos", rec["key"], time.time())
 
-    text_reject = _moderate_text_or_reject(combined_text, user["openid"])
-    if text_reject:
-        _safe_remove(job_tmp)
-        _reject_uploaded_content(user["openid"], "text", text_reject, quality, tpl)
-    with open(job_tmp, "rb") as fh:
-        reject = _moderate_or_reject(fh.read(), "upload", user["openid"])
-    if reject:
-        _safe_remove(job_tmp)
-        _reject_uploaded_content(user["openid"], "image", reject, quality, tpl)
-
     try:
-        return _register_job(user["openid"], quality, style, job_tmp, ext,
-                             template=tpl, text_values=text_values,
-                             aspect_ratio=payload.aspect_ratio, custom_prompt=custom_prompt)
-    except Exception:
+        text_reject = _moderate_text_or_reject(combined_text, user["openid"])
+        if text_reject:
+            _safe_remove(job_tmp)
+            _reject_uploaded_content(user["openid"], "text", text_reject, quality, tpl)
+        with open(job_tmp, "rb") as fh:
+            reject = _moderate_or_reject(fh.read(), "upload", user["openid"])
+        if reject:
+            _safe_remove(job_tmp)
+            _reject_uploaded_content(user["openid"], "image", reject, quality, tpl)
+
+        try:
+            return _register_job(user["openid"], quality, style, job_tmp, ext,
+                                 template=tpl, text_values=text_values,
+                                 aspect_ratio=payload.aspect_ratio, custom_prompt=custom_prompt)
+        except Exception:
+            _safe_remove(job_tmp)
+            raise
+    finally:
+        # Registration moves the file; every earlier failure still owns and removes it.
         _safe_remove(job_tmp)
-        raise
 
 
 @app.get("/api/jobs/{job_id}")

@@ -2,8 +2,8 @@
   <!-- 顶部策展画廊导航栏 -->
   <view class="gallery-nav">
     <view class="nav-back" bindtap="onClose">
-      <text class="back-glyph">‹</text>
-      <text class="typewriter-label">返回</text>
+      <view class="back-chevron" aria-hidden="true"></view>
+      <text class="compare-label">返回</text>
     </view>
 
     <view class="nav-spec">
@@ -11,7 +11,7 @@
     </view>
 
     <view class="quick-export" bindtap="onDownload">
-      <text class="typewriter-label">保存</text>
+      <text class="compare-label">保存</text>
     </view>
   </view>
 
@@ -60,11 +60,11 @@
     <!-- 浮动典藏标签 -->
     <view wx:if="{{ !textGenerated }}" class="floating-tag tag-before {{ isDragging ? 'tag-faded' : '' }}">
       <text class="tag-serif">原图</text>
-      <text class="typewriter-label">{{ originalUnavailable ? '原图已到期' : (originalCompressed ? '对比原图 · 压缩版' : '原始样张') }}</text>
+      <text class="compare-label">{{ originalUnavailable ? '原图已到期' : (originalCompressed ? '对比原图 · 压缩版' : '原始样张') }}</text>
     </view>
     <view class="floating-tag tag-after {{ isDragging ? 'tag-faded' : '' }}">
       <text class="tag-serif">效果</text>
-      <text class="typewriter-label">{{ textGenerated ? '文字生图成品' : '生成结果' }}</text>
+      <text class="compare-label">{{ textGenerated ? '文字生图成品' : '生成结果' }}</text>
     </view>
 
     <!-- 分割线与双向金环手柄 -->
@@ -88,14 +88,14 @@
       catchtouchstart="onPressOriginalStart"
       catchtouchend="onPressOriginalEnd"
     >
-      <text class="typewriter-label">{{ originalUnavailable ? '原图已到期 · 当前展示结果' : (isPressingOriginal ? '正在查看原图' : '按住查看原图') }}</text>
+      <text class="compare-label">{{ originalUnavailable ? '原图已到期 · 当前展示结果' : (isPressingOriginal ? '正在查看原图' : '按住查看原图') }}</text>
     </view>
   </view>
 
   <!-- 底部典藏导出底栏 -->
   <view class="gallery-dock">
     <view class="btn-line dock-btn" bindtap="onChangePhoto">
-      <text class="typewriter-label">换一张</text>
+      <text class="compare-label">换一张</text>
     </view>
 
     <view class="btn-ink dock-btn-save" bindtap="onDownload">

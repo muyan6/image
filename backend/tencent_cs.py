@@ -143,16 +143,24 @@ def moderate_image_bytes(image_bytes: bytes,
             raise ModerationError("返回不是 JSON: %s" % resp.text[:150],
                                   code="BAD_RESPONSE") from exc
 
-        response = body.get("Response", {})
+        response = body.get("Response") if isinstance(body, dict) else None
+        if not isinstance(response, dict):
+            raise ModerationError("图片审核响应缺少有效 Response", code="BAD_RESPONSE")
         if "Error" in response:
             err = response["Error"]
+            if not isinstance(err, dict):
+                raise ModerationError("图片审核错误信息格式无效", code="BAD_RESPONSE")
             code = err.get("Code", "")
             # 签名/参数类错误重试无意义，直接抛
             raise ModerationError("%s: %s" % (code, err.get("Message", "")),
                                   code="API_%s" % code)
-        suggestion = response.get("Suggestion", "Pass")
+        suggestion = response.get("Suggestion")
+        if suggestion not in ("Pass", "Review", "Block"):
+            raise ModerationError("图片审核响应缺少有效判定", code="BAD_RESPONSE")
         label = response.get("Label", "Normal")
-        score = int(response.get("Score", 0))
+        try:score = int(response.get("Score", 0))
+        except (ValueError, TypeError):
+            raise ModerationError("图片审核分数格式无效", code="BAD_RESPONSE")
         return suggestion, label, score
 
     raise last_error or ModerationError("重试耗尽", code="RETRY_EXHAUSTED")
@@ -171,14 +179,24 @@ def moderate_text(text: str, settings: SettingsStore) -> Tuple[str, str, int]:
         resp = requests.post("https://" + host, headers=headers,
                              data=payload.encode("utf-8"), timeout=_TIMEOUT)
         resp.raise_for_status()
-        result = resp.json().get("Response", {})
+        body = resp.json()
     except (requests.RequestException, ValueError) as exc:
         raise ModerationError("文本审核服务异常", code="NETWORK") from exc
+    result = body.get("Response") if isinstance(body, dict) else None
+    if not isinstance(result, dict):
+        raise ModerationError("文本审核响应缺少有效 Response", code="BAD_RESPONSE")
     if "Error" in result:
+        if not isinstance(result['Error'], dict):
+            raise ModerationError("文本审核错误信息格式无效", code="BAD_RESPONSE")
         raise ModerationError("文本审核失败: %s" % result["Error"].get("Code", "UNKNOWN"),
                               code="API_ERROR")
-    return (str(result.get("Suggestion") or "Review"),
-            str(result.get("Label") or ""), int(result.get("Score") or 0))
+    suggestion = result.get("Suggestion")
+    if suggestion not in ("Pass", "Review", "Block"):
+        raise ModerationError("文本审核响应缺少有效判定", code="BAD_RESPONSE")
+    try:score = int(result.get("Score") or 0)
+    except (ValueError, TypeError):
+        raise ModerationError("文本审核分数格式无效", code="BAD_RESPONSE")
+    return (suggestion, str(result.get("Label") or ""), score)
 
 
 def _squeeze(image_bytes: bytes, limit_mb: float = 4.0) -> bytes:

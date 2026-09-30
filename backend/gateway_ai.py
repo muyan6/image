@@ -25,6 +25,7 @@ import logging
 import os
 import time
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 
 import requests
 
@@ -360,13 +361,30 @@ class OpenAIImagesEnhance:
                            code="EMPTY_RESULT")
 
     def _download(self, url: str) -> bytes:
-        """结果图下载:先不带鉴权(预签名地址带鉴权头反而会 403),401 再补。"""
+        """Public/signed URLs never receive gateway credentials across origins."""
+        def origin(value):
+            try:
+                u = urlsplit(value)
+                if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password or u.port == 0:
+                    return None
+                return u.scheme, u.hostname.lower(), u.port if u.port is not None else (443 if u.scheme == 'https' else 80)
+            except ValueError:
+                return None
+        target_origin = origin(url)
+        if target_origin is None:
+            raise GatewayError("结果图地址无效", code="BAD_RESULT_URL")
         try:
             resp = self._session.get(url, timeout=(15, self.timeout))
-            if resp.status_code in (401, 403):
+            effective_origin = origin(getattr(resp, 'url', None) or url)
+            if (resp.status_code in (401, 403) and target_origin == origin(self.base_url)
+                    and effective_origin == target_origin):
                 resp = self._session.get(
                     url, headers={"Authorization": "Bearer %s" % self.api_key},
-                    timeout=(15, self.timeout))
+                    timeout=(15, self.timeout), allow_redirects=False)
+            if 300 <= resp.status_code < 400:
+                raise GatewayError("结果图鉴权地址发生重定向", code="RESULT_REDIRECT")
+            if resp.status_code in (401, 403):
+                raise GatewayError("结果图访问凭据失效", code="RESULT_ACCESS", status=resp.status_code)
             resp.raise_for_status()
         except requests.RequestException as exc:
             raise GatewayError("结果图下载失败: %s" % exc.__class__.__name__,

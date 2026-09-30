@@ -176,6 +176,12 @@ class UserStore:
             return balance - amount
 
     def confirm_job(self, job_id: str, detail: str) -> None:
+        # Every submission audit must be attributable to its charge reservation.
+        marker = "job=" + job_id
+        if detail != marker and not detail.startswith(marker + " "):
+            detail = marker + " " + detail
+        elif detail == marker:
+            detail += " "
         with self._lock, self._conn:
             self._conn.execute("BEGIN IMMEDIATE")
             row = self._conn.execute("SELECT openid,state FROM job_charges WHERE job_id=?", (job_id,)).fetchone()
@@ -240,7 +246,7 @@ class UserStore:
             row = self._conn.execute("SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
             if row is None:
                 raise ValueError("账号不存在")
-            charge = min(max(0, int(price)), int(row[0]))
+            charge = min(max(0, int(price)), max(0, int(row[0])))
             self._conn.execute("UPDATE users SET balance=balance-?,blocked=blocked+1 WHERE openid=?",
                                (charge, openid))
             self._conn.execute("INSERT INTO violations VALUES(?,?,?,?,?,?,?,?)",

@@ -28,8 +28,9 @@ def normalized_origin(value):
         u=urlsplit(value)
         if (u.scheme not in ('http','https') or not u.hostname or u.username is not None
                 or u.password is not None or u.path not in ('','/') or u.query or u.fragment
-                or u.netloc.endswith(':')):return None
-        return (u.scheme,u.hostname.lower(),u.port or (443 if u.scheme=='https' else 80))
+                or u.netloc.endswith(':') or u.port == 0):return None
+        port=u.port if u.port is not None else (443 if u.scheme=='https' else 80)
+        return (u.scheme,u.hostname.lower(),port)
     except ValueError:return None
 
 

@@ -2,6 +2,7 @@
 import json,re,time,xml.etree.ElementTree as ET
 from fastapi import APIRouter,HTTPException,Request
 from fastapi.responses import JSONResponse,PlainTextResponse,Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from virtual_payment import public_order
 from wechat_auth import WechatAuthError
@@ -36,7 +37,7 @@ async def handle_message(m,request):
     try:
         body=parse_message(raw);event=body.get('Event','')
         if event.startswith('xpay_'):
-            result=m.payments.notification(body)
+            result=await run_in_threadpool(m.payments.notification,body)
             if result:return JSONResponse(result)
         else:
             parsed=m.wechat_sec.parse_push_body(body)

@@ -31,10 +31,13 @@ page {
   color: #f5f2eb;
 }
 
-.back-glyph {
-  font-size: 44rpx;
-  font-weight: 300;
-  line-height: 40rpx;
+.back-chevron {
+  width: 16rpx;
+  height: 16rpx;
+  border-left: 3rpx solid currentColor;
+  border-bottom: 3rpx solid currentColor;
+  transform: rotate(45deg);
+  flex-shrink: 0;
 }
 
 .nav-spec {
@@ -44,7 +47,7 @@ page {
 }
 
 .spec-label {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 22rpx;
   color: #deb87b;
   letter-spacing: 2rpx;
@@ -117,7 +120,7 @@ page {
 }
 
 .tag-serif {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 22rpx;
   font-weight: 700;
   letter-spacing: 2rpx;
@@ -196,7 +199,7 @@ page {
   border-color: #f5f2eb;
 }
 
-.capsule-held .typewriter-label {
+.capsule-held .compare-label {
   color: #1a1917;
   font-weight: 700;
 }
@@ -244,7 +247,7 @@ page {
 }
 
 .dock-save-text {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 28rpx;
   font-weight: 700;
   letter-spacing: 1rpx;
@@ -269,5 +272,20 @@ page {
 .media-notice-original { left: 2%; }
 .media-loading { position: absolute; top: 42%; width: 100%; text-align: center; color: #dfcfb0; z-index: 14; }
 
-.gallery-nav .typewriter-label, .dock-btn .typewriter-label { font-size: 26rpx; letter-spacing: 0; color: #f5f2eb; }
-.floating-tag .typewriter-label, .hold-capsule .typewriter-label { font-size: 22rpx; letter-spacing: 0; color: #dfcfb0; }
+.gallery-nav .compare-label, .dock-btn .compare-label { font-size: 26rpx; letter-spacing: 0; color: #f5f2eb; }
+.floating-tag .compare-label, .hold-capsule .compare-label { font-size: 22rpx; letter-spacing: 0; color: #dfcfb0; }
+
+/* 中文操作文字使用系统无衬线字体，不继承打字机/装饰字体。 */
+.compare-page { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+.compare-label, .spec-label, .tag-serif, .dock-save-text { font-family: inherit; letter-spacing: 0; font-style: normal; }
+.compare-label { font-size: 26rpx; line-height: 1.5; }
+.gallery-nav { flex-shrink: 0; gap: 16rpx; padding: 0 28rpx; }
+.nav-back { min-width: 96rpx; min-height: 88rpx; gap: 12rpx; flex-shrink: 0; }
+.nav-back .compare-label { font-size: 28rpx; font-weight: 500; }
+.nav-spec { min-width: 0; text-align: center; }
+.spec-label { display: block; font-size: 24rpx; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quick-export { min-height: 72rpx; display: flex; align-items: center; flex-shrink: 0; }
+.tag-serif { font-size: 26rpx; line-height: 1.5; }
+.floating-tag .compare-label { font-size: 24rpx; line-height: 1.5; }
+.hold-capsule .compare-label { font-size: 26rpx; }
+.dock-btn .compare-label, .dock-save-text { font-size: 28rpx; line-height: 1.5; font-weight: 600; }

@@ -213,7 +213,11 @@ class CloudPipeline:
         url=cos.presign(m.settings,'get',job['norm_cos'],ttl_seconds=3600) if job.get('norm_cos') else None
         size=p['size']
         if not size and p['template']:
-            prompt=p['prompt'].lower()
+            # Output instructions describe forbidden comparisons, not the artwork's ratio.
+            # The split also supports queued snapshots created before layout_prompt existed.
+            prompt=p['template'].get('layout_prompt')
+            if prompt is None:prompt=p['prompt'].split('\n\n【本次成品形式：',1)[0]
+            prompt=prompt.lower()
             if p['template'].get('layout') or any(word in prompt for word in ('上下','竖版','竖向','纵向','长图','portrait','vertical','top half','bottom half')):
                 size='1024x1536'
         if not size:
@@ -282,7 +286,11 @@ class CloudPipeline:
         if current.get('deleted_at') or current['status']!='succeeded':raise RuntimeError('作品已取消，停止交付')
         m.users.complete_charge(job['id'])
         for key in (job.get('orig_cos'),job.get('result_cos'),job.get('norm_cos')):
-            if key:m._retain_job_object(job['id'],'cos',key,now+m.JOB_TTL_SECONDS)
+            if key:
+                try:m._retain_job_object(job['id'],'cos',key,now+m.JOB_TTL_SECONDS)
+                except Exception:
+                    # The periodic retention sweep retries this maintenance operation.
+                    m.log.exception('已完成作品的留存信息待后台重试：%s',job['id'])
         if job.get('template_id'):
             try:m.templates.inc_usage(job['template_id'])
             except Exception:m.log.exception('模板热度写入失败')
@@ -316,12 +324,14 @@ class CloudPipeline:
             current=m.jobs.get(jid)
             if current and current.get('status')=='processing' and not current.get('deleted_at'):
                 self.fail(current,str(exc) if isinstance(exc,(ValueError,cos.CosError,RuntimeError)) else '云端处理未完成，本次光子退回')
-            elif current:
+            elif current and (current.get('deleted_at') or current.get('status')=='failed'):
                 # A delete may race a cloud copy; delete unique targets after that copy finishes.
                 for key in (current.get('result_cos'),current.get('norm_cos'),current.get('orig_cos')):
                     if key:m.cleanup.schedule('cos',key,time.time())
                 if current.get('deleted_at'):
                     m.cleanup.delete_cos_now(m.settings,m._job_cos_keys(current))
+            elif current and current.get('status')=='succeeded':
+                m.log.exception('作品已完成，后续维护异常；保留成品：%s',jid)
         finally:
             current=m.jobs.get(jid)
             if current and phase!='wait_audit':
