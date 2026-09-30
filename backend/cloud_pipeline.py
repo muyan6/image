@@ -15,7 +15,7 @@ from fastapi import HTTPException
 import cos_store as cos
 from cloud_origin import MEDIA_HOST, IMPORT_PREFIX
 from cloud_layout import text_rule
-from gateway_async import AsyncImages, GatewayAsyncError, key_fingerprint
+from gateway_async import AsyncImages, GatewayAsyncError, key_fingerprint, failure_diagnostic
 from gateway_profiles import text_gateway
 from image_processing import normalization_rule
 from cloud_audit import CloudAudit
@@ -233,7 +233,14 @@ class CloudPipeline:
         if provider['base_url']!=p['base'] or key_fingerprint(provider)!=p['key_fingerprint']:
             raise ValueError('供应商配置已变更，旧任务状态待核对')
         data=AsyncImages(provider).poll(job['vendor_task_id']);state=data.get('status')
-        if state=='failed':raise ValueError('供应商生成失败，本次光子退回')
+        if state=='failed':
+            detail=failure_diagnostic(data,provider.get('api_key',''))
+            detail['task_id']=job['vendor_task_id']
+            m.jobs.update(job['id'],vendor_failure=detail)
+            reason=detail['message'] or '供应商未返回具体原因'
+            if detail['code']:reason+=' ['+detail['code']+']'
+            if detail['http_status']:reason+=' HTTP '+str(detail['http_status'])
+            raise ValueError('供应商生成失败：'+reason+'；本次光子退回')
         if state not in ('completed','succeeded'):
             m.jobs.update(job['id'],cloud_next_at=time.time()+self.config()['poll_interval']);return
         result=data.get('result') or {};items=result.get('data') or []

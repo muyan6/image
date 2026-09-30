@@ -230,6 +230,9 @@ def trigger_mirror(settings,key):
     with control_request(settings,'GET',key,headers={'Range':'bytes=0-0'},stream=True) as response:
         if response.status_code not in (200,206):
             raise response_error(response,'COS HTTPS 镜像导入失败',key,streamed=True)
+        request_id=response.headers.get('x-cos-request-id','')
+        if not isinstance(request_id,str) or not re.fullmatch(r'[A-Za-z0-9_.:+/=-]{1,256}',request_id):request_id=''
+        return {'accepted':True,'http_status':response.status_code,'request_id':request_id}
 
 
 def audit_object(settings,key,biz_type=''):

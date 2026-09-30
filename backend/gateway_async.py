@@ -9,6 +9,32 @@ class GatewayAsyncError(RuntimeError):
 
 def key_fingerprint(conf):return hashlib.sha256(str(conf.get('api_key') or '').encode()).hexdigest()
 
+
+def failure_diagnostic(data, api_key=''):
+    """Keep only bounded, redacted failure fields, not raw supplier responses."""
+    result=data.get('result') if isinstance(data.get('result'),dict) else {}
+    errors=[data.get('error'),result.get('error')]
+    objects=[e for e in errors if isinstance(e,dict)]
+    def clean(value,limit=300):
+        if not isinstance(value,(str,int)):return ''
+        value=str(value)
+        if api_key:value=value.replace(api_key,'[redacted]')
+        value=re.sub(r'https?://[^\s<>"\']+','[URL]',value,flags=re.I)
+        value=re.sub(r'\bBearer\s+[^\s,;]+','Bearer [redacted]',value,flags=re.I)
+        value=re.sub(r'\bsk-[A-Za-z0-9_-]{8,}','[redacted]',value)
+        value=re.sub(r'((?:api[_ -]?key|token|secret|authorization)\s*[:=]\s*)[^\s,;]+',r'\1[redacted]',value,flags=re.I)
+        return re.sub(r'[\x00-\x1f\x7f]',' ',value)[:limit]
+    code=next((e.get('code') or e.get('type') for e in objects if e.get('code') or e.get('type')),data.get('error_code',''))
+    message=next((e.get('message') for e in objects if isinstance(e.get('message'),str) and e.get('message')),None)
+    if message is None:message=next((e for e in errors if isinstance(e,str) and e),None)
+    message=message or data.get('message') or result.get('message') or result.get('detail') or ''
+    code=clean(code,80);message=clean(message)
+    status=data.get('http_status',result.get('http_status'))
+    if type(status) is not int or not 100<=status<=599:status=None
+    request_id=data.get('request_id') or next((e.get('request_id') for e in objects if e.get('request_id')),'')
+    return {'state':'failed','code':code,'message':message,'http_status':status,
+            'request_id':clean(request_id,128),'reason_available':bool(code or message)}
+
 class AsyncImages:
     def __init__(self,conf):
         self.conf=conf;self.base=conf['base_url'].rstrip('/')

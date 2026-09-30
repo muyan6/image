@@ -4,6 +4,7 @@ import cos_store as cos
 
 WAIT_SECONDS=120
 TRIGGER_LIMIT=5
+RETRIGGER_SECONDS=20
 TRANSIENT_STATUS=(404,408,424,429,500,502,503,504)
 
 
@@ -13,7 +14,8 @@ def import_result(pipeline,job):
     deadline=min(job['deadline'],started+WAIT_SECONDS)
     m.jobs.update(jid,cloud_import_started_at=started,provider='worldcodes',stage='store_cos')
     if now>=deadline:
-        raise RuntimeError('COS 成品导入等待超时；'+(job.get('import_last_error') or '对象尚未落盘'))
+        reason=job.get('import_last_trigger_error') or job.get('import_last_error') or '对象尚未落盘'
+        raise RuntimeError('COS 成品导入等待超时；'+reason)
     m.cleanup.schedule('cos',key,job['deadline']+3600)
     attempts=job.get('import_trigger_attempts',0)
     try:
@@ -21,12 +23,20 @@ def import_result(pipeline,job):
         try:meta=cos.object_metadata(m.settings,key)
         except cos.CosError as exc:
             if exc.status!=404:raise
-            if not job.get('cloud_import_triggered'):
+            triggered=job.get('cloud_import_triggered')
+            last_trigger=job.get('import_last_trigger_at') or started
+            retry_due=triggered and attempts<TRIGGER_LIMIT and time.time()-last_trigger>=RETRIGGER_SECONDS
+            if not triggered or retry_due:
                 if attempts>=TRIGGER_LIMIT:
                     raise RuntimeError('COS 成品回源连续失败；'+(job.get('import_last_error') or str(exc)))
-                attempts+=1;m.jobs.update(jid,import_trigger_attempts=attempts)
-                cos.trigger_mirror(m.settings,key)
-                m.jobs.update(jid,cloud_import_triggered=True)
+                pipeline.require_live(jid)
+                attempts+=1;m.jobs.update(jid,import_trigger_attempts=attempts,import_last_trigger_at=time.time())
+                try:accepted=cos.trigger_mirror(m.settings,key)
+                except cos.CosError as error:
+                    m.jobs.update(jid,import_last_trigger_error=str(error)[:500],import_trigger_diagnostic=error.details)
+                    raise
+                m.jobs.update(jid,cloud_import_triggered=True,import_last_trigger_error='',
+                              import_trigger_diagnostic=accepted if isinstance(accepted,dict) else {'accepted':True})
             meta=cos.object_metadata(m.settings,key)
         if not 0<meta['size']<=32*1024*1024:raise ValueError('云端结果大小异常')
         info=cos.image_info(m.settings,key)
