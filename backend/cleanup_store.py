@@ -127,5 +127,18 @@ class CleanupStore:
             self._conn.execute('UPDATE cleanup SET due=?,next_try=?,attempts=0 WHERE kind=? AND target=?',
                                (due,due,kind,target))
 
+    def protect_copy_until(self,target,expires):
+        if not target.startswith('community/submissions/'):raise ValueError('Invalid community copy target')
+        with self._lock,self._conn:
+            self._conn.execute('INSERT INTO upload_cleanup_guard VALUES(?,?) ON CONFLICT(target) DO UPDATE SET expires=MAX(expires,excluded.expires)',(target,expires+300))
+
+    def cancel(self, kind, target):
+        """Publication owns an independent object until explicit withdrawal."""
+        if kind!='cos' or not target.startswith('community/submissions/'):
+            raise ValueError('Only retained community copies may cancel automatic expiry')
+        with self._lock,self._conn:
+            self._conn.execute('DELETE FROM cleanup WHERE kind=? AND target=?',(kind,target))
+            self._conn.execute('DELETE FROM upload_cleanup_guard WHERE target=?',(target,))
+
     def close(self) -> None:
         self._conn.close()

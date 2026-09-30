@@ -380,6 +380,12 @@
       <!-- 社区帖子管理 -->
       <section id="page-community" hidden>
         <div class="card">
+          <div class="card-head"><h2>用户投稿审核<small>默认只公开成品；原图必须由作者主动授权。精选奖励每件作品只发一次。</small></h2></div>
+          <div style="display:flex;gap:12px;margin:18px 0"><select id="submission-status" onchange="loadSubmissions(true)"><option value="pending">待审核</option><option value="published">已发布</option><option value="rejected">未通过 / 下架</option><option value="uploading">保存中</option><option value="withdrawn">已撤回</option><option value="all">全部</option></select><button class="btn-ghost" onclick="loadSubmissions(true)">刷新投稿</button></div>
+          <div class="table-wrap"><table id="submission-table"></table></div>
+          <div style="display:flex;gap:12px;align-items:center;margin-top:14px"><button class="btn-ghost" id="submission-prev" onclick="submissionPage(-1)">上一页</button><span id="submission-page" class="muted"></span><button class="btn-ghost" id="submission-next" onclick="submissionPage(1)">下一页</button></div>
+        </div>
+        <div class="card">
           <div class="card-head"><h2>社区帖子<small>暂停只隐藏帖子；永久删除会移除帖子记录</small></h2><button class="btn-primary" onclick="openCommunityEditor()">＋ 新增帖子</button></div>
           <div class="stats" id="community-stats"></div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin:18px 0">
@@ -747,7 +753,7 @@ api("/session").then(enterApp).catch(() => {});
 const PAGES = {
   dash:  { title: "仪表盘",        load: loadOverview },
   tpl:   { title: "模板管理",      load: loadTemplates },
-  community: { title: "社区管理", load: () => loadCommunityPosts(true) },
+  community: { title: "社区管理", load: () => Promise.all([loadCommunityPosts(true),loadSubmissions(true)]) },
   ann:   { title: "公告管理",      load: loadAnnouncements },
   prov:  { title: "供应商与提示词", load: () => { renderProviderForm(); renderChain(); } },
   conf:  { title: "通用设置",      load: renderConf },
@@ -1575,6 +1581,34 @@ async function loadJobs() {
 window.jobsPage = (dir) => { JOBS_OFFSET = Math.max(0, JOBS_OFFSET + dir * 50); loadJobs(); };
 
 /* ---------- 社区管理 ---------- */
+
+let SUBMISSIONS=[],SUBMISSION_OFFSET=0,SUBMISSION_REWARD=0;
+const SUBMISSION_LABELS={uploading:'保存中',pending:'待审核',published:'已发布',rejected:'未通过 / 下架',withdrawn:'已撤回'};
+async function loadSubmissions(reset){
+  if(reset)SUBMISSION_OFFSET=0;
+  try{
+    const d=await api('/community/submissions?status='+$('submission-status').value+'&offset='+SUBMISSION_OFFSET+'&limit=30');
+    SUBMISSIONS=d.items;SUBMISSION_REWARD=d.reward;
+    $('submission-table').innerHTML='<thead><tr><th>作品 / 作者</th><th>公开内容</th><th>状态 / 奖励</th><th>操作</th></tr></thead><tbody>'+d.items.map(p=>
+      `<tr><td><b>${esc(p.title)}</b><br><small>${esc(p.author_name)}</small><br><span class="muted" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(p.story)}</span></td>`+
+      `<td>${p.result_url?`<a href="${esc(p.result_url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(p.result_url)}" style="width:96px;height:110px;object-fit:contain" alt="成品"></a>`:''}${p.share_original&&p.orig_url?`<a href="${esc(p.orig_url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(p.orig_url)}" style="width:96px;height:110px;object-fit:contain" alt="作者授权原图"></a>`:''}<br><small>${p.share_original?'作者同意公开成品与原图':'仅成品，未授权公开原图'}</small></td>`+
+      `<td>${esc(SUBMISSION_LABELS[p.status]||p.status)}${p.featured?' · 精选':''}<br>${p.rewarded?'精选奖励已处理 '+p.reward+' 光子':'尚未发放精选奖励'}<br><small>${esc(p.reason)}</small></td><td><div style="display:flex;gap:8px;flex-wrap:wrap">`+
+      (p.status==='pending'?`<button class="btn-primary btn-small" onclick="reviewSubmission('${esc(p.id)}','approve')">审核通过并发布</button><button class="btn-ghost btn-small" onclick="reviewSubmission('${esc(p.id)}','reject')">不通过</button>`:'')+
+      (p.status==='published'?`<button class="btn-ghost btn-small" onclick="reviewSubmission('${esc(p.id)}','${p.featured?'unfeature':'feature'}')">${p.featured?'取消精选':p.rewarded?'再次设为精选（不重复发奖）':'设为精选并奖励 '+d.reward+' 光子'}</button><button class="btn-danger btn-small" onclick="reviewSubmission('${esc(p.id)}','unpublish')">下架</button>`:'')+'</div></td></tr>').join('')+(d.items.length?'':'<tr><td colspan="4" class="empty">暂无此状态的投稿</td></tr>')+'</tbody>';
+    $('submission-page').textContent=`共 ${d.total} 条 · 第 ${Math.floor(SUBMISSION_OFFSET/30)+1} 页`;
+    $('submission-prev').disabled=SUBMISSION_OFFSET===0;$('submission-next').disabled=SUBMISSION_OFFSET+30>=d.total;
+  }catch(e){toast(e.message,'bad');}
+}
+window.submissionPage=step=>{SUBMISSION_OFFSET=Math.max(0,SUBMISSION_OFFSET+30*step);loadSubmissions();};
+window.reviewSubmission=async(id,action)=>{
+  const p=SUBMISSIONS.find(x=>x.id===id);if(!p)return;let reason='';
+  if(action==='reject'||action==='unpublish'){reason=prompt('请填写告知作者的原因（最多 500 字）');if(!reason||!reason.trim())return;reason=reason.trim();}
+  const message=action==='approve'?'已核对图片、文字及公开范围，确认发布？':action==='feature'?(p.rewarded?'此作品已发过奖励，本次仅恢复精选标记。':`确认设为精选并给作者发放 ${SUBMISSION_REWARD} 光子？重复点击不会重复发奖。`):'确认执行此操作？';
+  if(!confirm(message))return;
+  try{await api('/community/submissions/'+encodeURIComponent(id)+'/review',{method:'POST',body:{revision:p.revision,action,reason}});toast('投稿状态已更新');await loadSubmissions();}
+  catch(e){toast(e.message,'bad');await loadSubmissions();}
+};
+
 let COMMUNITY_ITEMS = [], COMMUNITY_OFFSET = 0;
 const COMMUNITY_CATEGORIES = {all:"其它",portrait:"冷白人像",film:"复古胶片",old_photo:"老照片复苏",anime:"动漫重绘"};
 async function loadCommunityPosts(reset) {

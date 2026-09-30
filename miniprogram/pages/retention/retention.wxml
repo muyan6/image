@@ -38,6 +38,8 @@
     </view>
   </view>
 
+  <view class="tip-card gallery-card"><view class="tip-item"><text class="tip-h">社区投稿独立保存</text><text class="tip-p">个人作品的 30 天保存期限不影响已发布社区副本。未通过或超过 7 天未审核的投稿图片会清理；已发布投稿请在“我的投稿”主动撤回。</text></view></view>
+
   <!-- 底部固定管理按钮 -->
   <view class="bottom-action-bar">
     <button class="btn-ink" bindtap="onGoManageWorks">

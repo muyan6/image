@@ -306,3 +306,10 @@
   color: var(--ink-muted);
   letter-spacing: 1rpx;
 }
+
+.salon-actions { display:flex;gap:18rpx;margin:24rpx 0 32rpx; }
+.salon-actions button { flex:1;min-width:0;margin:0;padding:18rpx 12rpx;font-size:25rpx;line-height:1.6;border-radius:2rpx; }
+.salon-mine { border:1rpx solid var(--paper-border-dark);background:var(--paper-card-subtle);color:var(--ink-title); }
+.compare-frame-single { grid-template-columns:1fr; }
+.compare-frame-single .frame-photo-box { width:100%;flex:1; }
+.featured-tag { display:inline-block;padding:4rpx 12rpx;margin-bottom:12rpx;border:1rpx solid var(--accent-gold);color:var(--accent-gold);font-size:21rpx;letter-spacing:2rpx; }

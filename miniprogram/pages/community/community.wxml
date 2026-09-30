@@ -6,6 +6,8 @@
     <text class="salon-desc">发现喜欢的效果，试试同款风格</text>
   </view>
 
+  <view class="salon-actions"><button class="btn-ink" bindtap="onContribute">投稿我的作品 ↗</button><button class="salon-mine" bindtap="onMySubmissions">我的投稿 ›</button></view>
+  <view wx:if="{{loadError}}" class="ui-state"><text>{{loadError}}</text><button class="ui-state-action" bindtap="onRetry">重新加载</button></view>
   <!-- 展区筛选胶囊：没有展品时不显示筛选条 -->
   <scroll-view
     wx:if="{{ items.length > 0 }}"
@@ -26,15 +28,15 @@
   </scroll-view>
 
   <!-- 沙龙暂停开放：后端 community.enabled = false -->
-  <view wx:if="{{ !loading && !enabled }}" class="salon-empty gallery-card">
+  <view wx:if="{{ !loading && !loadError && !enabled }}" class="salon-empty gallery-card">
     <text class="empty-title">沙龙正在布展中</text>
     <text class="empty-desc">灵感沙龙暂未开放，稍后再来看看。</text>
   </view>
 
   <!-- 已开放但暂无展品 -->
-  <view wx:elif="{{ !loading && items.length === 0 }}" class="salon-empty gallery-card">
+  <view wx:elif="{{ !loading && !loadError && items.length === 0 }}" class="salon-empty gallery-card">
     <text class="empty-title">展厅暂无展品</text>
-    <text class="empty-desc">完成一次创作后，作品就有机会被收录进沙龙。</text>
+    <text class="empty-desc">从“我的作品”点击“投稿到社区”，审核通过后在这里展示。</text>
   </view>
 
   <!-- 社区展品卡片流 -->
@@ -55,27 +57,27 @@
             <text class="author-time">{{ item.date }} · {{ item.categoryName }}</text>
           </view>
         </view>
-        <view class="recipe-badge">
+        <view class="recipe-badge" wx:if="{{item.templateId}}">
           <text class="recipe-tag">配方</text>
           <text class="recipe-name">{{ item.templateName }}</text>
         </view>
       </view>
 
       <!-- 双图对比展框 (原图 vs 新生图) -->
-      <view class="compare-frame">
+      <view class="compare-frame {{!item.origUrl ? 'compare-frame-single' : ''}}">
         <view class="frame-photo-box" bindtap="onPreviewExhibit" data-item="{{ item }}" data-type="result">
-          <image class="frame-photo" src="{{ item.resultUrl }}" mode="aspectFill" lazy-load></image>
+          <image class="frame-photo" binderror="onCommunityImageError" data-id="{{item.id}}" src="{{ item.resultUrl }}" mode="aspectFill" lazy-load></image>
           <view class="frame-tag frame-tag-after">{{ item.quality === 'fine' ? '精细生成' : '轻量生成' }}</view>
         </view>
-        <view class="frame-photo-box frame-photo-before" bindtap="onPreviewExhibit" data-item="{{ item }}" data-type="original">
-          <image class="frame-photo" src="{{ item.origUrl }}" mode="aspectFill" lazy-load></image>
+        <view wx:if="{{item.origUrl}}" class="frame-photo-box frame-photo-before" bindtap="onPreviewExhibit" data-item="{{ item }}" data-type="original">
+          <image class="frame-photo" binderror="onCommunityImageError" data-id="{{item.id}}" src="{{ item.origUrl }}" mode="aspectFill" lazy-load></image>
           <view class="frame-tag frame-tag-before">修护前原片</view>
         </view>
       </view>
 
       <!-- 作品故事与题跋 -->
       <view class="exhibit-body">
-        <text class="exhibit-title">{{ item.title }}</text>
+        <text class="featured-tag" wx:if="{{item.featured}}">精选展品</text><text class="exhibit-title">{{ item.title }}</text>
         <text class="exhibit-story">{{ item.story }}</text>
       </view>
 
@@ -102,6 +104,6 @@
   <!-- 底部装裱签条 -->
   <view class="salon-footer">
     <view class="footer-divider"></view>
-    <text class="footer-note">欢迎将您的重生之作投稿至沙龙 · 每期精选赠送 ✦{{ featuredReward }} 光子</text>
+    <text class="footer-note">欢迎将您的重生之作投稿至沙龙 · 经管理员选为精选可获 ✦{{ featuredReward }} 光子 · 每件作品仅一次</text>
   </view>
 </view>

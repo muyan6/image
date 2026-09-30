@@ -11,6 +11,8 @@
     </view>
   </view>
 
+  <view class="submission-entry" bindtap="onMySubmissions"><text>我的社区投稿</text><text>查看审核与精选奖励 ›</text></view>
+
   <!-- 作品网格 (双列画廊装裱框) -->
   <view class="work-filters">
     <view wx:for="{{workFilters}}" wx:key="id" class="work-filter {{activeStatus === item.id ? 'work-filter-active' : ''}}" bindtap="onFilterStatus" data-id="{{item.id}}">
@@ -39,6 +41,7 @@
         </view>
         <view class="work-processing-badge" wx:if="{{ item.status === 'failed' }}"><text>生成失败 · 光子已核对</text></view>
       </view>
+      <view wx:if="{{ item.status === 'succeeded' }}" class="work-submit" catchtap="onSubmitWork" data-index="{{ item.sourceIndex }}">投稿到社区 ↗</view>
       <view class="work-info">
         <text class="work-date">{{ item.time || '近期拯救' }}</text>
         <view class="work-more-btn" catchtap="onMoreWork" data-index="{{ item.sourceIndex }}" aria-label="更多操作">···</view>

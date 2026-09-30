@@ -212,6 +212,13 @@ def make_admin_router(*, settings: SettingsStore,
         if not token or not _verify_token(token, _password()):
             raise HTTPException(status_code=401, detail="未登录或会话已过期")
 
+    from community_api import install_admin_routes
+    def submission_runtime():
+        from types import SimpleNamespace
+        import main as runtime
+        return SimpleNamespace(settings=settings,users=users,jobs=jobs,cleanup=runtime.cleanup)
+    install_admin_routes(router,_guard,submission_runtime)
+
     @router.post("/login")
     async def login(request: Request, response: Response) -> Dict[str, Any]:
         ip = request.client.host if request.client else "?"

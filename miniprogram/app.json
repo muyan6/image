@@ -14,7 +14,8 @@
     "pages/retention/retention",
     "pages/works/works",
     "pages/compare/compare",
-    "pages/web-login/web-login"
+    "pages/web-login/web-login",
+    "pages/community-submit/community-submit"
   ],
   "window": {
     "backgroundTextStyle": "dark",

@@ -310,7 +310,7 @@ Page({
 
   showWorkActions(item, index) {
     wx.showActionSheet({
-      itemList: ['全屏高清查看并保存', '对比原图模式', '删除此件作品'],
+      itemList: ['全屏高清查看并保存', '对比原图模式', '删除此件作品', '投稿到社区'],
       itemColor: '#1a1917',
       success: (res) => {
         if (res.tapIndex === 0) {
@@ -338,10 +338,17 @@ Page({
           });
         } else if (res.tapIndex === 2) {
           this.deleteSingleWork(index,item);
-        }
+        } else if(res.tapIndex===3){this.openSubmission(item);}
       }
     });
   },
+
+  openSubmission(item) {
+    if(!item||!item.jobId||item.status!=='succeeded'){wx.showToast({title:'请选择已完成的作品',icon:'none'});return;}
+    wx.navigateTo({url:'/pages/community-submit/community-submit?job='+encodeURIComponent(item.jobId)});
+  },
+  onSubmitWork(e) { this.openSubmission(this.data.works[e.currentTarget.dataset.index]); },
+  onMySubmissions() { wx.navigateTo({url:'/pages/community-submit/community-submit'}); },
 
   submitWorkFeedback(item) {
     const v=item.violation;if(!v)return;
@@ -357,7 +364,7 @@ Page({
     if(!item)return;
     wx.showModal({
       title: '删除作品',
-      content: '确定要从典藏列表中移除这件作品吗？',
+      content: '确定要从典藏列表中移除这件作品吗？社区独立副本请在“我的投稿”单独撤回。',
       confirmText: '删除',
       confirmColor: '#9e4b3c',
       cancelText: '保留',
@@ -389,7 +396,7 @@ Page({
 
   onClearAllWorks() {
     wx.showModal({
-      title: '清空作品集', content: '确定删除全部云端作品和本地记录吗？',
+      title: '清空作品集', content: '确定删除全部个人云端作品和本地记录吗？社区独立副本请在“我的投稿”单独撤回。',
       confirmText: '清空全部', confirmColor: '#9e4b3c', cancelText: '保留',
       success: async (res) => {
         if (!res.confirm) return;

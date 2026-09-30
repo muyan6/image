@@ -1080,6 +1080,8 @@ def _bg_sweeper() -> None:
         try:
             jobs.sweep()
             _startup_file_gc()
+            from community_api import maintain as maintain_community
+            maintain_community(sys.modules[__name__])
             cleanup.run(settings)
         except Exception:
             log.exception("后台任务清理失败")
@@ -1681,30 +1683,10 @@ def public_config() -> Dict[str, Any]:
 
 
 @app.get("/api/community")
-def public_community() -> Dict[str, Any]:
-    """Only published posts are returned; pause/delete operate per post."""
-    items = []
-    for idx, raw in enumerate(CommunityStore(settings).list(status="published", limit=200)["items"]):
-        items.append({
-            "id": str(raw.get("id") or "c%d" % (idx + 1)),
-            "title": str(raw.get("title") or ""),
-            "story": str(raw.get("story") or ""),
-            "authorName": str(raw.get("author_name") or ""),
-            "authorAvatar": str(raw.get("author_avatar") or ""),
-            "date": str(raw.get("date") or ""),
-            "category": str(raw.get("category") or "all"),
-            "categoryName": str(raw.get("category_name") or ""),
-            "templateId": str(raw.get("template_id") or ""),
-            "templateName": str(raw.get("template_name") or ""),
-            "quality": "fine" if str(raw.get("quality")) == "fine" else "light",
-            "resultUrl": str(raw.get("result_url") or ""),
-            "origUrl": str(raw.get("orig_url") or ""),
-            "likes": _community_likes(raw.get("likes")),
-            "liked": False,
-            "pinned": bool(raw.get("pinned")),
-        })
-    return {"enabled": True, "items": items,
-            "featured_reward": settings.rewards()["community_featured"]}
+def public_community(request: Request, response: Response, offset: int = 0, limit: int = 200):
+    from community_api import public_feed
+    response.headers['Cache-Control']='private, no-store'
+    return public_feed(sys.modules[__name__],request,offset,limit)
 
 
 @app.get("/api/community/media/{filename}")
@@ -2566,6 +2548,8 @@ from web_login import make_web_login_router
 web_login_router=make_web_login_router(lambda:sys.modules[__name__])
 app.include_router(web_login_router)
 app.include_router(make_payment_router(lambda:sys.modules[__name__]))
+from community_api import make_community_router
+app.include_router(make_community_router(lambda:sys.modules[__name__]))
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,0 +1,31 @@
+<view class="page-container">
+  <view class="submission-header"><text class="eyebrow">废片新生所 · 灵感沙龙</text><text class="headline">把新生之作，留在展厅</text><text class="subtitle">你决定公开哪些图片，审核通过后才会展示。</text></view>
+  <view wx:if="{{jobLoading}}" class="ui-state">正在读取作品…</view>
+  <view wx:if="{{jobError}}" class="ui-state"><text>{{jobError}}</text><button class="ui-state-action" bindtap="retryJob">重试</button></view>
+  <view wx:if="{{job}}" class="submission-card gallery-card">
+    <image class="submission-preview" src="{{job.result_url}}" mode="aspectFit"></image>
+    <view class="form-body">
+      <text class="field-label">作品标题</text><input class="field-input" value="{{title}}" maxlength="60" bindinput="onTitle" placeholder="为这次创作起个名字" disabled="{{submitting}}" />
+      <text class="field-label">创作故事 <text class="optional">选填</text></text><textarea class="field-story" value="{{story}}" maxlength="500" bindinput="onStory" placeholder="分享照片背后的故事，或喜欢这个效果的理由" disabled="{{submitting}}" />
+      <text class="field-label">展区</text><picker range="{{categories}}" range-key="name" value="{{categoryIndex}}" bindchange="onCategory" disabled="{{submitting}}"><view class="field-input category-field">{{categories[categoryIndex].name}}<text>⌄</text></view></picker>
+      <view class="privacy-choice"><view><text class="field-label">同时公开修护前对比图</text><text class="privacy-hint">{{job.orig_url ? '默认关闭；开启后下方对比图也会被所有访客看到。' : '文生图等无原图作品只展示成品。'}}</text></view><switch color="#9e4b3c" checked="{{shareOriginal}}" disabled="{{!job.orig_url || submitting}}" bindchange="onOriginal" /></view>
+      <image wx:if="{{shareOriginal && job.orig_url}}" class="submission-preview" src="{{job.orig_url}}" mode="aspectFit"></image>
+      <view class="consent-note"><text class="consent-title">本次公开：{{shareOriginal ? '成品 + 修护前原图' : '仅成品，不公开原图'}}</text><text>社区副本独立保存，原作品到期不影响已发布投稿。你可以在“我的投稿”撤回；未通过或超过 7 天未审核的投稿图片会清理。</text></view>
+      <checkbox-group bindchange="onConsent"><label class="consent-row"><checkbox value="publish" checked="{{consent}}" color="#9e4b3c" disabled="{{submitting}}"/><text>我确认有权公开所选图片与文字，并同意审核通过后在社区展示和被访客分享。</text></label></checkbox-group>
+      <text wx:if="{{submitError}}" class="error-text">{{submitError}}</text>
+      <button class="btn-ink submit-button" bindtap="onSubmit" disabled="{{!consent || submitting}}" loading="{{submitting}}">提交审核</button>
+    </view>
+  </view>
+  <view wx:if="{{!job && !jobLoading}}" class="ui-state"><text>从已完成的作品中，选择一件投稿。</text><button class="btn-ink choose-button" bindtap="onChooseWork">去我的作品选择</button></view>
+  <view class="mine-heading"><text class="section-title">我的投稿</text><text class="refresh-link" bindtap="loadMine">刷新</text></view>
+  <view wx:if="{{loadError}}" class="ui-state"><text>{{loadError}}</text><button class="ui-state-action" bindtap="loadMine">重新加载</button></view>
+  <view wx:if="{{!items.length && !loading && !loadError}}" class="ui-state">还没有投稿，第一件展品等你来。</view>
+  <view class="mine-card gallery-card" wx:for="{{items}}" wx:key="id">
+    <view class="mine-title-row"><text class="mine-title">{{item.title}}</text><text class="status-tag status-{{item.status}}">{{item.statusLabel}}</text></view>
+    <text class="mine-meta">{{item.share_original ? '公开成品与原图' : '仅公开成品'}}{{item.featured ? ' · 精选作品' : ''}}</text>
+    <text wx:if="{{item.reason}}" class="mine-reason">{{item.reason}}</text>
+    <text wx:if="{{item.rewarded}}" class="reward-note">精选奖励 ✦{{item.reward}} {{item.reward > 0 ? '已到账' : '已登记'}} · 每件作品仅一次</text>
+    <view class="mine-actions"><button wx:if="{{item.status === 'published'}}" bindtap="onCommunity">去社区查看</button><button wx:if="{{item.status === 'rejected' || item.status === 'withdrawn' || item.status === 'uploading'}}" bindtap="onRetrySubmission" data-id="{{item.id}}">{{item.status === 'uploading' ? '继续提交' : '修改后再投稿'}}</button><button wx:if="{{item.status !== 'withdrawn'}}" bindtap="onWithdraw" data-id="{{item.id}}">撤回投稿</button></view>
+  </view>
+  <button wx:if="{{hasMore}}" class="ui-state-action" loading="{{loading}}" bindtap="onLoadMore">加载更多投稿</button>
+</view>

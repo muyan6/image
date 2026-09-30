@@ -21,7 +21,7 @@
       <view class="term-num">02</view>
       <view class="term-content">
         <text class="term-title">上传的照片</text>
-        <text class="term-desc">仅用于内容合规安全机审、AI 算力引擎执行修复并向您返回结果；绝不用于模型二次训练或任何公开商业传播。</text>
+        <text class="term-desc">默认仅用于审核、图片处理和向您返回结果，不自动公开到社区。社区投稿需另外确认公开授权；默认只公开成品，对比原图需主动开启。</text>
       </view>
     </view>
     <view class="term-divider"></view>
@@ -34,6 +34,8 @@
       </view>
     </view>
   </view>
+
+  <view class="terms-card gallery-card"><view class="term-item"><view class="term-num">04</view><view class="term-content"><text class="term-title">自愿社区投稿</text><text class="term-desc">审核通过后，所选图片、投稿文字与昵称将对访客展示。社区使用独立图片副本；删除个人作品不等于撤回投稿。请在“我的投稿”撤回，之后停止展示并清理社区副本；已经被他人下载或分享的内容不会随之收回。</text></view></view></view>
 
   <!-- 用户控制权卡片 -->
   <view class="control-card gallery-card">

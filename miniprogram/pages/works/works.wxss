@@ -186,3 +186,6 @@
 .work-more-btn { min-width: 72rpx; min-height: 72rpx; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; }
 .work-info { gap: 8rpx; padding: 8rpx 16rpx; }
 .work-date { min-width: 0; font-family: var(--font-sans); line-height: 1.5; }
+
+.submission-entry { display:flex; justify-content:space-between; gap:16rpx; padding:24rpx; margin-bottom:24rpx; border:1rpx solid var(--paper-border); background:var(--paper-card-subtle); font-size:23rpx; color:var(--ink-muted); }
+.work-submit { border-top:1rpx solid var(--paper-border); padding:18rpx 20rpx; color:var(--accent-rust); font-size:23rpx; background:var(--paper-card-subtle); }

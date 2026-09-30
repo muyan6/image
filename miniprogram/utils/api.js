@@ -146,7 +146,7 @@ function authedCall(fn) {
 }
 
 function request(path, options) {
-  const protectedPath = /^\/api\/(me(?:\/|$)|my\/|jobs\/|uploads(?:\/|$)|rescue(?:\/|$)|text-generation(?:\/|$)|payment\/|auth\/wechat-web\/approve)/.test(path);
+  const protectedPath = /^\/api\/(me(?:\/|$)|my\/|jobs\/|uploads(?:\/|$)|rescue(?:\/|$)|text-generation(?:\/|$)|payment\/|community\/(?:submissions|posts)(?:\/|$)|auth\/wechat-web\/approve)/.test(path);
   return protectedPath ? authedCall(() => rawRequest(path, options)) : rawRequest(path, options);
 }
 
