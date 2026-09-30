@@ -85,6 +85,8 @@ Page({
       const cloud = result.jobs.map(j => Object.assign({}, byId.get(j.id) || {}, {
         jobId: j.id, original: api.absolute(j.orig_url || ''),
         result: j.status === 'succeeded' ? api.absolute(j.result_url || '') : '',
+        preview: j.status === 'succeeded' &&
+          (typeof api.isJobCosUrl !== 'function' || api.isJobCosUrl(j.result_url)) ? api.absolute(j.result_url || '') : '',
         status: j.status, quality: j.quality, provider: j.provider,
         templateName: j.template_name || '', createdAt: j.created_at || 0
       }));

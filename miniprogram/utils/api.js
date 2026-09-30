@@ -194,6 +194,21 @@ function downloadImage(url, header) {
   });
 }
 
+function isJobCosUrl(url) {
+  return /^https:\/\//i.test(url || '') &&
+    url.split('/')[2].toLowerCase() !== apiBase().split('/')[2].toLowerCase();
+}
+
+/** 只返回直连 COS 的新地址；缺失对象只能经内网补存，不代理图片给客户端。 */
+function repairJobMedia(jobId, kind = 'result') {
+  if (!jobId || !['orig', 'result'].includes(kind)) return Promise.reject(new Error('图片参数错误'));
+  return request('/api/jobs/' + encodeURIComponent(jobId) + '/refresh-media?kind=' + kind,
+    {method: 'POST', timeout: UPLOAD_TIMEOUT}).then((data) => {
+      if (!isJobCosUrl(data && data.url)) throw new Error('COS 尚未提供可用的图片直链');
+      return absolute(data.url);
+    });
+}
+
 /** 图片始终直连 COS；403 时仅向 API 换新签名重试一次，不代理图片字节。 */
 async function downloadJobMedia(jobId, kind, signedUrl) {
   if (!['orig', 'result'].includes(kind)) throw new Error('图片参数错误');
@@ -211,9 +226,8 @@ async function downloadJobMedia(jobId, kind, signedUrl) {
     url = job[kind + '_url'];
   }
   const repair = async () => {
-    const data = await request('/api/jobs/' + encodeURIComponent(jobId) + '/refresh-media?kind=' + kind,
-      {method: 'POST', timeout: UPLOAD_TIMEOUT});
-    return downloadImage(directUrl(data.url));
+    const url = await repairJobMedia(jobId, kind);
+    return downloadImage(directUrl(url));
   };
   if (jobId && url && (!/^https:\/\//i.test(url) || url.split('/')[2].toLowerCase() === apiBase().split('/')[2].toLowerCase()))
     return repair();
@@ -490,6 +504,8 @@ module.exports = {
   absolute,
   cleanUrl,
   request,
+  isJobCosUrl,
+  repairJobMedia,
   downloadJobMedia,
   upload,
   submitJob,

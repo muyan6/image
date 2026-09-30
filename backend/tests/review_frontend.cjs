@@ -181,6 +181,64 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}) {
     return [data.code===0&&logins===1&&uploads===2&&app.globalData.lightPoints===87,{logins,uploads,balance:app.globalData.lightPoints}];
   });
 
+  await test('works_repair_old_server_media_without_loading_photo_bytes_from_api',async()=>{
+    const app=appFixture([]);let repaired=0;
+    const api={myJobs:async()=>({jobs:[{id:'abcdef123456',status:'succeeded',result_url:'/api/images/result.jpg',orig_url:'/api/images/orig.jpg'}]}),
+      request:async()=>({status:'succeeded'}),absolute:x=>x,
+      isJobCosUrl:x=>typeof x==='string'&&x.startsWith('https://cos.invalid/'),
+      repairJobMedia:async()=>{repaired++;return 'https://cos.invalid/recovered.jpg';}};
+    const {page}=loadPage('works',api,app);await page.loadWorks();
+    const work=page.data.works[0];
+    return [repaired===1&&work.result==='https://cos.invalid/recovered.jpg'&&work.preview===work.result,
+      {repaired,result:work.result,preview:work.preview}];
+  });
+
+  await test('works_fullscreen_preview_uses_local_file_from_cos',async()=>{
+    let opened,downloads=0;
+    const {page}=loadPage('works',{downloadJobMedia:async()=>{downloads++;return 'wxfile://cos-result.jpg';}},appFixture(),{
+      showActionSheet:o=>o.success({tapIndex:0}),previewImage:o=>{opened=o;}
+    });
+    page.showWorkActions({jobId:'abcdef123456',result:'https://cos.invalid/signed.jpg',original:'/api/images/orig.jpg'},0);
+    await tick();
+    return [downloads===1&&opened?.current==='wxfile://cos-result.jpg'&&opened?.urls.length===1,
+      {downloads,opened}];
+  });
+
+  await test('works_thumbnail_error_has_bounded_cos_repair',async()=>{
+    let repaired=0;
+    const api={repairJobMedia:async()=>{repaired++;return 'https://cos.invalid/fresh.jpg';},
+      isJobCosUrl:x=>String(x).startsWith('https://cos.invalid/')};
+    const {page}=loadPage('works',api);page.data.works=[{jobId:'abcdef123456',status:'succeeded',result:'https://cos.invalid/old.jpg',preview:'https://cos.invalid/old.jpg'}];
+    if(typeof page.onWorkImageError!=='function')return [false,{handler:'missing'}];
+    page.onWorkImageError({currentTarget:{dataset:{index:0}}});await tick();
+    page.onWorkImageError({currentTarget:{dataset:{index:0}}});await tick();
+    const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/works/works.wxml'),'utf8');
+    return [repaired===1&&page.data.works[0].preview==='https://cos.invalid/fresh.jpg'&&xml.includes('binderror="onWorkImageError"'),
+      {repaired,preview:page.data.works[0].preview}];
+  });
+
+  await test('profile_thumbnail_never_uses_old_backend_image_route',async()=>{
+    const app=appFixture([]);
+    const {page}=loadPage('my',{config:async()=>({free_mode:true,ads:{}}),me:async()=>({balance:90}),
+      myJobs:async()=>({jobs:[{id:'abcdef123456',status:'succeeded',result_url:'/api/images/result.jpg'}]}),
+      absolute:x=>x,isJobCosUrl:()=>false},app);
+    page.onShow();await tick();await tick();
+    const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/my/my.wxml'),'utf8');
+    return [page.data.previewWorks[0]?.preview===''&&xml.includes('src="{{ item.preview }}"'),
+      {preview:page.data.previewWorks[0]?.preview}];
+  });
+
+  await test('legacy_work_without_job_id_never_previews_backend_image',async()=>{
+    let previewCalls=0,modal;
+    const app=appFixture([{status:'succeeded',result:'/api/images/legacy.jpg',original:'/api/images/orig.jpg'}]);
+    const {page}=loadPage('works',{myJobs:async()=>({jobs:[]}),absolute:x=>x,isJobCosUrl:()=>false},app,{
+      showActionSheet:o=>o.success({tapIndex:0}),previewImage:()=>previewCalls++,showModal:o=>{modal=o;}
+    });
+    await page.loadWorks();page.showWorkActions(page.data.works[0],0);
+    return [page.data.works[0].preview===''&&previewCalls===0&&modal?.title==='图片暂不可用',
+      {thumbnail:page.data.works[0].preview,previewCalls,modal:modal?.title}];
+  });
+
   await test('catalog_respects_free_mode_and_current_server_prices',async()=>{
     const data={groups:[],items:[{id:'light',engine:'light',price:0},{id:'fine',engine:'fine',price:0},{id:'custom',engine:'fine',price:7}]};
     const app=appFixture();

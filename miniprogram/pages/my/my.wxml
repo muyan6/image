@@ -94,7 +94,7 @@
         wx:key="jobId"
         class="work-card gallery-card"
       >
-        <image class="work-thumb" src="{{ item.result }}" mode="aspectFill"></image>
+        <image class="work-thumb" src="{{ item.preview }}" mode="aspectFill"></image>
         <view class="work-tag">
           <text>{{ item.quality === 'fine' ? '2K精细' : '1.5K' }}</text>
         </view>
