@@ -87,6 +87,10 @@ if not args.legacy:
         ('test_review_pipeline_latency.py', 'review_pipeline_latency_results.json'),
         ('test_review_frontend_latency.cjs', 'review_frontend_latency_results.json'),
         ('test_review_backend_integrity.py', 'review_backend_integrity_results.json'),
+        ('test_sequential_store_fixes.py', 'sequential_store_results.json'),
+        ('test_sequential_frontend.cjs', 'sequential_frontend_results.json'),
+        ('test_sequential_transport.py', 'sequential_transport_results.json'),
+        ('test_sequential_text_config.py', 'sequential_text_config_results.json'),
     ):
         path = Path(__file__).with_name(script)
         if path.is_file():

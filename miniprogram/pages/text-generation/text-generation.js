@@ -44,14 +44,16 @@ Page({
     this.setData({busy:true});
     try{
       const created=await api.request('/api/text-generation',{method:'POST',data:{prompt,aspect_ratio:this.data.ratio}});
-      if(!created||!created.job_id)throw new Error('任务响应异常，请在作品页核对');
+      if(!created||!created.job_id){
+        const error=new Error('任务响应异常，请在作品页核对');error.jobSubmissionAttempted=true;throw error;
+      }
       const history=app.globalData.historyList||[];
       history.unshift({jobId:created.job_id,status:'processing',quality:'light',templateName:'文字生图',inputMode:'text',
         original:'',result:'',timestamp:Date.now()});
       app.globalData.historyList=history;app.persist();
       if(this._visible!==false&&!this._unloaded)wx.navigateTo({url:'/pages/works/works'});
     }catch(e){
-      if(e.code==='NETWORK'||e.status>=500||!e.status)this._uncertain=true;
+      if(e.jobSubmissionAttempted)this._uncertain=true;
       if(this._visible!==false&&!this._unloaded)wx.showModal({title:'文生图提交未完成',content:(e.message||'请稍后重试')+(this._uncertain?'；先到作品页核对是否已受理。':''),showCancel:false});
     }finally{if(!this._unloaded)this.setData({busy:false});}
   }

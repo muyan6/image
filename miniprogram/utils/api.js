@@ -70,13 +70,27 @@ function syncAccount(data) {
 }
 
 const STORAGE_TOKEN = 'sessionToken';
+let memoryToken = '';
+let tokenStorageSnapshot = null;
 
 function getToken() {
-  try { return wx.getStorageSync(STORAGE_TOKEN) || ''; } catch (e) { return ''; }
+  try {
+    const stored = wx.getStorageSync(STORAGE_TOKEN) || '';
+    if (memoryToken && stored === tokenStorageSnapshot) return memoryToken;
+    // 持久化值主动清除/替换后，不复活上一次登录的内存凭据。
+    memoryToken = '';
+    tokenStorageSnapshot = null;
+    return stored;
+  } catch (e) { return memoryToken; }
 }
 
 function setToken(token) {
-  try { wx.setStorageSync(STORAGE_TOKEN, token); } catch (e) { /* 存储失败下次重登 */ }
+  memoryToken = token;
+  try { tokenStorageSnapshot = wx.getStorageSync(STORAGE_TOKEN) || ''; } catch (e) {}
+  try {
+    wx.setStorageSync(STORAGE_TOKEN, token);
+    tokenStorageSnapshot = wx.getStorageSync(STORAGE_TOKEN) || '';
+  } catch (e) { /* 存储已满时，本次会话仍使用新登录凭据。 */ }
 }
 
 /**
@@ -138,6 +152,7 @@ function request(path, options) {
 
 function rawRequest(path, options) {
   const opts = options || {};
+  const billableTextPost = path === '/api/text-generation' && (opts.method || 'GET').toUpperCase() === 'POST';
   return new Promise((resolve, reject) => {
     wx.request({
       url: apiBase() + path,
@@ -154,10 +169,15 @@ function rawRequest(path, options) {
         else {
           const err = makeError(res);
           if (res.statusCode === 401) err.code = 'UNAUTHORIZED';
+          if (billableTextPost && res.statusCode >= 500) err.jobSubmissionAttempted = true;
           reject(err);
         }
       },
-      fail: (err) => reject(networkError(err)),
+      fail: (err) => {
+        const error = networkError(err);
+        if (billableTextPost) error.jobSubmissionAttempted = true;
+        reject(error);
+      },
     });
   });
 }

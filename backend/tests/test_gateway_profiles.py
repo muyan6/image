@@ -183,7 +183,7 @@ class ProfileTests(WorkflowTests):
         import gateway_async
         m.settings.update({'text_generation':{'base_url':'https://text.invalid','api_key':'text-key','timeout':47}})
         r=response(200,b'{"status":"running"}')
-        with patch.object(gateway_async.requests,'request',return_value=r) as request:
+        with patch.object(gateway_async.http_transport,'request',return_value=r) as request:
             AsyncImages(text_gateway(m.settings)).poll('imgtask_fixture')
         self.assertEqual(request.call_args.kwargs['timeout'],(5,47))
         self.assertEqual(request.call_args.kwargs['headers']['Authorization'],'Bearer text-key')

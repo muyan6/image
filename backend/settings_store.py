@@ -495,6 +495,9 @@ class SettingsStore:
     def cloud_pipeline(self) -> Dict[str, Any]:
         return self._section("cloud_pipeline")
 
+    def text_generation(self) -> Dict[str, Any]:
+        return self._section("text_generation")
+
     def cos_ready(self) -> bool:
         """COS 直传是否可用：密钥与桶信息齐全。"""
         tc = self.tencent()
@@ -572,17 +575,22 @@ class AnnouncementStore:
                 self._items = [item for item in loaded if isinstance(item, dict)]
             else:
                 raise ValueError("根节点不是列表")
-        except (OSError, ValueError) as exc:
+        except ValueError as exc:
             log.error("公告文件损坏(%s),已重置", exc)
             self._items = []
             self._save_locked()
 
-    def _save_locked(self) -> None:
+    def _save_locked(self, items: Optional[List[Dict[str, Any]]] = None) -> None:
         tmp = self._path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(self._items, fh, ensure_ascii=False, indent=2)
+            json.dump(self._items if items is None else items, fh, ensure_ascii=False, indent=2)
             fh.write("\n")
         os.replace(tmp, self._path)
+
+    def _commit_locked(self, items: List[Dict[str, Any]]) -> None:
+        """Publish detached candidate state only after the atomic write succeeds."""
+        self._save_locked(items)
+        self._items = items
 
     def list_all(self) -> List[Dict[str, Any]]:
         with self._lock:
@@ -617,8 +625,7 @@ class AnnouncementStore:
             "updated_at": time.time(),
         }
         with self._lock:
-            self._items.append(item)
-            self._save_locked()
+            self._commit_locked(self._items + [item])
         return copy.deepcopy(item)
 
     def update(self, item_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -643,19 +650,16 @@ class AnnouncementStore:
                     if "enabled" in patch:
                         candidate["enabled"] = bool(patch["enabled"])
                     candidate["updated_at"] = time.time()
-                    self._items[index] = candidate
-                    try:
-                        self._save_locked()
-                    except OSError:
-                        self._items[index] = item
-                        raise
+                    items = list(self._items)
+                    items[index] = candidate
+                    self._commit_locked(items)
                     return copy.deepcopy(candidate)
         raise KeyError("公告不存在")
 
     def delete(self, item_id: str) -> None:
         with self._lock:
             before = len(self._items)
-            self._items = [i for i in self._items if i["id"] != item_id]
-            if len(self._items) == before:
+            candidate = [i for i in self._items if i["id"] != item_id]
+            if len(candidate) == before:
                 raise KeyError("公告不存在")
-            self._save_locked()
+            self._commit_locked(candidate)

@@ -21,8 +21,8 @@ def tier_fields(shared, quality):
             'model':conf.get('model_'+quality,''),'price_cny':conf.get('price_'+quality+'_cny',0)}
 
 
-def text_gateway(settings):
-    text=settings.snapshot()['text_generation']
+def text_gateway(settings, text=None):
+    text=settings.text_generation() if text is None else text
     return {'enabled':text['enabled'],'base_url':text.get('base_url',''),'api_key':text.get('api_key',''),
             'endpoint':text['endpoint'],'timeout':text.get('timeout',30),'request_timeout':text.get('timeout',30),
             'model_light':text['model'],'model_fine':text['model'],

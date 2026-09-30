@@ -8,6 +8,7 @@ import cos_store as cos
 from cloud_origin import merged_origin,merged_policy,MEDIA_HOST
 from gateway_async import AsyncImages,GatewayAsyncError
 import requests
+import http_transport
 
 class Fixture:
     def tencent(self):return {'secret_id':'fixture','secret_key':'fixture','cos_bucket':'fixture-123456','cos_region':'ap-guangzhou','cos_custom_domain':'cos.invalid'}
@@ -51,7 +52,7 @@ class OriginTests(unittest.TestCase):
         self.assertEqual(result.findtext('OriginRule/OriginCondition/Prefix'),'old/')
 
     def test_signed_control_put_uses_direct_host_and_required_md5(self):
-        with patch.object(requests,'request',return_value=response()) as req:
+        with patch.object(http_transport,'request',return_value=response()) as req:
             cos.control_request(Fixture(),'PUT',params={'origin':''},data=b'<fixture/>')
         kw=req.call_args.kwargs
         self.assertIn('fixture-123456.cos.ap-guangzhou.myqcloud.com',req.call_args.args[1])
@@ -60,7 +61,7 @@ class OriginTests(unittest.TestCase):
 
     def test_import_trigger_does_not_read_image_body(self):
         r=response(body=b'NEVER_READ')
-        with patch.object(requests,'request',return_value=r) as req:cos.trigger_mirror(Fixture(),'images/fixture.png')
+        with patch.object(http_transport,'request',return_value=r) as req:cos.trigger_mirror(Fixture(),'images/fixture.png')
         r.iter_content.assert_not_called();self.assertTrue(req.call_args.kwargs['stream'])
         self.assertEqual(req.call_args.kwargs['headers']['Range'],'bytes=0-0')
 
@@ -75,25 +76,25 @@ class OriginTests(unittest.TestCase):
 
     def test_invalid_audit_xml_and_scene_error_fail_closed(self):
         for body in [b'<RecognitionResult/>',b'<RecognitionResult><Result>0</Result><PornInfo><Code>5</Code></PornInfo></RecognitionResult>']:
-            with patch.object(requests,'request',return_value=response(body=body)):
+            with patch.object(http_transport,'request',return_value=response(body=body)):
                 with self.assertRaises(cos.CosError):cos.audit_object(Fixture(),'results/x.jpg')
-        with patch.object(requests,'request',return_value=response(body=b'<RecognitionResult><Result>0</Result><Label>Normal</Label><PornInfo><Code>0</Code></PornInfo></RecognitionResult>')):
+        with patch.object(http_transport,'request',return_value=response(body=b'<RecognitionResult><Result>0</Result><Label>Normal</Label><PornInfo><Code>0</Code></PornInfo></RecognitionResult>')):
             self.assertEqual(cos.audit_object(Fixture(),'results/x.jpg')['result'],0)
 
     def test_gateway_submit_json_once_and_no_auto_size(self):
-        with patch.object(requests,'request',return_value=response(202,b'{"task_id":"imgtask_fixture"}')) as req:
+        with patch.object(http_transport,'request',return_value=response(202,b'{"task_id":"imgtask_fixture"}')) as req:
             client=AsyncImages({'base_url':'https://fixture.invalid','api_key':'fixture'})
             self.assertEqual(client.submit('model','prompt','https://cos.invalid/source',size='auto'),'imgtask_fixture')
         req.assert_called_once();body=req.call_args.kwargs['json'];self.assertNotIn('size',body)
         self.assertNotIn('SecretKey',str(body));self.assertEqual(body['n'],1)
 
     def test_gateway_timeout_is_uncertain_and_not_retried(self):
-        with patch.object(requests,'request',side_effect=requests.Timeout()) as req:
+        with patch.object(http_transport,'request',side_effect=requests.Timeout()) as req:
             with self.assertRaises(GatewayAsyncError) as e:AsyncImages({'base_url':'https://fixture.invalid','api_key':'fixture'}).submit('m','p')
         req.assert_called_once();self.assertTrue(e.exception.uncertain)
 
     def test_gateway_large_base64_metadata_is_rejected(self):
-        with patch.object(requests,'request',return_value=response(200,b'x'*(256*1024+1))):
+        with patch.object(http_transport,'request',return_value=response(200,b'x'*(256*1024+1))):
             with self.assertRaises(GatewayAsyncError):AsyncImages({'base_url':'https://fixture.invalid','api_key':'fixture'}).poll('imgtask_fixture')
 
     def test_gateway_path_cannot_redirect_bearer_and_task_id_is_strict(self):

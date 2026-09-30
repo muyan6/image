@@ -28,6 +28,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 from typing import Any, Dict, Optional
 
 import requests
+import http_transport
 
 from settings_store import SettingsStore
 
@@ -164,7 +165,7 @@ def control_request(settings,method,key='',params=None,headers=None,data=None,st
         headers.setdefault('Content-MD5', base64.b64encode(hashlib.md5(data).digest()).decode('ascii'))
     url,host=control_url(settings,method.lower(),key,params,headers)
     try:
-        return requests.request(method.upper(),url,headers={**(headers or {}),'Host':host},data=data,
+        return http_transport.request(method.upper(),url,headers={**(headers or {}),'Host':host},data=data,
                                 timeout=(5,30),allow_redirects=False,stream=stream)
     except requests.RequestException as exc:raise CosError('COS 元数据请求未完成',code='NETWORK') from exc
 

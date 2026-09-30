@@ -395,11 +395,23 @@ class TemplateStore:
         """检查所有模板，若未配置封面或本地封面文件缺失，自动生成专属占位封面。"""
         out_dir = covers_dir()
         migrated = False
+        created_files = []
+        def remove_created(paths):
+            for path in paths:
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    log.exception("占位封面事务回退清理失败: %s", path)
         with self._lock:
-            for t in self._templates:
-                cover = str(t.get("cover") or "").strip()
-                filename = "%s_v1.jpg" % t["id"]
-                local_path = os.path.join(out_dir, filename)
+            candidate = copy.deepcopy(self._templates)
+            for t in candidate:
+                covers = t.get("covers") if isinstance(t.get("covers"), list) else []
+                primary_index = next((i for i, ref in enumerate(covers)
+                                      if isinstance(ref, str) and ref.strip()), None)
+                cover = (covers[primary_index].strip() if primary_index is not None
+                         else str(t.get("cover") or "").strip())
                 need_make = False
                 if not cover:
                     need_make = True
@@ -408,24 +420,44 @@ class TemplateStore:
                     need_make = not os.path.isfile(referenced_path)
 
                 if need_make:
+                    local_path = None
                     try:
+                        version = max(int(t.get("cover_v", 0)), 1)
                         data = generate_placeholder_cover(
                             t.get("name", ""), t.get("subtitle", ""), t.get("group_id", "")
                         )
                         if data:
-                            with open(local_path, "wb") as fh:
+                            filename = "%s_v1.jpg" % t["id"]
+                            while True:
+                                local_path = os.path.join(out_dir, filename)
+                                try:
+                                    file = open(local_path, "xb")
+                                    break
+                                except FileExistsError:
+                                    # An existing v1 image can be shared by another
+                                    # template. Never overwrite it, even during repair.
+                                    filename = "%s_placeholder_%s.jpg" % (t["id"], uuid.uuid4().hex)
+                            created_files.append(local_path)
+                            with file as fh:
                                 fh.write(data)
                             t["cover"] = "local:%s" % filename
-                            if t.get("covers"):
-                                # The public projection prefers covers[0] over cover.
-                                # Replace only a missing primary example; retain the others.
-                                t["covers"][0] = t["cover"]
-                            t["cover_v"] = max(int(t.get("cover_v", 0)), 1)
+                            if covers:
+                                covers[primary_index if primary_index is not None else 0] = t["cover"]
+                            t["cover_v"] = version
                             migrated = True
                     except Exception as exc:
+                        if local_path in created_files:
+                            remove_created([local_path])
+                            created_files.remove(local_path)
                         log.warning("[%s] 自动生成占位封面跳过: %s", t.get("id"), exc)
             if migrated:
-                self._save_locked()
+                try:
+                    self._commit_locked(templates=candidate)
+                except Exception:
+                    # Only exclusive-created files belong to this transaction.
+                    # Keep all pre-existing/shared images when metadata is rejected.
+                    remove_created(created_files)
+                    raise
                 log.info("已自动为模板补充生成占位封面并更新数据")
 
     # ------------------------------------------------------------------ #
@@ -447,33 +479,7 @@ class TemplateStore:
                 raise ValueError("groups/templates 缺失")
             candidate = {"groups": groups, "templates": templates}
             _validate(candidate)  # 坏数据直接回种子，不带病运行
-            # Persisted templates are authoritative: deletion is not a migration.
-            # Future seed additions must have an explicit, one-time versioned migration.
-            migrated = loaded.get("version", 1) < 2
-            if loaded.get("version", 1) < 3:
-                # 新计费规则：现有全部模板的价格一次性统一为 40 光子。
-                for t in templates:
-                    t["price"] = 40
-                migrated = True
-
-            # 旧版本数据没有 guide 字段：读入时统一补齐并归一化；
-            # 种子模板指南为空的回填种子内容（一次性迁移），自建模板不动
-            seed_guides = {t["id"]: t["guide"] for t in _seed_templates()}
-            for t in templates:
-                g = _norm_guide(t.get("guide"))
-                if not any([g["advice"], g["suitable"], g["unsuitable"], g["tips"]]) \
-                        and t["id"] in seed_guides:
-                    g = seed_guides[t["id"]]
-                    migrated = True
-                t["guide"] = g
-            self._groups = groups
-            self._templates = templates
-            if migrated:
-                self._save_locked()
-                log.info("模板数据迁移/同步完成（已同步种子模板与选图指南）")
-            log.info("模板已加载: %s（%d 组 / %d 模板）",
-                     self._path, len(groups), len(templates))
-        except (OSError, ValueError) as exc:
+        except ValueError as exc:
             stamp = time.strftime("%Y%m%d_%H%M%S")
             backup = "%s.corrupt_%s" % (self._path, stamp)
             try:
@@ -484,14 +490,48 @@ class TemplateStore:
             self._groups = _seed_groups()
             self._templates = _seed_templates()
             self._save_locked()
+            return
 
-    def _save_locked(self) -> None:
+        # I/O failures are not corrupt JSON. Keep migration writes outside the
+        # recovery handler so a full disk cannot rename valid data to .corrupt.
+        # Persisted deletions remain authoritative; migrations never add seeds.
+        migrated = loaded.get("version", 1) < 2
+        if loaded.get("version", 1) < 3:
+            for t in templates:
+                t["price"] = 40
+            migrated = True
+        seed_guides = {t["id"]: t["guide"] for t in _seed_templates()}
+        for t in templates:
+            g = _norm_guide(t.get("guide"))
+            if not any([g["advice"], g["suitable"], g["unsuitable"], g["tips"]]) \
+                    and t["id"] in seed_guides:
+                g = seed_guides[t["id"]]
+                migrated = True
+            t["guide"] = g
+        if migrated:
+            self._commit_locked(groups=groups, templates=templates)
+            log.info("模板数据迁移/同步完成（已同步种子模板与选图指南）")
+        else:
+            self._groups, self._templates = groups, templates
+        log.info("模板已加载: %s（%d 组 / %d 模板）",
+                 self._path, len(groups), len(templates))
+
+    def _save_locked(self, *, groups=None, templates=None) -> None:
         tmp = self._path + ".tmp"
-        doc = {"version": 3, "groups": self._groups, "templates": self._templates}
+        doc = {"version": 3, "groups": self._groups if groups is None else groups,
+               "templates": self._templates if templates is None else templates}
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(doc, fh, ensure_ascii=False, indent=2)
             fh.write("\n")
         os.replace(tmp, self._path)
+
+    def _commit_locked(self, *, groups=None, templates=None) -> None:
+        """Persist a candidate without exposing uncommitted data to readers."""
+        self._save_locked(groups=groups, templates=templates)
+        if groups is not None:
+            self._groups = groups
+        if templates is not None:
+            self._templates = templates
 
     # ------------------------------------------------------------------ #
     # 分组
@@ -515,8 +555,7 @@ class TemplateStore:
                 gid = "g%s" % uuid.uuid4().hex[:6]
             group = {"id": gid, "name": name, "sort": int(sort),
                      "enabled": bool(enabled), "created_at": time.time()}
-            self._groups.append(group)
-            self._save_locked()
+            self._commit_locked(groups=self._groups + [group])
             return copy.deepcopy(group)
 
     def update_group(self, group_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -533,12 +572,9 @@ class TemplateStore:
                         candidate["sort"] = int(patch["sort"])
                     if "enabled" in patch:
                         candidate["enabled"] = bool(patch["enabled"])
-                    self._groups[index] = candidate
-                    try:
-                        self._save_locked()
-                    except OSError:
-                        self._groups[index] = g
-                        raise
+                    groups = list(self._groups)
+                    groups[index] = candidate
+                    self._commit_locked(groups=groups)
                     return copy.deepcopy(candidate)
         raise KeyError("分组不存在")
 
@@ -549,8 +585,7 @@ class TemplateStore:
             used = any(t["group_id"] == group_id for t in self._templates)
             if used:
                 raise ValueError("分组下还有模板，请先移走或删除它们")
-            self._groups = [g for g in self._groups if g["id"] != group_id]
-            self._save_locked()
+            self._commit_locked(groups=[g for g in self._groups if g["id"] != group_id])
 
     # ------------------------------------------------------------------ #
     # 模板
@@ -571,10 +606,11 @@ class TemplateStore:
         if any(value < 0 or value > 9999 for value in amounts.values()):
             raise ValueError("模板价格必须是 0～9999 光子")
         with self._lock:
-            for template in self._templates:
+            candidate = copy.deepcopy(self._templates)
+            for template in candidate:
                 template["price"] = amounts[template.get("engine", "light")]
                 template["updated_at"] = time.time()
-            self._save_locked()
+            self._commit_locked(templates=candidate)
             return len(self._templates)
 
     def get_template(self, tpl_id: str,
@@ -617,8 +653,7 @@ class TemplateStore:
             # 先校验（含新模板的整体快照），通过才落内存 —— 校验失败不能污染现有数据
             _validate({"groups": self._groups,
                        "templates": self._templates + [item]})
-            self._templates.append(item)
-            self._save_locked()
+            self._commit_locked(templates=self._templates + [item])
             return copy.deepcopy(item)
 
     def update_template(self, tpl_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -656,26 +691,28 @@ class TemplateStore:
                 merged = [candidate if i == idx else copy.deepcopy(x)
                           for i, x in enumerate(self._templates)]
                 _validate({"groups": self._groups, "templates": merged})
-                self._templates = merged
-                self._save_locked()
+                self._commit_locked(templates=merged)
                 return copy.deepcopy(candidate)
         raise KeyError("模板不存在")
 
     def delete_template(self, tpl_id: str) -> None:
         with self._lock:
             before = len(self._templates)
-            self._templates = [t for t in self._templates if t["id"] != tpl_id]
-            if len(self._templates) == before:
+            candidate = [t for t in self._templates if t["id"] != tpl_id]
+            if len(candidate) == before:
                 raise KeyError("模板不存在")
-            self._save_locked()
+            self._commit_locked(templates=candidate)
 
     def inc_usage(self, tpl_id: str) -> None:
         """成功交付后累计一次；历史累计基数保留，失败和排队不再增加。"""
         with self._lock:
-            for t in self._templates:
-                if t["id"] == tpl_id:
+            for index, original in enumerate(self._templates):
+                if original["id"] == tpl_id:
+                    t = copy.deepcopy(original)
                     t["usage_count"] = int(t.get("usage_count", 0)) + 1
-                    self._save_locked()
+                    candidate = list(self._templates)
+                    candidate[index] = t
+                    self._commit_locked(templates=candidate)
                     return
 
     def set_cover(self, tpl_id: str, cover: str) -> Dict[str, Any]:
@@ -686,8 +723,9 @@ class TemplateStore:
         """设置模板的第 slot 张示例图（slot 为 0, 1, 2）。"""
         slot = max(0, min(int(slot), 2))
         with self._lock:
-            for t in self._templates:
-                if t["id"] == tpl_id:
+            for index, original in enumerate(self._templates):
+                if original["id"] == tpl_id:
+                    t = copy.deepcopy(original)
                     covers = list(t.get("covers") or [])
                     if not covers and t.get("cover"):
                         covers = [t["cover"]]
@@ -700,7 +738,9 @@ class TemplateStore:
                     t["cover"] = covers[0] if covers else ""
                     t["cover_v"] = int(t.get("cover_v", 0) or 0) + 1
                     t["updated_at"] = time.time()
-                    self._save_locked()
+                    candidate = list(self._templates)
+                    candidate[index] = t
+                    self._commit_locked(templates=candidate)
                     return copy.deepcopy(t)
         raise KeyError("模板不存在")
 
@@ -708,8 +748,9 @@ class TemplateStore:
         """删除模板的第 slot 张示例图（slot 为 0, 1, 2）。"""
         slot = max(0, min(int(slot), 2))
         with self._lock:
-            for t in self._templates:
-                if t["id"] == tpl_id:
+            for index, original in enumerate(self._templates):
+                if original["id"] == tpl_id:
+                    t = copy.deepcopy(original)
                     covers = list(t.get("covers") or [])
                     if not covers and t.get("cover"):
                         covers = [t["cover"]]
@@ -719,7 +760,9 @@ class TemplateStore:
                     t["cover"] = covers[0] if covers else ""
                     t["cover_v"] = int(t.get("cover_v", 0) or 0) + 1
                     t["updated_at"] = time.time()
-                    self._save_locked()
+                    candidate = list(self._templates)
+                    candidate[index] = t
+                    self._commit_locked(templates=candidate)
                     return copy.deepcopy(t)
         raise KeyError("模板不存在")
 

@@ -3,6 +3,7 @@ import hashlib
 import re
 from urllib.parse import urlsplit
 import requests
+import http_transport
 
 class GatewayAsyncError(RuntimeError):
     def __init__(self,message,uncertain=False):super().__init__(message);self.uncertain=uncertain
@@ -45,7 +46,7 @@ class AsyncImages:
         if not path.startswith('/') or path.startswith('//') or '?' in path or '#' in path:
             raise GatewayAsyncError('异步接口路径无效')
         try:
-            response=requests.request(method,self.base+path,
+            response=http_transport.request(method,self.base+path,
                 headers={'Authorization':'Bearer '+self.conf['api_key'],'Content-Type':'application/json'},
                 json=body,timeout=(5,self.conf.get('request_timeout',30)),allow_redirects=False,stream=True)
             with response:

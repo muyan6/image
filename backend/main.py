@@ -1653,6 +1653,7 @@ def get_available_styles() -> Dict[str, Any]:
 def public_config() -> Dict[str, Any]:
     """小程序启动时拉取：价格、维护状态、风格表、调试免扣费开关、社区与广告开关。"""
     ads = settings.ads()
+    text_conf = settings.text_generation()
     community = CommunityStore(settings)._normalize()
     return {
         "prices": settings.prices(),
@@ -1662,7 +1663,7 @@ def public_config() -> Dict[str, Any]:
         "template_output_modes": ["template", "single"],
         "cloud_pipeline": cloud.snapshot(),
         "template_quality_options": ["light", "fine"],
-        "text_generation": {'ready':text_generation_ready(sys.modules[__name__]),'price':settings.snapshot()['text_generation']['price']},
+        "text_generation": {'ready':text_generation_ready(sys.modules[__name__],text_conf),'price':text_conf['price']},
         "image_processing": {"ci_enabled":settings.snapshot()["processing"]["ci_enabled"],"local_image_parallelism":1},
         "maintenance": settings.maintenance(),
         "styles": settings.styles(),

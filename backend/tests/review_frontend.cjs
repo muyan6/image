@@ -74,7 +74,7 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
   });
   await test('text_generation_disabled_or_uncertain_never_reposts',async()=>{
     let calls=0;
-    const {page}=loadPage('text-generation',{request:async()=>{calls++;const e=new Error('network');e.code='NETWORK';throw e;}});
+    const {page}=loadPage('text-generation',{request:async()=>{calls++;const e=new Error('network');e.code='NETWORK';e.jobSubmissionAttempted=true;throw e;}});
     await page.onGenerate();const disabledCalls=calls;
     page.setData({ready:true,prompt:'forest'});await page.onGenerate();await page.onGenerate();
     return [disabledCalls===0&&calls===1&&page._uncertain,{disabledCalls,calls,uncertain:!!page._uncertain}];

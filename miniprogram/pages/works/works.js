@@ -23,7 +23,7 @@ Page({
     this.setData({activeStatus:id});this.setWorks(this.data.works);
   },
 
-  onRetryWorks() { return this.loadWorks(true); },
+  onRetryWorks() { return this.loadWorks(true).finally(() => this.schedulePendingRefresh()); },
 
   onLoad() {
     // 首次及之后返回本页均由 onShow 加载，避免相同请求并发两次。
@@ -79,6 +79,7 @@ Page({
         !this.data.works.some(w => w.preview && !reusablePreview(w.preview))) return;
     const version = (this._loadVersion || 0) + 1;
     this._loadVersion = version;
+    const startingJobIds = new Set((app.globalData.historyList || []).map(w => w.jobId).filter(Boolean));
     this.setData({loading:true,loadError:''});
     if (!this.data.works.length) this.setWorks((app.globalData.historyList || []).map(w =>
       Object.assign({}, w, {preview: this.safePreview(w)})));
@@ -108,7 +109,10 @@ Page({
       });
       // A successful empty/full cloud response is authoritative for server jobs.
       const cloudIds = new Set(cloud.map(j => j.id));
-      const merged = localOnly.concat([...byId.values()].filter(w => cloudIds.has(w.jobId)))
+      // 在请求启动后，后台上传可能刚被受理；较早的列表快照不应抹掉新任务。
+      // 请求开始前已存在的任务仍以云端为准，已删除/到期的旧任务不复活。
+      const merged = localOnly.concat([...byId.values()].filter(w => cloudIds.has(w.jobId) ||
+        (!startingJobIds.has(w.jobId) && w.status === 'processing')))
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       // 旧任务若只返回后端本地图片路径，先拿 JSON 补存到 COS 再展示前几件作品。
       const visible = merged.slice(0, 6).filter(w => w.jobId && w.status === 'succeeded' &&

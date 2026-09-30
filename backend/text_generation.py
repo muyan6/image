@@ -12,8 +12,8 @@ class TextBody(BaseModel):
     prompt:str=''
     aspect_ratio:str='1:1'
 
-def ready(m):
-    conf=m.settings.snapshot()['text_generation'];provider=text_gateway(m.settings)
+def ready(m, conf=None):
+    conf=m.settings.text_generation() if conf is None else conf;provider=text_gateway(m.settings,conf)
     return bool(conf['enabled'] and conf['model'] and provider.get('base_url') and provider.get('api_key') and m.settings.cos_ready()
                 and (not m.cloud.enabled() or m.cloud.ready(text=True)))
 
@@ -65,7 +65,7 @@ def make_text_router(runtime):
         if not 1<=len(prompt)<=500:raise HTTPException(status_code=400,detail='请填写 1~500 字的画面描述')
         if payload.aspect_ratio not in SIZES:raise HTTPException(status_code=400,detail='请选择支持的画幅')
         if not ready(m):raise HTTPException(status_code=503,detail='文生图尚未启用，请先配置模型与 COS')
-        conf=m.settings.snapshot()['text_generation'];provider=text_gateway(m.settings)
+        conf=m.settings.text_generation();provider=text_gateway(m.settings,conf)
         rejected=m._moderate_text_or_reject(prompt,user['openid'])
         if rejected:m._reject_uploaded_content(user['openid'],'text',rejected,'light',{'price':conf['price']})
         if m.cloud.enabled():
