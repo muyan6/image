@@ -250,7 +250,7 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     const ok=!html.includes('onclick="maskClose(event)"') &&
       !html.includes('<button class="btn-ghost" onclick="closeModal()">取消</button>') &&
       html.includes('onclick="openPurgeUsersModal()"') &&
-      html.includes("confirmation:'删除全部账号'") &&
+      html.includes("confirmation:'移出全部用户'") && !html.includes('永久删除全部账号') &&
       html.includes('input[type=url]') &&
       html.includes('.form-grid > .field > label') &&
       html.includes('loadViolationFeedback()') &&

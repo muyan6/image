@@ -553,9 +553,9 @@
               <option value="all">全部账号</option>
             </select>
             <button class="btn-ghost btn-small" onclick="loadUsers()">刷新</button>
-            <button class="btn-danger btn-small" onclick="openPurgeUsersModal()">删除全部账号</button>
+            <button class="btn-danger btn-small" onclick="openPurgeUsersModal()">全部移出列表</button>
           </div>
-          <p class="muted">单行“移出列表”仅隐藏管理记录；“删除全部账号”会永久删除微信与网页账号、余额流水及作品，不是封禁。</p>
+          <p class="muted">单行或全部“移出列表”仅隐藏管理记录；保留账户、余额、作品及封禁状态，用户再次活跃后恢复显示。</p>
           <div class="table-wrap"><table id="users-table"></table></div>
         </div>
         <div class="card">
@@ -1492,43 +1492,30 @@ async function reviewViolation(id, accepted) {
   } catch (err) { toast(err.message, 'bad'); }
 }
 
-/* ---------- 用户操作：改光子 / 封禁 / 清理管理列表 / 永久删除全部 ---------- */
+/* ---------- 用户操作：改光子 / 封禁 / 移出管理列表 ---------- */
 window.openPurgeUsersModal = async () => {
   try {
-    const summary = await api('/users/purge-summary');
+    const summary = await api('/users/remove-summary');
     const count = Number(summary.accounts) || 0;
-    const jobsCount = Number(summary.jobs) || 0;
-    const processing = Number(summary.processing) || 0;
-    openModal(`<div class="modal-head"><b>永久删除全部账号</b><button class="icon-btn" onclick="closeModal()">✕</button></div>
-      <div class="modal-body">
-        <p>将删除 <b>${count}</b> 个账号（微信 ${Number(summary.wechat)||0}、网页 ${Number(summary.web)||0}）及 <b>${jobsCount}</b> 条作品记录，并清空关联余额、扣费流水、邀请、奖励、违规与审计记录。</p>
-        <p class="muted">这是永久删除，不是封禁或移出列表。仍在处理的任务：${processing} 条；有任务处理中时暂不执行。</p>
-        <div class="field"><label for="purge-confirm">请输入“删除全部账号”确认</label>
-          <input type="text" id="purge-confirm" autocomplete="off" placeholder="删除全部账号"></div>
-      </div>
-      <div class="modal-foot"><span class="msg" id="purge-msg">删除后不可恢复</span>
-        <button class="btn-danger" id="purge-submit" disabled onclick="purgeAllUsers()">永久删除全部账号</button></div>`);
+    openModal(`<div class="modal-head"><b>全部移出列表</b><button class="icon-btn" onclick="closeModal()">✕</button></div>
+      <div class="modal-body"><p>将 ${count} 个可见用户移出管理列表（微信 ${summary.wechat||0}、网页 ${summary.web||0}）。</p>
+        <p>账户、UID、光子、流水、作品与封禁状态全部保留；不影响正在生成的任务，用户再次上线自动恢复显示。</p>
+        <div class="field"><label for="purge-confirm">请输入“移出全部用户”确认</label>
+          <input id="purge-confirm" autocomplete="off" placeholder="移出全部用户"></div></div>
+      <div class="modal-foot"><span class="msg" id="purge-msg">仅清理管理列表</span>
+        <button class="btn-ghost" id="purge-submit" disabled onclick="purgeAllUsers()">全部移出列表</button></div>`);
     const input = $('purge-confirm');
-    input.addEventListener('input', () => {
-      $('purge-submit').disabled = input.value.trim() !== '删除全部账号' || processing > 0;
-    });
-    input.focus();
-    window._purgeSummary = {accounts: count, jobs: jobsCount};
-  } catch (err) { toast(err.message, 'bad'); }
+    input.addEventListener('input',()=>{$('purge-submit').disabled=input.value.trim()!=='移出全部用户';});
+    input.focus();window._purgeSummary={accounts:count};
+  } catch(err) {toast(err.message,'bad');}
 };
 window.purgeAllUsers = async () => {
-  if ($('purge-confirm')?.value.trim() !== '删除全部账号' || !window._purgeSummary) return;
-  const btn = $('purge-submit'); btn.disabled = true;
+  if($('purge-confirm')?.value.trim()!=='移出全部用户'||!window._purgeSummary)return;
+  const btn=$('purge-submit');btn.disabled=true;
   try {
-    const result = await api('/users', {method:'DELETE', body:{confirmation:'删除全部账号',
-      expected_accounts:window._purgeSummary.accounts, expected_jobs:window._purgeSummary.jobs}});
-    closeModal(); window._purgeSummary = null;
-    toast(`已永久删除 ${result.deleted_accounts} 个账号、${result.deleted_jobs} 条作品`);
-    await loadUsers();
-  } catch (err) {
-    $('purge-msg').textContent = err.message;
-    btn.disabled = false;
-  }
+    const result=await api('/users',{method:'DELETE',body:{confirmation:'移出全部用户',expected_accounts:window._purgeSummary.accounts}});
+    closeModal();toast(`已移出 ${result.removed_from_list} 个用户，账户数据保留`);await loadUsers();
+  } catch(err) {$('purge-msg').textContent=err.message;btn.disabled=false;}
 };
 $("users-table").addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-act]");

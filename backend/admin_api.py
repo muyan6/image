@@ -409,45 +409,26 @@ def make_admin_router(*, settings: SettingsStore,
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"items": items, "account_type": account_type, "stats": users.stats()}
 
-    @router.get("/users/purge-summary")
-    def purge_users_summary(request: Request) -> Dict[str, Any]:
+    @router.get("/users/remove-summary")
+    def remove_users_summary(request: Request) -> Dict[str, Any]:
         _guard(request)
-        return {**users.purge_summary(), **jobs.purge_summary()}
+        return users.admin_remove_summary()
 
     @router.delete("/users")
-    async def purge_all_users(request: Request) -> Dict[str, Any]:
-        """彻底删除全部账号、流水和作品；不是封禁或仅移出后台列表。"""
+    async def remove_all_users(request: Request) -> Dict[str, Any]:
+        """全部移出管理列表，与单行移出相同；没有永久删除入口。"""
         _guard(request)
         body = await _json_body(request)
-        if body.get("confirmation") != "删除全部账号":
-            raise HTTPException(status_code=400, detail="请输入“删除全部账号”确认")
-        for field in ("expected_accounts", "expected_jobs"):
-            if type(body.get(field)) is not int or body[field] < 0:
-                raise HTTPException(status_code=400, detail="缺少删除前的账号与作品数量确认")
+        if body.get("confirmation") != "移出全部用户":
+            raise HTTPException(status_code=400, detail="请输入“移出全部用户”确认；旧版永久删除请求已停用")
+        count = body.get("expected_accounts")
+        if type(count) is not int or count < 0:
+            raise HTTPException(status_code=400, detail="缺少移出前的可见用户数量确认")
         try:
-            users.begin_purge()
+            removed = users.hide_all_from_admin(count)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        snapshot = []
-        try:
-            summary = {**users.purge_summary(), **jobs.purge_summary()}
-            if (summary["accounts"] != body["expected_accounts"] or
-                    summary["jobs"] != body["expected_jobs"]):
-                raise HTTPException(status_code=409, detail="账号或作品数量已变化，请刷新后重新确认")
-            try:
-                snapshot = jobs.take_all_for_purge()
-            except ValueError as exc:
-                raise HTTPException(status_code=409, detail=str(exc)) from exc
-            try:
-                deleted = users.purge_all_accounts()
-            except Exception:
-                jobs.restore_purged(snapshot)
-                raise
-        finally:
-            users.end_purge()
-        jobs.cleanup_purged(snapshot)
-        return {"ok": True, "deleted_accounts": deleted["accounts"],
-                "deleted_jobs": len(snapshot)}
+        return {"ok": True, "removed_from_list": removed}
 
     @router.delete("/users/{openid}")
     def cleanup_user(openid: str, request: Request) -> Dict[str, Any]:

@@ -400,6 +400,24 @@ class UserStore:
                                    (time.time(), openid, "admin_cleanup_user", "仅移除管理列表，再次活跃自动恢复"))
             return bool(found)
 
+    def admin_remove_summary(self) -> Dict[str, Any]:
+        with self._lock:
+            rows = self._conn.execute("SELECT account_type,COUNT(*) FROM users WHERE admin_hidden=0 GROUP BY account_type").fetchall()
+        counts = dict(rows)
+        return {"accounts":sum(counts.values()),"wechat":counts.get("wechat",0),"web":counts.get("web",0)}
+
+    def hide_all_from_admin(self, expected_accounts: int) -> int:
+        """Only remove management visibility; no account, ledger or job deletion."""
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            count = self._conn.execute("SELECT COUNT(*) FROM users WHERE admin_hidden=0").fetchone()[0]
+            if count != expected_accounts:
+                raise ValueError("可见用户数量已变化，请刷新后重新确认")
+            self._conn.execute("UPDATE users SET admin_hidden=1 WHERE admin_hidden=0")
+            self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
+                               (time.time(), "", "admin_cleanup_all_users", "移出管理列表 %d 个账号，保留所有账户数据" % count))
+            return int(count)
+
     def get_user(self, openid: str) -> Optional[Dict[str, Any]]:
         with self._lock:
             row = self._conn.execute(

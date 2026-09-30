@@ -370,38 +370,39 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(failed.status_code, 503)
         self.assertEqual(m.users.get_balance('sample_user'), before)
 
-    def test_admin_purge_all_is_real_deletion_and_requires_exact_confirmation(self):
-        m.users.audit('sample_user', 'test_record', 'fixture')
-        m.users.record_violation('sample_user', 'v123456', 'text', 'fixture', 1)
-        m.jobs.create('purgejob1234', openid='sample_user', status='succeeded',
-                      quality='light', orig_file='', result_file='')
-        preview = self.admin.get('/admin/api/users/purge-summary')
-        self.assertEqual(preview.status_code, 200)
-        self.assertEqual((preview.json()['accounts'], preview.json()['jobs']), (2, 1))
-        bad = self.admin.request('DELETE', '/admin/api/users', json={
-            'confirmation': '删除', 'expected_accounts': 2, 'expected_jobs': 1})
-        self.assertEqual(bad.status_code, 400)
-        stale = self.admin.request('DELETE', '/admin/api/users', json={
-            'confirmation': '删除全部账号', 'expected_accounts': 1, 'expected_jobs': 1})
-        self.assertEqual(stale.status_code, 409)
-        self.assertIsNotNone(m.users.get_user('sample_user'))
-        result = self.admin.request('DELETE', '/admin/api/users', json={
-            'confirmation': '删除全部账号', 'expected_accounts': 2, 'expected_jobs': 1})
-        self.assertEqual(result.status_code, 200, result.text)
-        self.assertEqual((result.json()['deleted_accounts'], result.json()['deleted_jobs']), (2, 1))
-        self.assertIsNone(m.users.get_user('sample_user'))
-        self.assertIsNone(m.jobs.get('purgejob1234'))
-        for table in ('users', 'audit', 'job_charges', 'invite_bindings', 'ad_rewards', 'violations'):
-            self.assertEqual(m.users._conn.execute('SELECT COUNT(*) FROM '+table).fetchone()[0], 0)
-        self.assertEqual(m.jobs._conn.execute('SELECT COUNT(*) FROM jobs').fetchone()[0], 0)
+    def test_admin_bulk_remove_preserves_accounts_ledgers_and_works(self):
+        m.users.audit('sample_user','test_record','fixture')
+        m.users.record_violation('sample_user','v123456','text','fixture',1)
+        m.jobs.create('keptjob12345',openid='sample_user',status='succeeded',quality='light')
+        original=m.users.get_user('sample_user')
+        preview=self.admin.get('/admin/api/users/remove-summary')
+        self.assertEqual(preview.status_code,200)
+        self.assertEqual(preview.json()['accounts'],2)
+        stale=self.admin.request('DELETE','/admin/api/users',json={'confirmation':'移出全部用户','expected_accounts':1})
+        self.assertEqual(stale.status_code,409)
+        self.assertEqual(len(m.users.list_users(200,account_type='all')),2)
+        result=self.admin.request('DELETE','/admin/api/users',json={'confirmation':'移出全部用户','expected_accounts':2})
+        self.assertEqual(result.status_code,200,result.text)
+        self.assertEqual(result.json()['removed_from_list'],2)
+        self.assertEqual(m.users.list_users(200,account_type='all'),[])
+        kept=m.users.get_user('sample_user')
+        self.assertEqual((kept['balance'],kept['user_id']),(original['balance'],original['user_id']))
+        self.assertIsNotNone(m.jobs.get('keptjob12345'))
+        self.assertEqual(m.users._conn.execute('SELECT COUNT(*) FROM violations').fetchone()[0],1)
+        self.assertEqual(self.client.get('/api/me',headers=self.headers).status_code,200)
+        self.assertEqual(len(m.users.list_users(200,account_type='all')),1)
+        self.assertEqual(m.users.get_balance('sample_user'),original['balance'])
 
-    def test_admin_purge_refuses_active_processing_job(self):
-        m.jobs.create('activejob1234', openid='sample_user', quality='light')
-        result = self.admin.request('DELETE', '/admin/api/users', json={
-            'confirmation': '删除全部账号', 'expected_accounts': 2, 'expected_jobs': 1})
-        self.assertEqual(result.status_code, 409)
+    def test_admin_bulk_remove_keeps_running_job_and_rejects_legacy_delete(self):
+        m.jobs.create('activejob1234',openid='sample_user',quality='light')
+        old=self.admin.request('DELETE','/admin/api/users',json={'confirmation':'删除全部账号','expected_accounts':2,'expected_jobs':1})
+        self.assertEqual(old.status_code,400)
+        result=self.admin.request('DELETE','/admin/api/users',json={'confirmation':'移出全部用户','expected_accounts':2})
+        self.assertEqual(result.status_code,200,result.text)
+        self.assertEqual(m.jobs.get('activejob1234')['status'],'processing')
         self.assertIsNotNone(m.users.get_user('sample_user'))
-        self.assertIsNotNone(m.jobs.get('activejob1234'))
+        html=(ROOT/'backend/admin.html').read_text(encoding='utf-8')
+        self.assertIn('全部移出列表',html);self.assertNotIn('永久删除全部账号',html)
 
 if __name__=='__main__':
     suite=unittest.defaultTestLoader.loadTestsFromTestCase(WorkflowTests);names=[t._testMethodName for t in suite]
