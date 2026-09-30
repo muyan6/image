@@ -1412,12 +1412,35 @@ window.importTpls = async () => {
 };
 
 /* ---------- 任务记录 ---------- */
+function jobPhaseText(j){
+  const labels={queued:'排队',prepare:'原图处理',submit:'提交供应商',submitting:'提交供应商',
+    generating:'AI 生成',unknown:'确认供应商受理状态',import:'成品导入 COS',store_cos:'成品导入 COS',
+    finalize:'成品处理',done:'完成',audit_input:'原图审核',audit_output:'成品审核'};
+  let phase=j.status==='failed'?(j.failed_phase||j.failed_stage):(j.cloud_phase||j.stage);
+  if(phase==='wait_audit')phase=j.audit_stage==='output'?'audit_output':'audit_input';
+  if(j.status==='failed'&&!phase&&String(j.error||'').includes('镜像导入'))phase='import';
+  return labels[phase]||(j.status==='failed'?'失败阶段未记录':j.status==='succeeded'?'完成':'等待阶段信息');
+}
+function jobTimingText(j,now=Date.now()/1000){
+  const t=j.timings||{},parts=[];
+  const add=(label,value)=>{if(typeof value==='number'&&Number.isFinite(value))parts.push(label+' '+Math.max(0,Math.round(value/1000))+'s');};
+  add('排队',t.queue_ms);add('原图审核',t.input_audit_ms);add('原图处理',t.prepare_ms??t.normalize_ms);
+  if(typeof t.provider_ms==='number')add('AI',t.provider_ms);
+  else if(j.submitted_at){
+    add(j.provider_completed_at?'AI':'AI 已等待',((j.provider_completed_at||j.failed_at||now)-j.submitted_at)*1000);
+  }
+  if(j.status==='processing'&&j.cloud_phase==='import'&&j.cloud_import_started_at)add('导入已等待',(now-j.cloud_import_started_at)*1000);
+  else add('成品导入',t.import_wait_ms??t.storage_ms);
+  add('成品处理',t.finalize_ms);add('成品审核',t.output_audit_ms);
+  if(j.status==='processing'&&j.created_at)add('累计',(now-j.created_at)*1000);
+  return parts.length?parts.join(' / '):(j.status==='processing'?'等待阶段计时':'未记录分阶段耗时');
+}
 async function loadJobs() {
   try {
     const data = await api("/jobs?offset=" + JOBS_OFFSET + "&limit=50");
     const t = $("jobs-table");
     t.innerHTML = "<thead><tr><th>时间</th><th>ID</th><th>档位</th><th>模板</th><th>供应商</th>" +
-                  "<th>状态</th><th>阶段耗时</th><th>成本</th><th>错误</th></tr></thead><tbody></tbody>";
+                  "<th>状态</th><th>当前／失败阶段</th><th>阶段耗时</th><th>成本</th><th>错误</th></tr></thead><tbody></tbody>";
     const tbody = t.tBodies[0];
     data.items.forEach((j) => {
       const cost = j.cost_cny != null ? "¥" + (+j.cost_cny).toFixed(2)
@@ -1429,12 +1452,12 @@ async function loadJobs() {
       tr.innerHTML =
         `<td>${fmtTime(j.created_at)}</td><td><code>${esc(j.id)}</code></td>` +
         `<td>${esc(j.quality)}</td><td>${esc(j.template_name || "—")}</td>` +
-        `<td>${esc(j.provider || "—")}</td><td>${badge}</td>` +
-        `<td class="muted">${j.timings ? esc(['排队 '+Math.round((j.timings.queue_ms||0)/1000)+'s','处理 '+Math.round((j.timings.normalize_ms||0)/1000)+'s','AI '+Math.round((j.timings.provider_ms||0)/1000)+'s','保存 '+Math.round((j.timings.storage_ms||0)/1000)+'s'].join(' / ')) : '旧任务无计时'}</td>` +
-        `<td>${cost}</td><td class="muted">${esc(j.error || "")}</td>`;
+        `<td>${esc(j.provider || (j.vendor_task_id?'worldcodes':'—'))}</td><td>${badge}</td>` +
+        `<td>${esc(jobPhaseText(j))}</td><td class="muted">${esc(jobTimingText(j))}</td>` +
+        `<td>${cost}</td><td class="muted">${esc(j.error || j.import_last_error || "")}</td>`;
       tbody.appendChild(tr);
     });
-    if (!data.items.length) tbody.innerHTML = '<tr><td colspan="8" class="empty">暂无任务</td></tr>';
+    if (!data.items.length) tbody.innerHTML = '<tr><td colspan="10" class="empty">暂无任务</td></tr>';
     $("jobs-page").textContent = `第 ${JOBS_OFFSET / 50 + 1} 页 · 共 ${data.total} 条`;
     $("jobs-prev").disabled = JOBS_OFFSET <= 0;
     $("jobs-next").disabled = JOBS_OFFSET + 50 >= data.total;

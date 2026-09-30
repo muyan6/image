@@ -62,6 +62,7 @@ class OriginTests(unittest.TestCase):
         r=response(body=b'NEVER_READ')
         with patch.object(requests,'request',return_value=r) as req:cos.trigger_mirror(Fixture(),'images/fixture.png')
         r.iter_content.assert_not_called();self.assertTrue(req.call_args.kwargs['stream'])
+        self.assertEqual(req.call_args.kwargs['headers']['Range'],'bytes=0-0')
 
     def test_result_url_is_fixed_https_host_prefix_without_query(self):
         good='https://'+MEDIA_HOST+'/images/fixture.png'

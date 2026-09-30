@@ -22,6 +22,7 @@ import hmac
 import logging
 import time
 import json
+import re
 import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlsplit, urlunsplit
 from typing import Any, Dict, Optional
@@ -35,10 +36,42 @@ log = logging.getLogger("rescue.cos")
 
 class CosError(RuntimeError):
     def __init__(self, message: str, *, status: Optional[int] = None,
-                 code: str = "COS_ERROR") -> None:
+                 code: str = "COS_ERROR", details=None) -> None:
         super().__init__(message)
         self.status = status
         self.code = code
+        self.details = details or {}
+
+
+def response_error(response, action, key='', *, streamed=False):
+    """Keep bounded COS diagnostic metadata, never signed URLs or image bytes."""
+    data=b''
+    if streamed:
+        try:
+            for chunk in response.iter_content(1024):
+                data+=chunk[:max(0,8192-len(data))]
+                if len(data)>=8192:break
+        except requests.RequestException:pass
+    elif isinstance(response.content,bytes):data=response.content[:8192]
+    code='COS_ERROR';request_id=response.headers.get('x-cos-request-id','');upstream=None
+    try:
+        root=ET.fromstring(data)
+        fields={x.tag.rsplit('}',1)[-1]:x.text or '' for x in root.iter()}
+        code=fields.get('Code') or code;request_id=request_id or fields.get('RequestId','')
+        match=re.search(r'(?:status(?:\s*code)?|response(?:\s+code)?|http)\s*[:=]?\s*([345]\d\d)',fields.get('Message',''),re.I)
+        if match:upstream=int(match[1])
+    except ET.ParseError:pass
+    def tag(value):return value if isinstance(value,str) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}',value) else ''
+    code=tag(code) or 'COS_ERROR'
+    request_id=request_id if isinstance(request_id,str) and re.fullmatch(r'[A-Za-z0-9_.:+/=-]{1,256}',request_id) else ''
+    kind=key.split('/',1)[0] if key else 'bucket'
+    if kind not in ('uploads','origins','norms','results','images','audit-tencent','bucket'):kind='object'
+    details={'operation':action,'object_kind':kind,'http_status':response.status_code,'code':code,'request_id':request_id}
+    if upstream:details['upstream_status']=upstream
+    text=f'{action} HTTP {response.status_code} [{kind}; {code}]'
+    if upstream:text+=f' 源站 HTTP {upstream}'
+    if request_id:text+=' 请求ID '+request_id
+    return CosError(text,status=response.status_code,code=code,details=details)
 
 
 def _conf(settings: SettingsStore) -> Dict[str, str]:
@@ -112,7 +145,7 @@ def process_image(settings: SettingsStore, source: str, target: str, rule: str) 
     # Only small control responses cross the VM; no internal-DNS retry or CDN negative-cache probe.
     response=control_request(settings,'POST',source,params={'image_process':''},headers=headers,data=b'')
     if response.status_code!=200:
-        raise CosError('CI 基础图片处理失败 HTTP %s'%response.status_code,code='CI_PROCESSING_FAILED')
+        raise response_error(response,'CI 基础图片处理失败',target)
     meta=object_metadata(settings,target)
     if meta['size']<=0:raise CosError('CI 处理结果为空',code='CI_PROCESSING_FAILED')
     return meta
@@ -138,7 +171,7 @@ def control_request(settings,method,key='',params=None,headers=None,data=None,st
 
 def object_metadata(settings,key):
     response=control_request(settings,'HEAD',key)
-    if response.status_code!=200:raise CosError('COS 对象校验失败 HTTP %s'%response.status_code,status=response.status_code)
+    if response.status_code!=200:raise response_error(response,'COS 对象校验失败',key)
     return {'size':int(response.headers.get('Content-Length','0')),'content_type':response.headers.get('Content-Type','')}
 
 
@@ -192,9 +225,11 @@ def mirror_key(url,media_host,prefix='images/'):
 
 
 def trigger_mirror(settings,key):
-    # Headers-only streaming GET triggers COS Mirror; never consumes image bytes or follows redirects.
-    with control_request(settings,'GET',key,stream=True) as response:
-        if response.status_code!=200:raise CosError('COS HTTPS 镜像导入失败 HTTP %s'%response.status_code,status=response.status_code)
+    # COS documents Range GET as triggering a separate full-object backfill.
+    # Do not mistake the response headers for proof that the object is stored.
+    with control_request(settings,'GET',key,headers={'Range':'bytes=0-0'},stream=True) as response:
+        if response.status_code not in (200,206):
+            raise response_error(response,'COS HTTPS 镜像导入失败',key,streamed=True)
 
 
 def audit_object(settings,key,biz_type=''):

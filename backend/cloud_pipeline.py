@@ -241,16 +241,8 @@ class CloudPipeline:
         m.jobs.update(job['id'],cloud_phase='import',vendor_result_key=key,stage='store_cos',cloud_next_at=0,provider_completed_at=time.time())
 
     def import_result(self,job):
-        m=self.runtime();key=job['vendor_result_key']
-        # Shared import cache is never deleted immediately by an individual job.
-        m.cleanup.schedule('cos',key,time.time()+3600)
-        cos.trigger_mirror(m.settings,key)
-        meta=cos.object_metadata(m.settings,key)
-        if not 0<meta['size']<=32*1024*1024:raise ValueError('云端结果大小异常')
-        info=cos.image_info(m.settings,key)
-        if info['width']*info['height']>m.MAX_PIXELS:raise ValueError('云端结果像素过大')
-        self.require_live(job['id'])
-        m.jobs.update(job['id'],cloud_phase='finalize',stage='finalize',cloud_import_info=info)
+        from cloud_import import import_result
+        import_result(self,job)
 
     def finalize(self,job):
         m=self.runtime();p=job['cloud_request'];key=job['vendor_result_key']
@@ -297,7 +289,8 @@ class CloudPipeline:
 
     def fail(self,job,message):
         m=self.runtime()
-        m.jobs.update(job['id'],status='failed',stage='failed',cloud_phase='failed',error=message[:500])
+        m.jobs.update(job['id'],status='failed',stage='failed',cloud_phase='failed',error=message[:500],
+                      failed_phase=job.get('cloud_phase'),failed_stage=job.get('stage'),failed_at=time.time())
         m.users.refund_job(job['openid'],job['id'])
         for key in (job.get('result_cos'),job.get('norm_cos'),job.get('orig_cos'),job['cloud_request']['source'].get('key')):
             if key:m.cleanup.schedule('cos',key,time.time())
