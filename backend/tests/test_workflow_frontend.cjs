@@ -24,14 +24,15 @@ async function test(name,fn) {
 const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/orig?signature=fresh',
   result_url:'https://cos.invalid/result?signature=fresh',width:90,height:160};
 (async()=>{
-  await test('homepage_copy_and_history_follow_all_creation_entries',()=>{
+  await test('homepage_photo_modules_remain_and_history_follows_showcase',()=>{
     const xml=fs.readFileSync(path.join(root,'miniprogram/pages/index/index.wxml'),'utf8');
     assert(xml.includes('旧日瞬间 · 重现眼前'));
     assert.equal((xml.match(/class="history-entry"/g)||[]).length,1);
-    assert(xml.indexOf('class="history-entry"')>xml.indexOf('class="text-generation-entry"'));
+    const showcase=xml.indexOf('class="showcase-scroll"'),history=xml.indexOf('class="history-entry"');
+    assert(showcase>=0);assert(history>showcase);assert(xml.includes('bindtap="onPickImage"'));
     assert(xml.includes('wx:if="{{ historyCount > 0 }}"'));
-    const p=page('index');assert.equal(typeof p.onOpenHistory,'function');
-    assert(!xml.slice(xml.indexOf('class="history-entry"')).includes('bindtap="onOpenTextGeneration"'));
+    const p=page('index');assert.equal(typeof p.onOpenHistory,'function');assert.equal(typeof p.onPickImage,'function');
+    assert.equal(typeof p.onOpenTextGeneration,'undefined');assert(!xml.includes('text-generation-entry'));assert(!xml.includes('onOpenTextGeneration'));
     assert(fs.readFileSync(path.join(root,'backend/index.html'),'utf8').includes('旧日瞬间 · 重现眼前'));
   });
   await test('invite_button_uses_shorter_label_and_keeps_share_handler',()=>{

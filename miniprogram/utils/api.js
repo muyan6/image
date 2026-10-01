@@ -146,6 +146,13 @@ function authedCall(fn) {
 }
 
 function request(path, options) {
+  // This mini-program does not expose text-to-image. Keep the independent
+  // backend service available, but reject even accidental client helper calls.
+  if (/^\/api\/text-generation(?:[/?]|$)/.test(path)) {
+    const error = new Error('文字生图已在小程序关闭');
+    error.code = 'FEATURE_DISABLED';
+    return Promise.reject(error);
+  }
   const protectedPath = /^\/api\/(me(?:\/|$)|my\/|jobs\/|uploads(?:\/|$)|rescue(?:\/|$)|text-generation(?:\/|$)|payment\/|community\/(?:submissions|posts|comments)(?:\/|$)|auth\/wechat-web\/approve)/.test(path);
   return protectedPath ? authedCall(() => rawRequest(path, options)) : rawRequest(path, options);
 }

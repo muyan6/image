@@ -24,22 +24,27 @@ async function test(name,fn){
  catch(e){rows.push({case:name,passed:false,error:String(e.stack)});console.log('FAIL '+name+': '+e.message);}
 }
 (async()=>{
- await test('text_login_failure_before_post_allows_retry_after_network_recovers',async()=>{
-  let token='',offline=true,posts=0,logins=0;const a=app();
+ await test('photo_login_failure_before_upload_allows_retry_after_network_recovers',async()=>{
+  let token='',offline=true,uploads=0,logins=0;const a=app();
   const api=apiModule({getStorageSync:()=>token,setStorageSync:(k,v)=>token=v,
    login:o=>{logins++;offline?o.fail({errMsg:'network timeout'}):o.success({code:'fixture'});},
    request:o=>{if(o.url.endsWith('/api/auth/login'))o.success({statusCode:200,data:{token:'session'}});
-    else if(o.url.endsWith('/api/text-generation')){posts++;o.success({statusCode:200,data:{code:0,job_id:'recovered'}});}
-    else o.success({statusCode:200,data:{}});}},a);
-  const p=page('text-generation',api,a);p.data.ready=true;p.data.prompt='森林小屋';
-  await p.onGenerate();const before={posts,uncertain:!!p._uncertain};offline=false;await p.onGenerate();
-  assert.equal(before.posts,0);assert.equal(before.uncertain,false);assert.equal(posts,1);
-  return {before,afterPosts:posts,logins};
+    else o.success({statusCode:200,data:{cos_ready:false,prices:{light:40,fine:40},free_mode:false}});},
+   uploadFile:o=>{uploads++;o.success({statusCode:200,data:JSON.stringify({code:0,job_id:'recovered',orig_url:'https://cos.invalid/orig'})});}},a);
+  api.waitForJob=async()=>({status:'succeeded',orig_url:'https://cos.invalid/orig',result_url:'https://cos.invalid/result'});
+  const p=page('adjust',api,a,{redirectTo(){}});p._foreground=true;
+  await p.executeUpload('fixture.jpg');const before={uploads,uncertain:!!p._submissionUncertain};offline=false;await p.executeUpload('fixture.jpg');
+  assert.equal(before.uploads,0);assert.equal(before.uncertain,false);assert.equal(uploads,1);assert.equal(a.globalData.historyList[0].status,'succeeded');
+  return {before,afterUploads:uploads,logins};
  });
- await test('text_final_post_network_loss_still_blocks_repeat_charge',async()=>{
-  let posts=0;const api=apiModule({getStorageSync:()=> 'session',request:o=>{posts++;o.fail({errMsg:'request:fail timeout'});}});
-  const p=page('text-generation',api);p.data.ready=true;p.data.prompt='森林小屋';await p.onGenerate();await p.onGenerate();
-  assert.equal(posts,1);assert(p._uncertain);return {posts,uncertain:!!p._uncertain};
+ await test('photo_final_upload_network_loss_still_blocks_repeat_charge',async()=>{
+  let uploads=0,fileInfoCalls=0;const api=apiModule({getStorageSync:()=> 'session',
+   request:o=>o.success({statusCode:200,data:{cos_ready:false,prices:{light:40,fine:40},free_mode:false}}),
+   uploadFile:o=>{uploads++;o.fail({errMsg:'uploadFile:fail timeout'});}});
+  const p=page('adjust',api,app(),{getFileInfo:()=>fileInfoCalls++});p._foreground=true;p.data.priceReady=true;p.data.lightPoints=200;p.data.imagePath='fixture.jpg';
+  await p.executeUpload('fixture.jpg');await p.onStartGenerate();
+  assert.equal(uploads,1);assert.equal(fileInfoCalls,0);assert(p._submissionUncertain);
+  return {uploads,fileInfoCalls,uncertain:!!p._submissionUncertain};
  });
  await test('successful_login_remains_usable_when_storage_write_fails',async()=>{
   let logins=0,headers=[];const api=apiModule({getStorageSync:()=> '',setStorageSync(){throw new Error('storage full');},

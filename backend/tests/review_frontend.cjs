@@ -56,28 +56,30 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     page.onSelectQuality({currentTarget:{dataset:{quality:'fine'}}});
     return [light===20&&page.data.currentQualityCost===80,{light,fine:page.data.currentQualityCost}];
   });
-  await test('text_entry_is_compact_and_after_style_showcase',()=>{
+  await test('text_generation_entry_removed_from_homepage',()=>{
     const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/index/index.wxml'),'utf8');
     const css=fs.readFileSync(path.join(ROOT,'miniprogram/pages/index/index.wxss'),'utf8');
-    return [xml.indexOf('text-generation-entry')>xml.indexOf('showcase-scroll') && xml.includes('entry-label')&&css.includes('min-height:88rpx'),
-      {afterShowcase:xml.indexOf('text-generation-entry')>xml.indexOf('showcase-scroll'),compact:css.includes('min-height:88rpx')}];
+    const {page}=loadPage('index');
+    const hidden=!xml.includes('text-generation-entry')&&!xml.includes('onOpenTextGeneration')&&
+      !css.includes('.text-generation-entry')&&typeof page.onOpenTextGeneration==='undefined';
+    return [hidden&&xml.includes('bindtap="onPickImage"')&&xml.includes('showcase-scroll'),
+      {textEntryRemoved:hidden,photoEntryPresent:xml.includes('bindtap="onPickImage"')}];
   });
-  await test('text_generation_separate_page_uses_server_price_and_no_photo',async()=>{
-    let sent,route;
-    const app=appFixture();
-    const {page}=loadPage('text-generation',{config:async()=>({text_generation:{ready:true,price:75}}),
-      request:async(path,o)=>{sent={path,...o};return {code:0,job_id:'textjob123456'};}},app,{navigateTo:o=>route=o.url});
-    page.onShow();await tick();page.onInput({detail:{value:'水彩森林'}});await page.onGenerate();
-    return [page.data.price===75&&sent.path==='/api/text-generation'&&!sent.data.image&&
-      app.globalData.historyList[0].inputMode==='text'&&route==='/pages/works/works',
-      {price:page.data.price,path:sent.path,photoRequired:false,route}];
+  await test('text_generation_page_is_not_registered_or_packaged',()=>{
+    const config=JSON.parse(fs.readFileSync(path.join(ROOT,'miniprogram/app.json'),'utf8'));
+    const registered=config.pages.some(p=>p.startsWith('pages/text-generation/'));
+    const packagedFiles=['js','json','wxml','wxss'].filter(ext=>fs.existsSync(
+      path.join(ROOT,'miniprogram/pages/text-generation/text-generation.'+ext)));
+    return [!registered&&packagedFiles.length===0,{registered,packagedFiles}];
   });
-  await test('text_generation_disabled_or_uncertain_never_reposts',async()=>{
-    let calls=0;
-    const {page}=loadPage('text-generation',{request:async()=>{calls++;const e=new Error('network');e.code='NETWORK';e.jobSubmissionAttempted=true;throw e;}});
-    await page.onGenerate();const disabledCalls=calls;
-    page.setData({ready:true,prompt:'forest'});await page.onGenerate();await page.onGenerate();
-    return [disabledCalls===0&&calls===1&&page._uncertain,{disabledCalls,calls,uncertain:!!page._uncertain}];
+  await test('photo_submission_unknown_response_blocks_reposting',async()=>{
+    let calls=0,fileInfoCalls=0;
+    const {page}=loadPage('adjust',{submitJob:async()=>{calls++;const e=new Error('network');e.code='NETWORK';e.jobSubmissionAttempted=true;throw e;}},
+      appFixture(),{getFileInfo:()=>fileInfoCalls++});
+    page._foreground=true;page.data.priceReady=true;page.data.lightPoints=90;page.data.imagePath='fixture.jpg';
+    await page.executeUpload('fixture.jpg');await page.onStartGenerate();
+    return [calls===1&&fileInfoCalls===0&&page._submissionUncertain,
+      {calls,fileInfoCalls,uncertain:!!page._submissionUncertain}];
   });
   await test('template_popularity_orders_success_counts_without_breaking_search',()=>{
     const {page}=loadPage('templates',{absolute:x=>x});
@@ -158,7 +160,8 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     for(const file of walk(path.join(ROOT,'miniprogram')).filter(f=>f.endsWith('.js'))) {
       new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});count++;
     }
-    for(const name of fs.readdirSync(path.join(ROOT,'miniprogram/pages'))) {
+    for(const name of fs.readdirSync(path.join(ROOT,'miniprogram/pages')).filter(name=>fs.existsSync(
+      path.join(ROOT,'miniprogram/pages',name,name+'.js')))) {
       const {page}=loadPage(name);
       const xml=fs.readFileSync(path.join(ROOT,`miniprogram/pages/${name}/${name}.wxml`),'utf8');
       for(const match of xml.matchAll(/\b(?:bind(?::)?\w+|catch(?::)?\w+)=["']([a-zA-Z_$][\w$]*)["']/g)) {

@@ -947,8 +947,3 @@
   color: var(--ink-muted);
   padding: 0 8rpx;
 }
- .text-generation-entry { width:100%; min-height:88rpx; margin:0; padding:16rpx 24rpx; display:flex; align-items:center; justify-content:space-between; box-sizing:border-box; border-top:1rpx solid var(--paper-border,#ddd6c9); color:var(--ink-color,#1a1917); }
-.entry-copy { display:flex; align-items:center; flex-wrap:wrap; flex:1; min-width:0; gap:4rpx 20rpx; }
-.entry-label { font-size:27rpx; line-height:40rpx; flex-shrink:0; }
-.entry-note { font-size:22rpx; color:#8e887f; line-height:40rpx; }
-.entry-arrow { font-size:30rpx; color:#8a6939; line-height:40rpx; margin-left:16rpx; flex-shrink:0; }

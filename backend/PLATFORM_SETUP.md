@@ -139,3 +139,10 @@ Nginx/Caddy 应保留原 Host，正确传递 X-Forwarded-Proto；只有可信代
 - 云端任务受理时冻结所选档位的供应商人民币参考价；文生图使用自己的供应商参考价。供应商明确完成后，后台立即记录 `cost_cny` 与 `cost_estimated`，后续 COS 导入或审核失败仍保留生成参考成本。未提交、明确生成失败或结果不确定的任务不冒充已完成费用。
 - 后台 `≈¥` / `≈$` 为参考估算，不是供应商实际账单；小于一分钱的人民币成本显示四位小数。历史无成本快照的记录继续显示 `—`，不会用当前价格伪造历史成本。
 - 同步兼容链路也标明参考成本；云端成本快照、零成本与已有实际成本在重启恢复中保持不变。相关专项为 `test_gateway_cost_tracking.py` 与 `test_community_action_cost_display.cjs`。
+
+
+### 小程序关闭文字生图入口，后端接口保留
+
+- 新版小程序移除首页文字生图入口、页面注册和对应四个页面源文件；已知旧页面路径也不能打开。官方小程序接口封装对 `/api/text-generation` 在本地返回 `FEATURE_DISABLED`，即使后端 ready=true 也不会提交此类请求。
+- 后端 `/api/text-generation`、文字模型配置、鉴权和记账逻辑保持不变，供独立后端调用；照片修复、模板生成、模板文字字段和已有作品保留。
+- 此调整以重新编译、上传并发布新版小程序生效；无需关闭后端文生图开关。专项为 `test_text_generation_frontend_disabled.cjs`、`test_text_generation_api_preserved.py`。
