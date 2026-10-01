@@ -11,6 +11,16 @@ from template_output import select_template_output, SINGLE_OUTPUT_RULE
 
 
 class OutputTests(WorkflowTests):
+    def test_output_public_cover_version_changes_without_exposing_prompt(self):
+        template={'id':'fixture','group_id':'g','name':'封面','engine':'fine','cover':'https://fixture.invalid/cover.jpg',
+                  'cover_v':7,'prompt':'private prompt','price':40}
+        store=SimpleNamespace(list_groups=lambda **kw:[{'id':'g','name':'分组'}],list_templates=lambda **kw:[template])
+        from templates_store import TemplateStore
+        row=TemplateStore.public_templates(store,m.settings)[0]
+        self.assertEqual(row['cover_version'],7);self.assertNotIn('prompt',row)
+        template['cover_v']=8
+        self.assertEqual(TemplateStore.public_templates(store,m.settings)[0]['cover_version'],8)
+
     def template(self):
         return {'id':'poster','name':'上下拼图','engine':'fine','prompt':'上半放原图，下半水彩',
                 'layout':'postcard_bottom','text_fields':[{'key':'title','default':'旧标题'}],'price':40}

@@ -1,5 +1,6 @@
 const app = getApp();
 const api = require('../../utils/api.js');
+const update=(page,patch)=>typeof api.setDataStable==='function'?api.setDataStable(page,patch):page.setData(patch);
 
 Page({
   onOpenTextGeneration() {wx.navigateTo({url:'/pages/text-generation/text-generation'});},
@@ -32,7 +33,7 @@ Page({
 
   onShow() {
     this.loadConfig();
-    this.setData({
+    update(this,{
       lightPoints: app.globalData.lightPoints,
       freeMode: app.globalData.freeMode,
       historyCount: (app.globalData.historyList || []).length
@@ -42,7 +43,7 @@ Page({
     if (app.globalData.selectedTemplate) {
       const tpl = app.globalData.selectedTemplate;
       app.globalData.selectedTemplate = null;
-      this.setData({ activeTemplate: tpl });
+      update(this,{ activeTemplate: tpl });
     }
   },
 
@@ -56,7 +57,7 @@ Page({
       .then((d) => {
         try { wx.removeStorageSync('pendingInvite'); } catch (e) {}
         if (d && typeof d.balance === 'number') app.setBalance(d.balance);
-        this.setData({ lightPoints: app.globalData.lightPoints });
+        update(this,{ lightPoints: app.globalData.lightPoints });
         wx.showToast({ title: `邀请奖励 ✦${typeof d.reward === 'number' ? d.reward : 40} 已到账`, icon: 'none' });
       })
       .catch((err) => {
@@ -92,15 +93,24 @@ Page({
     const free = !!this.data.freeMode;
     const pFine = this.data.priceFine != null ? this.data.priceFine : 40;
     const pLight = this.data.priceLight != null ? this.data.priceLight : 40;
+    const prior=new Map(this.data.featuredTemplates.map(x=>[x.id,x]));this._featuredSources={};
     const featured = items.slice(0, 6).map((t) => {
       const low=Math.min(pLight,pFine),high=Math.max(pLight,pFine);
       let cost = free ? '免扣费' : ('✦ '+(low===high?low:low+'–'+high)+' 光子');
+      const old=prior.get(t.id),urls=(t.covers&&t.covers.length?t.covers:[t.cover]).filter(Boolean);
+      this._featuredSources[t.id]={url:t.cover,version:t.cover_version};
+      const covers=urls.map((url,i)=>typeof api.stableImageUrl==='function'?api.stableImageUrl(url,old&&old.covers&&old.covers[i],t.cover_version,old&&old.cover_version):api.absolute(url));
+      const coverUrl=covers[0]||'/images/logo.jpg';
       return Object.assign({}, t, {
-        coverUrl: t.cover ? api.absolute(t.cover) : '/images/logo.jpg',
+        cover:coverUrl,covers,coverUrl,
         costText: cost
       });
     });
-    this.setData({ featuredTemplates: featured });
+    update(this,{ featuredTemplates: featured });
+  },
+  onFeaturedImageLoad(e) {
+    const s=this._featuredSources&&this._featuredSources[e.currentTarget.dataset.id];
+    if(s&&typeof api.rememberCommunityImage==='function')api.rememberCommunityImage(s.url,s.version).catch(()=>{});
   },
 
   onGoToTemplates() {
@@ -119,14 +129,14 @@ Page({
 
   /** 清除待使用模板 */
   onClearTemplate() {
-    this.setData({ activeTemplate: null });
+    update(this,{ activeTemplate: null });
   },
 
   loadNotice() {
     api.announcements()
       .then((d) => {
         const items = (d && d.items) || [];
-        this.setData({ notice: items.length ? items[0] : null });
+        update(this,{ notice: items.length ? items[0] : null });
       })
       .catch(() => {});
   },
@@ -148,7 +158,7 @@ Page({
         if (!c) return;
         const p = c.prices || {};
         app.globalData.freeMode = !!c.free_mode;
-        this.setData({
+        update(this,{
           priceLight: (p.light != null) ? p.light : this.data.priceLight,
           priceFine: (p.fine != null) ? p.fine : this.data.priceFine,
           freeMode: !!c.free_mode
@@ -160,7 +170,7 @@ Page({
     api.me()
       .then((d) => {
         if (d && typeof d.balance === 'number') app.setBalance(d.balance);
-        this.setData({ lightPoints: app.globalData.lightPoints });
+        update(this,{ lightPoints: app.globalData.lightPoints });
       })
       .catch(() => {});
   },
@@ -177,7 +187,7 @@ Page({
         if (!file || !file.tempFilePath) return;
         const pending = this.data.activeTemplate;
         const defaultTid = pending ? pending.id : '';
-        if (pending) this.setData({ activeTemplate: null });
+        if (pending) update(this,{ activeTemplate: null });
 
         wx.navigateTo({
           url: `/pages/adjust/adjust?image=${encodeURIComponent(file.tempFilePath)}&templateId=${encodeURIComponent(defaultTid)}`

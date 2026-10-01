@@ -783,6 +783,7 @@ class TemplateStore:
                 "subtitle": t.get("subtitle", ""),
                 "cover": main_cover,
                 "covers": resolved_list,
+                "cover_version": max(0, int(t.get("cover_v", 0) or 0)),
                 "engine": t["engine"],
                 "price": int(t.get("price", 0)),
                 "usage_count": max(0,int(t.get('usage_count',0))),

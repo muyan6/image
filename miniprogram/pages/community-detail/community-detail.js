@@ -1,5 +1,6 @@
 const app=getApp();
 const api=require('../../utils/api.js');
+const update=(page,patch)=>typeof api.setDataStable==='function'?api.setDataStable(page,patch):page.setData(patch);
 const reportReasons=[['spam','广告引流'],['abuse','辱骂攻击'],['inappropriate','不适宜内容'],['privacy','侵犯隐私'],['copyright','侵权'],['other','其他问题']];
 const dateLabel=at=>{const d=new Date(at*1000),pad=x=>String(x).padStart(2,'0');return `${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;};
 
@@ -9,60 +10,60 @@ Page({
   onLoad(options){
     this._id=options.id||'';
     const preview=app.globalData.communityPreview;
-    if(preview&&preview.id===this._id)this.setData({post:preview});
+    if(preview&&preview.id===this._id)update(this,{post:preview});
     return this.loadPost();
   },
   onUnload(){this._unloaded=true;},
   onPullDownRefresh(){return this.loadPost().finally(()=>wx.stopPullDownRefresh());},
   async loadPost(){
-    if(this._postLoading)return;this._postLoading=true;this.setData({loading:!this.data.post,error:''});
+    if(this._postLoading)return;this._postLoading=true;update(this,{loading:!this.data.post,error:''});
     try{
       const d=await api.request('/api/community/posts/'+encodeURIComponent(this._id));
       if(this._unloaded)return;
-      const p=d.post,display=url=>typeof api.communityImage==='function'?api.communityImage(url):api.absolute(url);
-      this.setData({post:{...p,resultRemote:api.absolute(p.resultUrl),origRemote:api.absolute(p.origUrl),
-        resultUrl:display(p.resultUrl),origUrl:display(p.origUrl),authorAvatar:p.authorAvatar?api.absolute(p.authorAvatar):''},unavailable:false});
+      const p=d.post,prior=this.data.post,display=(url,old)=>typeof api.stableImageUrl==='function'?api.stableImageUrl(url,old):(typeof api.communityImage==='function'?api.communityImage(url):api.absolute(url));
+      update(this,{post:{...p,resultRemote:api.absolute(p.resultUrl),origRemote:api.absolute(p.origUrl),
+        resultUrl:display(p.resultUrl,prior&&prior.resultUrl),origUrl:display(p.origUrl,prior&&prior.origUrl),authorAvatar:p.authorAvatar?api.absolute(p.authorAvatar):''},unavailable:false});
       await this.loadComments();
     }catch(e){if(!this._unloaded){
-      this.setData({error:e.message||'作品读取失败',...(e.status===404?{post:null,comments:[],unavailable:true}:{} )});
+      update(this,{error:e.message||'作品读取失败',...(e.status===404?{post:null,comments:[],unavailable:true}:{} )});
       if(e.status===404){app.globalData.communityDirty=true;app.globalData.communityPreview=null;}
-    }}finally{this._postLoading=false;if(!this._unloaded)this.setData({loading:false});}
+    }}finally{this._postLoading=false;if(!this._unloaded)update(this,{loading:false});}
   },
   async loadComments(more=false){
     more=more===true;if(this._commentsBusy||!this.data.post||(more&&!this.data.hasMore))return;
-    this._commentsBusy=true;this.setData({commentsLoading:true,commentError:''});
+    this._commentsBusy=true;update(this,{commentsLoading:true,commentError:''});
     const offset=more?(this._offset||0):0;
     try{
       const d=await api.request('/api/community/posts/'+encodeURIComponent(this._id)+'/comments?limit=30&offset='+offset);
       if(this._unloaded)return;
       const items=(d.items||[]).map(x=>({...x,dateLabel:dateLabel(x.created_at)}));
       this._offset=d.next_offset;
-      this.setData({comments:more?[...new Map([...this.data.comments,...items].map(x=>[x.id,x])).values()]:items,
+      update(this,{comments:more?[...new Map([...this.data.comments,...items].map(x=>[x.id,x])).values()]:items,
         commentTotal:d.total,hasMore:!!d.has_more});this.publishDelta({comments:d.total});
-    }catch(e){if(!this._unloaded)this.setData({commentError:e.message||'留言读取失败'});}
-    finally{this._commentsBusy=false;if(!this._unloaded)this.setData({commentsLoading:false});}
+    }catch(e){if(!this._unloaded)update(this,{commentError:e.message||'留言读取失败'});}
+    finally{this._commentsBusy=false;if(!this._unloaded)update(this,{commentsLoading:false});}
   },
   onRetry(){return this.loadPost();},
   onRetryComments(){return this.loadComments();},
   onMoreComments(){return this.loadComments(true);},
-  onDraft(e){this.setData({draft:e.detail.value,sendError:''});},
-  onKeyboard(e){this.setData({keyboardHeight:e.detail.height||0});},
+  onDraft(e){update(this,{draft:e.detail.value,sendError:''});},
+  onKeyboard(e){update(this,{keyboardHeight:e.detail.height||0});},
   async onSend(){
     if(this.data.sending||!this.data.post)return;
     const content=this.data.draft.trim();if(!content){wx.showToast({title:'请写下留言',icon:'none'});return;}
     if(!this._ticket||this._ticket.content!==content)this._ticket={content,id:'comment_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,12)};
-    this.setData({sending:true,sendError:''});
+    update(this,{sending:true,sendError:''});
     try{
       await api.request('/api/community/posts/'+encodeURIComponent(this._id)+'/comments',{method:'POST',data:{content,request_id:this._ticket.id}});
       if(this._unloaded)return;
-      this._ticket=null;this.setData({draft:''});wx.hideKeyboard();
+      this._ticket=null;update(this,{draft:''});wx.hideKeyboard();
       wx.showToast({title:'微信审核通过，留言已发布',icon:'none'});await this.loadComments();
-    }catch(e){if(!this._unloaded){this.setData({sendError:e.message||'留言暂未发布，请重试'});if(e.status===400)this._ticket=null;}}
-    finally{if(!this._unloaded)this.setData({sending:false});}
+    }catch(e){if(!this._unloaded){update(this,{sendError:e.message||'留言暂未发布，请重试'});if(e.status===400)this._ticket=null;}}
+    finally{if(!this._unloaded)update(this,{sending:false});}
   },
   publishDelta(delta){
     app.globalData.communityUpdated={id:this._id,...(app.globalData.communityUpdated&&app.globalData.communityUpdated.id===this._id?app.globalData.communityUpdated:{}),...delta};
-    this.setData({post:{...this.data.post,...delta}});
+    update(this,{post:{...this.data.post,...delta}});
   },
   async onLikePost(){
     if(this._likePost||!this.data.post)return;this._likePost=true;
@@ -75,7 +76,7 @@ Page({
     const id=e.currentTarget.dataset.id,row=this.data.comments.find(x=>x.id===id);if(!row)return;
     this._likes=this._likes||new Set();if(this._likes.has(id))return;this._likes.add(id);
     try{const d=await api.request('/api/community/comments/'+encodeURIComponent(id)+'/like',{method:'PUT',data:{liked:!row.liked}});
-      if(!this._unloaded)this.setData({comments:this.data.comments.map(x=>x.id===id?{...x,likes:d.likes,liked:d.liked}:x)});
+      if(!this._unloaded)update(this,{comments:this.data.comments.map(x=>x.id===id?{...x,likes:d.likes,liked:d.liked}:x)});
     }catch(err){if(!this._unloaded)wx.showToast({title:err.message||'点赞暂未保存',icon:'none'});}
     finally{this._likes.delete(id);}
   },

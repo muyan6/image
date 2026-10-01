@@ -73,6 +73,7 @@
         >
           <view class="showcase-cover-wrap">
             <image
+              bindload="onFeaturedImageLoad" data-id="{{item.id}}"
               class="showcase-cover"
               src="{{ item.coverUrl || '/images/logo.jpg' }}"
               mode="aspectFit"

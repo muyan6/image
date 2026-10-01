@@ -1,5 +1,6 @@
 const app = getApp();
 const api = require('../../utils/api.js');
+const update=(page,patch)=>typeof api.setDataStable==='function'?api.setDataStable(page,patch):page.setData(patch);
 
 Page({
   data: {
@@ -15,12 +16,12 @@ Page({
 
   onLoad(options) {
     const tid = options.id || 't_anime_dots';
-    this.setData({ templateId: tid });
+    update(this,{ templateId: tid });
     this.loadTemplateDetail(tid);
   },
 
   loadTemplateDetail(tid) {
-    this.setData({ loading: true });
+    update(this,{ loading: true });
     api.templates()
       .then((data) => {
         const items = (data && data.items) || [];
@@ -33,7 +34,8 @@ Page({
           const rawCovers = (Array.isArray(tpl.covers) && tpl.covers.length > 0)
             ? tpl.covers
             : (tpl.cover ? [tpl.cover] : []);
-          const coverUrls = rawCovers.map((c) => api.absolute(c)).filter(Boolean);
+          this._coverSources=rawCovers.map(c=>api.absolute(c));this._coverVersion=tpl.cover_version;
+          const coverUrls = rawCovers.map((c) => typeof api.communityImage==='function'?api.communityImage(c,tpl.cover_version):api.absolute(c)).filter(Boolean);
           if (coverUrls.length === 0) coverUrls.push('/images/logo.jpg');
 
           const fullTpl = Object.assign({}, tpl, {
@@ -55,7 +57,7 @@ Page({
 
           let unsuitable = guide.unsuitable || [];
 
-          this.setData({
+          update(this,{
             template: fullTpl,
             suitableList: suitable,
             unsuitableList: unsuitable,
@@ -69,7 +71,7 @@ Page({
           if (typeof api.config === 'function') {
             api.config().then((config) => {
               if (this.data.templateId !== tid || !config) return;
-              this.setData({ priceLabel: this.priceLabelFor(tpl, config) });
+              update(this,{ priceLabel: this.priceLabelFor(tpl, config) });
             }).catch(() => {});
           }
 
@@ -79,12 +81,12 @@ Page({
             });
           }
         } else {
-          this.setData({ loading: false });
+          update(this,{ loading: false });
         }
       })
       .catch((err) => {
         console.warn('加载模板详情失败', err);
-        this.setData({ loading: false });
+        update(this,{ loading: false });
       });
   },
 
@@ -113,10 +115,12 @@ Page({
   onBannerSwiperChange(e) {
     const index = Number(e.detail.current) || 0;
     const height = this._coverHeights && this._coverHeights[index];
-    this.setData(height ? { bannerIndex: index, bannerHeight: height } : { bannerIndex: index });
+    update(this,height ? { bannerIndex: index, bannerHeight: height } : { bannerIndex: index });
   },
 
   onCoverLoad(e) {
+    const slot=Number(e.currentTarget.dataset.index)||0;
+    if(typeof api.rememberCommunityImage==='function'&&this._coverSources)api.rememberCommunityImage(this._coverSources[slot],this._coverVersion).catch(()=>{});
     const info = e.detail || {};
     const width = Number(info.width);
     const height = Number(info.height);
@@ -127,7 +131,7 @@ Page({
     if (!this._coverHeights) this._coverHeights = {};
     this._coverHeights[index] = scaled;
     if (index === this.data.bannerIndex && this.data.bannerHeight !== scaled) {
-      this.setData({ bannerHeight: scaled });
+      update(this,{ bannerHeight: scaled });
     }
   },
 

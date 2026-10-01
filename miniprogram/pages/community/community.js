@@ -1,5 +1,6 @@
 const app = getApp();
 const api = require('../../utils/api.js');
+const update=(page,patch)=>typeof api.setDataStable==='function'?api.setDataStable(page,patch):page.setData(patch);
 
 /**
  * 灵感沙龙（社区）
@@ -33,7 +34,7 @@ Page({
   onShow() {
     if (app.globalData.communityUpdated) {
       const delta=app.globalData.communityUpdated;
-      this.setData({items:this.data.items.map(x=>x.id===delta.id?{...x,...delta}:x)});
+      update(this,{items:this.data.items.map(x=>x.id===delta.id?{...x,...delta}:x)});
       this.filterItems(this.data.activeFilter);app.globalData.communityUpdated=null;
     }
     if (this._communityLoaded) this.loadCommunity(!!app.globalData.communityDirty);
@@ -50,7 +51,7 @@ Page({
     if (!force && this._lastLoadedAt && Date.now() - this._lastLoadedAt < 30000) return Promise.resolve();
     if (this._loadingCommunity) return this._loadingCommunity;
     const version=(this._loadVersion||0)+1;this._loadVersion=version;
-    this.setData({loading:!this.data.items.length,loadError:''});
+    update(this,{loading:!this.data.items.length,loadError:''});
     this._loadingCommunity=(async()=>{
       let offset=0,items=[],d;
       do{
@@ -63,18 +64,21 @@ Page({
         const prior=this.data.items.find(x=>x.id===item.id);
         const display=(url,old)=>{
           const next=api.absolute(url);
+          if(typeof api.stableImageUrl==='function')return api.stableImageUrl(next,old);
           if(typeof api.communityImage==='function')return api.communityImage(next);
           return old&&old===next?old:next;
         };
-        return {...item,resultRemote:api.absolute(item.resultUrl),origRemote:api.absolute(item.origUrl),
+        // Remote signatures stay private to image-load handlers; they are not visual data.
+        this._imageSources=this._imageSources||{};this._imageSources[item.id]={result:api.absolute(item.resultUrl),orig:api.absolute(item.origUrl)};
+        return {...item,
           resultUrl:display(item.resultUrl,prior&&prior.resultUrl),origUrl:display(item.origUrl,prior&&prior.origUrl),
           authorAvatar:item.authorAvatar?api.absolute(item.authorAvatar):''};
       });
       this._communityLoaded=true;
-      this.setData({enabled:!!(d&&d.enabled),featuredReward:d&&typeof d.featured_reward==='number'?d.featured_reward:this.data.featuredReward,
+      update(this,{enabled:!!(d&&d.enabled),featuredReward:d&&typeof d.featured_reward==='number'?d.featured_reward:this.data.featuredReward,
         items:[...new Map(items.map(x=>[x.id,x])).values()],loading:false});
       this.filterItems(this.data.activeFilter);this._lastLoadedAt=Date.now();
-    })().catch(()=>{if(!this._unloaded&&version===this._loadVersion)this.setData({loading:false,loadError:'社区加载失败，请重试'});}).finally(()=>{this._loadingCommunity=null;});
+    })().catch(()=>{if(!this._unloaded&&version===this._loadVersion)update(this,{loading:false,loadError:'社区加载失败，请重试'});}).finally(()=>{this._loadingCommunity=null;});
     return this._loadingCommunity;
   },
   onRetry(){return this.loadCommunity(true);},
@@ -85,16 +89,16 @@ Page({
   onSelectFilter(e) {
     const fid = e.currentTarget.dataset.id;
     if (fid === this.data.activeFilter) return;
-    this.setData({ activeFilter: fid });
+    update(this,{ activeFilter: fid });
     this.filterItems(fid);
   },
 
   filterItems(fid) {
     const all = this.data.items;
     if (fid === 'all') {
-      this.setData({ filteredItems: all });
+      update(this,{ filteredItems: all });
     } else {
-      this.setData({
+      update(this,{
         filteredItems: all.filter((x) => x.category === fid)
       });
     }
@@ -106,7 +110,7 @@ Page({
     try{
       const r=await api.request('/api/community/posts/'+encodeURIComponent(id)+'/like',{method:'PUT',data:{liked:!item.liked}});
       if(this._unloaded)return;
-      this.setData({items:this.data.items.map(x=>x.id===id?{...x,likes:r.likes,liked:r.liked}:x)});
+      update(this,{items:this.data.items.map(x=>x.id===id?{...x,likes:r.likes,liked:r.liked}:x)});
       this.filterItems(this.data.activeFilter);
     }catch(err){if(!this._unloaded){wx.showToast({title:err.message||'点赞暂未保存，请重试',icon:'none'});if(err.status===404)this.loadCommunity(true);}}
     finally{this._liking.delete(id);}
@@ -115,7 +119,7 @@ Page({
   onCommunityImageError(e) {
     const id=e.currentTarget.dataset.id;if(!id)return;
     const item=this.data.items.find(x=>x.id===id);
-    if(item&&typeof api.forgetCommunityImage==='function')api.forgetCommunityImage(item[e.currentTarget.dataset.kind+'Remote']);
+    if(item&&typeof api.forgetCommunityImage==='function')api.forgetCommunityImage(this._imageSources&&this._imageSources[id]&&this._imageSources[id][e.currentTarget.dataset.kind]);
     this._mediaRetries=this._mediaRetries||new Set();if(this._mediaRetries.has(id))return;
     this._mediaRetries.add(id);this.loadCommunity(true);
   },
@@ -123,7 +127,7 @@ Page({
   onCommunityImageLoad(e) {
     const {id,kind}=e.currentTarget.dataset,item=this.data.items.find(x=>x.id===id);
     if(!item||typeof api.rememberCommunityImage!=='function')return;
-    api.rememberCommunityImage(item[kind+'Remote']).catch(()=>{});
+    api.rememberCommunityImage(this._imageSources&&this._imageSources[id]&&this._imageSources[id][kind]).catch(()=>{});
   },
   onOpenPost(e) {
     const id=e.currentTarget.dataset.id,item=this.data.items.find(x=>x.id===id);if(!item)return;

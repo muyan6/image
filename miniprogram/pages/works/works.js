@@ -1,5 +1,6 @@
 const app = getApp();
 const api = require('../../utils/api.js');
+const update=(page,patch)=>typeof api.setDataStable==='function'?api.setDataStable(page,patch):page.setData(patch);
 const reusablePreview = url => !!url &&
   (typeof api.isReusableMediaUrl !== 'function' || api.isReusableMediaUrl(url));
 
@@ -12,7 +13,7 @@ Page({
 
   setWorks(works) {
     const status=w=>w.status || (w.result ? 'succeeded' : 'processing');
-    this.setData({works,
+    update(this,{works,
       filteredWorks:works.map((w,index)=>Object.assign({},w,{sourceIndex:index})).filter(w=>this.data.activeStatus==='all'||status(w)===this.data.activeStatus),
       workFilters:this.data.workFilters.map(f=>Object.assign({},f,{count:f.id==='all'?works.length:works.filter(w=>status(w)===f.id).length}))});
   },
@@ -20,7 +21,7 @@ Page({
   onFilterStatus(e) {
     const id=e.currentTarget.dataset.id;
     if(!this.data.workFilters.some(f=>f.id===id))return;
-    this.setData({activeStatus:id});this.setWorks(this.data.works);
+    update(this,{activeStatus:id});this.setWorks(this.data.works);
   },
 
   onRetryWorks() { return this.loadWorks(true).finally(() => this.schedulePendingRefresh()); },
@@ -39,7 +40,7 @@ Page({
   onHide() {
     this._visible = false;
     this._loadVersion = (this._loadVersion || 0) + 1;
-    this.setData({loading:false});
+    update(this,{loading:false});
     this.clearPendingRefresh();
   },
 
@@ -80,7 +81,7 @@ Page({
     const version = (this._loadVersion || 0) + 1;
     this._loadVersion = version;
     const startingJobIds = new Set((app.globalData.historyList || []).map(w => w.jobId).filter(Boolean));
-    this.setData({loading:true,loadError:''});
+    update(this,{loading:true,loadError:''});
     if (!this.data.works.length) this.setWorks((app.globalData.historyList || []).map(w =>
       Object.assign({}, w, {preview: this.safePreview(w)})));
     try {
@@ -103,15 +104,16 @@ Page({
         if (deleted.has(cj.id)) return;
         const old = byId.get(cj.id) || {};
         const work = Object.assign({}, old, {
-          jobId: cj.id, original: api.absolute(cj.orig_url || ''),
-          result: cj.status === 'succeeded' ? api.absolute(cj.result_url || '') : '',
+          jobId: cj.id, original: typeof api.stableImageUrl==='function'?api.stableImageUrl(cj.orig_url||'',old.original):api.absolute(cj.orig_url || ''),
+          result: cj.status === 'succeeded' ? (typeof api.stableImageUrl==='function'?api.stableImageUrl(cj.result_url||'',old.result):api.absolute(cj.result_url || '')) : '',
           status: cj.status, error: cj.error || '', violation:cj.violation||null, quality: cj.quality,
           provider: cj.provider, width: cj.width, height: cj.height,
           templateName: cj.template_name || '', createdAt: cj.created_at || old.createdAt || 0,
           time: cj.created_at ? this.formatTime(new Date(cj.created_at * 1000)) : old.time || '近期'
         });
         const pinned = old.status === 'succeeded' && reusablePreview(old.preview) ? this.safePreview(old) : '';
-        work.preview = pinned || this.safePreview(work);
+        work.preview = cj.result_url && (typeof api.isJobCosUrl!=='function'||api.isJobCosUrl(cj.result_url))
+          ? (typeof api.stableImageUrl==='function'?api.stableImageUrl(cj.result_url,old.preview):pinned || this.safePreview(work)) : '';
         byId.set(cj.id, work);
       });
       // A successful empty/full cloud response is authoritative for server jobs.
@@ -141,14 +143,15 @@ Page({
       this.setWorks(merged);
       this._lastLoadedAt = Date.now();
     } catch (e) {
-      if(this._loadVersion===version)this.setData({loadError:'作品加载失败，请检查网络后重试'});
+      if(this._loadVersion===version)update(this,{loadError:'作品加载失败，请检查网络后重试'});
     }
-    if(this._loadVersion===version)this.setData({loading:false,loaded:true});
+    if(this._loadVersion===version)update(this,{loading:false,loaded:true});
   },
 
   safePreview(work) {
-    const local = work.jobId && app.globalData.mediaCache && app.globalData.mediaCache[work.jobId] &&
+    let local = work.jobId && app.globalData.mediaCache && app.globalData.mediaCache[work.jobId] &&
       app.globalData.mediaCache[work.jobId].result;
+    if(local&&typeof api.isLocalImageAvailable==='function'&&!api.isLocalImageAvailable(local))local='';
     if (local) return local;
     if (reusablePreview(work.preview) && (/^(wxfile:|http:\/\/tmp\/)/i.test(work.preview) ||
         (typeof api.isJobCosUrl === 'function' && api.isJobCosUrl(work.preview)))) return work.preview;
@@ -179,6 +182,10 @@ Page({
         Object.assign({}, w, {result:'', preview:'', error:err.message || '结果图暂不可用'}) : w);
       this.setWorks(works);
     });
+  },
+  onWorkImageLoad(e) {
+    const w=this.data.works[e.currentTarget.dataset.index];
+    if(w&&typeof api.rememberCommunityImage==='function')api.rememberCommunityImage(w.preview).catch(()=>{});
   },
 
   async refreshPendingWorks() {

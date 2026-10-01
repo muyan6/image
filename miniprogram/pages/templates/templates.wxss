@@ -567,7 +567,9 @@
   margin-top: 24rpx;
 }
 .template-search { display:flex; align-items:center; gap:18rpx; margin:0 0 28rpx; padding:20rpx 24rpx; background:#fffdf8; border:1rpx solid #d8d0c2; border-radius:12rpx; }
-.search-icon { color:#8e887f; font-size:38rpx; }
+.search-icon { position:relative;width:36rpx;height:36rpx;flex:0 0 36rpx;align-self:center; }
+.search-lens { position:absolute;left:2rpx;top:2rpx;width:24rpx;height:24rpx;border:3rpx solid #8e887f;border-radius:50%;box-sizing:border-box; }
+.search-handle { position:absolute;left:24rpx;top:23rpx;width:14rpx;height:3rpx;background:#8e887f;transform:rotate(45deg);transform-origin:left center;border-radius:2rpx; }
 .search-input { flex:1; min-width:0; font-size:26rpx; height:48rpx; }
 .search-clear { flex-shrink:0; color:#8a6939; padding:12rpx 4rpx; font-size:24rpx; }
 

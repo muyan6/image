@@ -129,11 +129,27 @@
   .badge.amber { background: #fffbeb; color: #b45309; }
 
   /* ---------- 表格 ---------- */
-  .table-wrap { overflow-x: auto; margin: 0 -6px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .table-wrap { overflow-x: auto; max-width:100%; min-width:0; margin: 0; overscroll-behavior-x:contain; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; table-layout:fixed; }
   th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; white-space: nowrap;
        padding: 9px 12px; border-bottom: 1px solid var(--border); background: #f8fafc; }
-  td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap:anywhere; word-break:normal; }
+  td code { white-space:normal;overflow-wrap:anywhere; }
+  .card { min-width:0;overflow-wrap:anywhere; }
+  .card pre,.modal pre { white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto; }
+  td button { max-width:100%;white-space:normal; }
+  .cell-content { min-width:0;max-width:100%; }
+  .cell-preview { display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere; }
+  .cell-title .cell-preview, .sub .cell-preview { -webkit-line-clamp:2; }
+  .cell-details { margin-top:6px; }
+  .cell-details summary { color:var(--brand);cursor:pointer;font-size:12px; }
+  .cell-full { white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow-y:auto;padding:8px 10px;margin-top:6px;background:#f8fafc;border:1px solid var(--border);border-radius:6px; }
+  .card-head > *, .modal-head > *, .field { min-width:0; }
+  .card-head h2, .modal-head h3, .modal-head b, .modal-body, .muted, .line-item b { overflow-wrap:anywhere; }
+  .modal-head h3, .modal-head b { flex:1; }
+  .modal-head .btn-icon, .modal-head .icon-btn { flex-shrink:0; }
+  .form-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  input,select,textarea { min-width:0;max-width:100%; }
   tbody tr:hover td { background: #fafbff; }
   td .sub { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
   .cell-title { font-weight: 600; }
@@ -142,7 +158,8 @@
   .thumb-fallback { width: 44px; height: 56px; border-radius: 6px; border: 1px solid var(--border);
                     background: linear-gradient(160deg, #dfe5ee, #b9c5d4); color: rgba(255,255,255,.9);
                     display: flex; align-items: center; justify-content: center; font-weight: 700; }
-  .row-actions { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .row-actions { display: flex; align-items: center; gap: 8px; flex-wrap:wrap;white-space:normal; }
+  .row-actions button { flex-shrink:0; }
   .empty { text-align: center; color: var(--faint); padding: 28px 0 !important; }
 
   /* ---------- 链路行 / 动态行 ---------- */
@@ -238,11 +255,21 @@
     .sidebar-backdrop.show { display: block; }
     .content { padding: 16px 14px 60px; }
   }
-#jobs-table { min-width: 1100px; }
-#jobs-table th, #jobs-table td { word-break: normal; }
-#jobs-table td:nth-child(4) { min-width: 120px; }
-#jobs-table td:nth-child(8) { min-width: 160px; }
-#jobs-table td:last-child { min-width: 250px; max-width: 420px; overflow-wrap: anywhere; }
+#jobs-table { min-width:1440px; }
+#grp-table { min-width:800px; }
+#tpl-table { min-width:1150px; }
+#users-table { min-width:1150px; }
+#violations-table { min-width:1100px; }
+#submission-table { min-width:1000px; }
+#community-table { min-width:1050px; }
+#comment-table { min-width:800px; }
+#report-table { min-width:1050px; }
+.content:has(#page-jobs:not([hidden])), .content:has(#page-tpl:not([hidden])), .content:has(#page-community:not([hidden])), .content:has(#page-users:not([hidden])) { max-width:1600px; }
+@media (max-width:600px) {
+  .form-grid { grid-template-columns:minmax(0,1fr); }
+  .modal-head,.modal-body,.modal-foot { padding-left:16px;padding-right:16px; }
+  .modal-foot,.card-head { flex-wrap:wrap;gap:12px; }
+}
 </style>
 </head>
 <body>
@@ -674,6 +701,12 @@ async function api(path, opts = {}) {
 }
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
   (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function textCell(value) {
+  const text=String(value??''),escaped=esc(text);
+  if(text.length<=40&&text.split('\n').length<=3)return `<div class="cell-content" style="white-space:pre-wrap">${escaped||'—'}</div>`;
+  return `<div class="cell-content"><span class="cell-preview">${escaped}</span><details class="cell-details"><summary>展开完整内容</summary><div class="cell-full">${escaped}</div></details></div>`;
+}
+function tableColumns(widths) { return '<colgroup>'+widths.map(width=>`<col style="width:${width}px">`).join('')+'</colgroup>'; }
 const fmtTime = (ts) => ts ? new Date(ts * 1000).toLocaleString("zh-CN", { hour12: false }) : "—";
 
 let toastTimer = null;
@@ -1204,13 +1237,13 @@ async function loadTemplates() {
 
 function renderGroupTable() {
   const t = $("grp-table");
-  t.innerHTML = "<thead><tr><th>分组名</th><th>ID</th><th>模板数</th><th>排序</th><th>启用</th><th style='width:150px'>操作</th></tr></thead><tbody></tbody>";
+  t.innerHTML = tableColumns([230,180,80,80,80,150]) + "<thead><tr><th>分组名</th><th>ID</th><th>模板数</th><th>排序</th><th>启用</th><th style='width:150px'>操作</th></tr></thead><tbody></tbody>";
   const tbody = t.tBodies[0];
   if (!TPL_GROUPS.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">还没有分组</td></tr>'; return; }
   TPL_GROUPS.forEach((g) => {
     const tr = document.createElement("tr");
     tr.innerHTML =
-      `<td class="cell-title">${esc(g.name)}</td>
+      `<td class="cell-title">${textCell(g.name)}</td>
        <td><code>${esc(g.id)}</code></td>
        <td>${g.template_count ?? 0}</td>
        <td>${esc(g.sort)}</td>
@@ -1271,7 +1304,7 @@ function renderTplTable() {
   const gname = (id) => (TPL_GROUPS.find((x) => x.id === id) || {}).name || id;
   $("tpl-count").textContent = filter ? "" : `共 ${TPLS.length} 个`;
   const t = $("tpl-table");
-  t.innerHTML = "<thead><tr><th>封面</th><th>模板</th><th>分组</th><th>引擎</th><th>价格</th>" +
+  t.innerHTML = tableColumns([80,265,140,105,110,125,70,75,180]) + "<thead><tr><th>封面</th><th>模板</th><th>分组</th><th>引擎</th><th>价格</th>" +
                 "<th>输出</th><th>使用</th><th>启用</th><th style='width:150px'>操作</th></tr></thead><tbody></tbody>";
   const tbody = t.tBodies[0];
   if (!rows.length) { tbody.innerHTML = '<tr><td colspan="9" class="empty">这个分组下还没有模板</td></tr>'; return; }
@@ -1287,10 +1320,10 @@ function renderTplTable() {
           ? `<img class="thumb" src="${esc(tpl.cover_url)}" alt="">`
           : `<div class="thumb-fallback">${esc((tpl.name || "?")[0])}</div>`}
           ${tpl.covers_urls && tpl.covers_urls.length > 1 ? `<span style="display:block;font-size:10px;color:var(--primary);text-align:center;margin-top:2px;font-weight:600">${tpl.covers_urls.length}图</span>` : ""}</td>
-       <td><span class="cell-title">${esc(tpl.name)}</span>
-           <span class="sub">${esc(tpl.subtitle || "")}</span>
-           ${extra ? `<span class="sub">${esc(extra)}</span>` : ""}</td>
-       <td>${esc(gname(tpl.group_id))}</td>
+       <td><div class="cell-title">${textCell(tpl.name)}</div>
+           <div class="sub">${textCell(tpl.subtitle || "")}</div>
+           ${extra ? `<div class="sub">${textCell(extra)}</div>` : ""}</td>
+       <td>${textCell(gname(tpl.group_id))}</td>
        <td><span class="badge indigo">轻量 / 精细</span></td>
        <td>${esc((SETTINGS?.prices?.light ?? 40) + ' / ' + (SETTINGS?.prices?.fine ?? 40))} 光子</td>
        <td>随所选档位模型</td>
@@ -1564,7 +1597,7 @@ async function loadJobs() {
   try {
     const data = await api("/jobs?offset=" + JOBS_OFFSET + "&limit=50");
     const t = $("jobs-table");
-    t.innerHTML = "<thead><tr><th>时间</th><th>ID</th><th>档位</th><th>模板</th><th>供应商</th>" +
+    t.innerHTML = tableColumns([120,140,70,170,115,85,155,230,85,270]) + "<thead><tr><th>时间</th><th>ID</th><th>档位</th><th>模板</th><th>供应商</th>" +
                   "<th>状态</th><th>当前／失败阶段</th><th>阶段耗时</th><th>成本</th><th>错误</th></tr></thead><tbody></tbody>";
     const tbody = t.tBodies[0];
     data.items.forEach((j) => {
@@ -1576,10 +1609,10 @@ async function loadJobs() {
       const tr = document.createElement("tr");
       tr.innerHTML =
         `<td>${fmtTime(j.created_at)}</td><td><code>${esc(j.id)}</code></td>` +
-        `<td>${esc(j.quality)}</td><td>${esc(j.template_name || "—")}</td>` +
+        `<td>${esc(j.quality)}</td><td>${textCell(j.template_name || "—")}</td>` +
         `<td>${esc(j.provider || (j.vendor_task_id?'worldcodes':'—'))}</td><td>${badge}</td>` +
-        `<td>${esc(jobPhaseText(j))}</td><td class="muted">${esc(jobTimingText(j))}</td>` +
-        `<td>${cost}</td><td class="muted">${esc(j.error || (j.status==='processing' ? (j.import_last_error ? "等待存图，正在重试：" + j.import_last_error : j.last_phase_error || "") : ""))}</td>`;
+        `<td>${textCell(jobPhaseText(j))}</td><td class="muted">${textCell(jobTimingText(j))}</td>` +
+        `<td>${cost}</td><td class="muted">${textCell(j.error || (j.status==='processing' ? (j.import_last_error ? "等待存图，正在重试：" + j.import_last_error : j.last_phase_error || "") : ""))}</td>`;
       tbody.appendChild(tr);
     });
     if (!data.items.length) tbody.innerHTML = '<tr><td colspan="10" class="empty">暂无任务</td></tr>';
@@ -1599,10 +1632,10 @@ async function loadSubmissions(reset){
   try{
     const d=await api('/community/submissions?status='+$('submission-status').value+'&offset='+SUBMISSION_OFFSET+'&limit=30');
     SUBMISSIONS=d.items;SUBMISSION_REWARD=d.reward;
-    $('submission-table').innerHTML='<thead><tr><th>作品 / 作者</th><th>公开内容</th><th>状态 / 奖励</th><th>操作</th></tr></thead><tbody>'+d.items.map(p=>
-      `<tr><td><b>${esc(p.title)}</b><br><small>${esc(p.author_name)}</small><br><span class="muted" style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(p.story)}</span></td>`+
+    $('submission-table').innerHTML=tableColumns([330,260,200,260])+'<thead><tr><th>作品 / 作者</th><th>公开内容</th><th>状态 / 奖励</th><th>操作</th></tr></thead><tbody>'+d.items.map(p=>
+      `<tr><td><div class="cell-title">${textCell(p.title)}</div><div class="muted">${textCell(p.author_name)}</div><div class="muted">${textCell(p.story)}</div></td>`+
       `<td>${p.result_url?`<a href="${esc(p.result_url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(p.result_url)}" style="width:96px;height:110px;object-fit:contain" alt="成品"></a>`:''}${p.share_original&&p.orig_url?`<a href="${esc(p.orig_url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(p.orig_url)}" style="width:96px;height:110px;object-fit:contain" alt="作者授权原图"></a>`:''}<br><small>${p.share_original?'作者同意公开成品与原图':'仅成品，未授权公开原图'}</small></td>`+
-      `<td>${esc(SUBMISSION_LABELS[p.status]||p.status)}${p.featured?' · 精选':''}<br>${p.rewarded?'精选奖励已处理 '+p.reward+' 光子':'尚未发放精选奖励'}<br><small>${esc(p.reason)}</small></td><td><div style="display:flex;gap:8px;flex-wrap:wrap">`+
+      `<td>${esc(SUBMISSION_LABELS[p.status]||p.status)}${p.featured?' · 精选':''}<br>${p.rewarded?'精选奖励已处理 '+p.reward+' 光子':'尚未发放精选奖励'}<div class="muted">${textCell(p.reason)}</div></td><td><div style="display:flex;gap:8px;flex-wrap:wrap">`+
       (p.status==='pending'?`<button class="btn-primary btn-small" onclick="reviewSubmission('${esc(p.id)}','approve')">审核通过并发布</button><button class="btn-ghost btn-small" onclick="reviewSubmission('${esc(p.id)}','reject')">不通过</button>`:'')+
       (p.status==='published'?`<button class="btn-ghost btn-small" onclick="reviewSubmission('${esc(p.id)}','${p.featured?'unfeature':'feature'}')">${p.featured?'取消精选':p.rewarded?'再次设为精选（不重复发奖）':'设为精选并奖励 '+d.reward+' 光子'}</button><button class="btn-danger btn-small" onclick="reviewSubmission('${esc(p.id)}','unpublish')">下架</button>`:'')+'</div></td></tr>').join('')+(d.items.length?'':'<tr><td colspan="4" class="empty">暂无此状态的投稿</td></tr>')+'</tbody>';
     $('submission-page').textContent=`共 ${d.total} 条 · 第 ${Math.floor(SUBMISSION_OFFSET/30)+1} 页`;
@@ -1626,8 +1659,8 @@ async function loadCommunityComments(reset){
   try{
     const d=await api('/community/comments?limit=30&offset='+COMMENT_OFFSET);
     if(!d.items.length&&COMMENT_OFFSET){COMMENT_OFFSET=Math.max(0,COMMENT_OFFSET-30);return loadCommunityComments();}
-    $('comment-table').innerHTML='<thead><tr><th>作者 / 时间</th><th>留言 / 所属帖子</th><th>点赞</th><th>操作</th></tr></thead><tbody>'+d.items.map(p=>
-      `<tr><td>${esc(p.author_name)}<br><small class="muted">${fmtTime(p.created_at)}</small></td><td style="max-width:520px;white-space:pre-wrap;overflow-wrap:anywhere">${esc(p.content)}<br><small class="muted">${esc(p.post_id)}</small></td><td>${p.likes}</td><td><button class="btn-danger btn-small" onclick="deleteCommunityComment('${esc(p.id)}')">删除留言</button></td></tr>`).join('')+(d.items.length?'':'<tr><td colspan="4" class="empty">暂无留言</td></tr>')+'</tbody>';
+    $('comment-table').innerHTML=tableColumns([200,430,70,130])+'<thead><tr><th>作者 / 时间</th><th>留言 / 所属帖子</th><th>点赞</th><th>操作</th></tr></thead><tbody>'+d.items.map(p=>
+      `<tr><td>${textCell(p.author_name)}<small class="muted">${fmtTime(p.created_at)}</small></td><td style="max-width:520px">${textCell(p.content)}<br><small class="muted">${esc(p.post_id)}</small></td><td>${p.likes}</td><td><button class="btn-danger btn-small" onclick="deleteCommunityComment('${esc(p.id)}')">删除留言</button></td></tr>`).join('')+(d.items.length?'':'<tr><td colspan="4" class="empty">暂无留言</td></tr>')+'</tbody>';
     $('comment-page').textContent=`共 ${d.total} 条 · 第 ${Math.floor(COMMENT_OFFSET/30)+1} 页`;
     $('comment-prev').disabled=COMMENT_OFFSET===0;$('comment-next').disabled=!d.has_more;
   }catch(e){toast(e.message,'bad');}
@@ -1637,8 +1670,8 @@ async function loadCommunityReports(reset){
   try{
     const d=await api('/community/reports?status='+$('report-status').value+'&limit=30&offset='+REPORT_OFFSET);
     if(!d.items.length&&REPORT_OFFSET){REPORT_OFFSET=Math.max(0,REPORT_OFFSET-30);return loadCommunityReports();}
-    $('report-table').innerHTML='<thead><tr><th>举报对象 / 原因</th><th>提交时内容</th><th>状态 / 时间</th><th>处理</th></tr></thead><tbody>'+d.items.map(p=>
-      `<tr><td>${p.target_type==='post'?'作品':'留言'} · ${esc(REPORT_LABELS[p.reason]||p.reason)}<br><small class="muted">${esc(p.post_id)}</small></td><td style="max-width:500px;white-space:pre-wrap;overflow-wrap:anywhere">${esc(p.snapshot)}</td><td>${p.status==='open'?'待处理':'已处理'}<br><small>${fmtTime(p.created)}</small></td><td><div style="display:flex;gap:8px;flex-wrap:wrap">${p.status==='open'?`<button class="btn-danger btn-small" onclick="removeReportedContent('${esc(p.target_type)}','${esc(p.target_id)}','${esc(p.id)}')">移除内容并结案</button><button class="btn-ghost btn-small" onclick="resolveCommunityReport('${esc(p.id)}')">标记已处理</button>`:''}</div></td></tr>`).join('')+(d.items.length?'':'<tr><td colspan="4" class="empty">暂无举报</td></tr>')+'</tbody>';
+    $('report-table').innerHTML=tableColumns([220,420,150,260])+'<thead><tr><th>举报对象 / 原因</th><th>提交时内容</th><th>状态 / 时间</th><th>处理</th></tr></thead><tbody>'+d.items.map(p=>
+      `<tr><td>${p.target_type==='post'?'作品':'留言'} · ${esc(REPORT_LABELS[p.reason]||p.reason)}<br><small class="muted">${esc(p.post_id)}</small></td><td style="max-width:500px">${textCell(p.snapshot)}</td><td>${p.status==='open'?'待处理':'已处理'}<br><small>${fmtTime(p.created)}</small></td><td><div style="display:flex;gap:8px;flex-wrap:wrap">${p.status==='open'?`<button class="btn-danger btn-small" onclick="removeReportedContent('${esc(p.target_type)}','${esc(p.target_id)}','${esc(p.id)}')">移除内容并结案</button><button class="btn-ghost btn-small" onclick="resolveCommunityReport('${esc(p.id)}')">标记已处理</button>`:''}</div></td></tr>`).join('')+(d.items.length?'':'<tr><td colspan="4" class="empty">暂无举报</td></tr>')+'</tbody>';
     $('report-page').textContent=`共 ${d.total} 条 · 第 ${Math.floor(REPORT_OFFSET/30)+1} 页`;
     $('report-prev').disabled=REPORT_OFFSET===0;$('report-next').disabled=!d.has_more;
   }catch(e){toast(e.message,'bad');}
@@ -1671,9 +1704,9 @@ async function loadCommunityPosts(reset) {
     if (!data.items.length && COMMUNITY_OFFSET > 0) { COMMUNITY_OFFSET = Math.max(0, COMMUNITY_OFFSET-30); return loadCommunityPosts(); }
     const c = data.stats;
     $("community-stats").innerHTML = stat(c.total,"全部帖子") + stat(c.published,"已发布") + stat(c.paused,"暂停展示") + stat(c.pinned,"置顶帖子");
-    $("community-table").innerHTML = '<thead><tr><th><input type="checkbox" onchange="document.querySelectorAll(\'.community-select:not(:disabled)\').forEach(x=>x.checked=this.checked)"></th><th>图片</th><th>帖子 / 作者 / 配方</th><th>展示状态</th><th>排序</th><th>更新时间</th><th>操作</th></tr></thead><tbody>' +
+    $("community-table").innerHTML = tableColumns([45,100,290,115,65,150,285]) + '<thead><tr><th><input type="checkbox" onchange="document.querySelectorAll(\'.community-select:not(:disabled)\').forEach(x=>x.checked=this.checked)"></th><th>图片</th><th>帖子 / 作者 / 配方</th><th>展示状态</th><th>排序</th><th>更新时间</th><th>操作</th></tr></thead><tbody>' +
       data.items.map(p => `<tr><td><input type="checkbox" class="community-select" ${p.source==='submission'?'disabled':''} value="${esc(p.id)}"></td><td>${p.result_url ? `<img src="${esc(p.result_url)}" alt="帖子图片" style="width:64px;height:76px;object-fit:cover;border-radius:8px;cursor:pointer" onclick="previewCommunity('${esc(p.id)}')">` : '<span class="muted">尚未配图</span>'}</td>` +
-      `<td><b>${esc(p.title)}</b><br><small class="muted">${esc(p.author_name || '未填作者')} · ${esc(p.category_name || COMMUNITY_CATEGORIES[p.category] || '其它')}</small><br><small class="muted">${esc(p.template_name || '未绑定配方')}</small></td>` +
+      `<td><div class="cell-title">${textCell(p.title)}</div><div class="muted">${textCell((p.author_name || '未填作者')+' · '+(p.category_name || COMMUNITY_CATEGORIES[p.category] || '其它'))}</div><div class="sub">${textCell(p.template_name || '未绑定配方')}</div></td>` +
       `<td><span class="badge ${p.status==='published'?'green':''}">${p.status==='published'?'已发布':'暂停展示'}</span><br><small class="muted">${p.source==='submission'?'用户投稿':'手工帖子'}</small>${p.pinned?'<br><span class="badge indigo">置顶</span>':''}</td><td>${p.sort}</td><td>${fmtTime(p.updated_at)}</td>` +
       `<td><div style="display:flex;gap:6px;flex-wrap:wrap;max-width:280px"><button class="btn-ghost btn-small" onclick="previewCommunity('${esc(p.id)}')">预览</button>` +
       (p.source==='submission'?`<button class="btn-ghost btn-small" onclick="reviewSubmission('${esc(p.id)}','${p.featured?'unfeature':'feature'}')">${p.featured?'取消精选':'设为精选'}</button><button class="btn-danger btn-small" onclick="reviewSubmission('${esc(p.id)}','unpublish')">下架</button>`:
@@ -1741,7 +1774,7 @@ async function loadUsers() {
     $("users-summary").textContent = "微信账号 " + (counts.wechat_users_total ?? 0) +
       " · 网页访客 " + (counts.web_users_total ?? 0) + "（当前管理列表，按来源区分）";
     const t = $("users-table");
-    t.innerHTML = "<thead><tr><th>固定账号编号</th><th>来源 / AppID</th><th>首次使用</th><th>最近活跃</th><th>已修图</th><th>被拦截</th><th>光子余额</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody>";
+    t.innerHTML = tableColumns([190,170,125,125,65,65,90,90,225]) + "<thead><tr><th>固定账号编号</th><th>来源 / AppID</th><th>首次使用</th><th>最近活跃</th><th>已修图</th><th>被拦截</th><th>光子余额</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody>";
     const tbody = t.tBodies[0];
     data.items.forEach((u) => {
       const tr = document.createElement("tr");
@@ -1767,7 +1800,7 @@ async function loadViolationFeedback() {
     const data = await api('/violations?limit=100');
     const items = (data.items || []).filter(v => v.feedback);
     const table = $('violations-table');
-    table.innerHTML = '<thead><tr><th>提交时间</th><th>账号</th><th>审核原因</th><th>误判说明</th><th>状态</th><th>复核</th></tr></thead><tbody></tbody>';
+    table.innerHTML = tableColumns([135,135,200,350,100,180]) + '<thead><tr><th>提交时间</th><th>账号</th><th>审核原因</th><th>误判说明</th><th>状态</th><th>复核</th></tr></thead><tbody></tbody>';
     const tbody = table.tBodies[0];
     for (const v of items) {
       const tr = document.createElement('tr');
@@ -1775,7 +1808,7 @@ async function loadViolationFeedback() {
       const masked = oid.slice(0, 6) + '…' + oid.slice(-4);
       const status = v.status === 'overturned' ? '误判已撤销' : v.status === 'upheld' ? '维持违规' : '待复核';
       tr.innerHTML = `<td>${fmtTime(v.created_at)}</td><td title="${esc(oid)}">${esc(masked)}</td>` +
-        `<td>${esc(v.reason || '—')}</td><td style="max-width:340px;white-space:pre-wrap">${esc(v.feedback)}</td>` +
+        `<td>${textCell(v.reason || '—')}</td><td>${textCell(v.feedback)}</td>` +
         `<td><span class="badge ${v.status === 'active' ? 'amber' : v.status === 'overturned' ? 'green' : 'red'}">${status}</span></td>` +
         `<td>${v.status === 'active' ? `<div class="row-actions"><button class="btn-ghost btn-small" onclick="reviewViolation('${esc(v.id)}',true)">确认为误判</button><button class="btn-danger btn-small" onclick="reviewViolation('${esc(v.id)}',false)">维持违规</button></div>` : '—'}</td>`;
       tbody.appendChild(tr);

@@ -7,7 +7,7 @@
   </view>
 
   <view class="template-search">
-    <text class="search-icon">⌕</text>
+    <view class="search-icon" aria-hidden="true"><view class="search-lens"></view><view class="search-handle"></view></view>
     <input class="search-input" value="{{ searchQuery }}" maxlength="40" confirm-type="search"
       placeholder="搜索模板名称、风格或关键词" bindinput="onSearchInput" />
     <view class="search-clear" wx:if="{{ searchQuery }}" bindtap="onClearSearch">清除</view>
@@ -51,6 +51,7 @@
           src="{{ item.coverUrl || '/images/logo.jpg' }}"
           mode="aspectFit"
           lazy-load
+          bindload="onTemplateImageLoad" binderror="onTemplateImageError" data-id="{{item.id}}"
         ></image>
         <view class="card-multi-badge" wx:if="{{ item.covers && item.covers.length > 1 }}">
           <text>{{ item.covers.length }}图</text>

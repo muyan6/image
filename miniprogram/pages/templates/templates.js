@@ -1,5 +1,6 @@
 const app = getApp();
 const api = require('../../utils/api.js');
+const update=(page,patch)=>typeof api.setDataStable==='function'?api.setDataStable(page,patch):page.setData(patch);
 
 Page({
   data: {
@@ -21,7 +22,7 @@ Page({
   },
 
   onLoad() {
-    // tabBar 页面每次回到前台都需刷新，不在 onLoad 再重复请求一次。
+    // Return refreshes metadata without replacing unchanged image sources.
   },
 
   onShow() {
@@ -35,7 +36,7 @@ Page({
   },
 
   fetchTemplates(callback, force = false) {
-    this.setData({ loadError: '' });
+    update(this,{ loadError: '' });
     if (!force && this._lastFetchedAt && Date.now() - this._lastFetchedAt < 30000 &&
         this.data.allTemplates.length) {
       if (typeof callback === 'function') callback();
@@ -43,9 +44,9 @@ Page({
     }
     const version = (this._fetchVersion || 0) + 1;
     this._fetchVersion = version;
-    if (!this.data.allTemplates.length) this.setData({ loading: true });
+    if (!this.data.allTemplates.length) update(this,{ loading: true });
     if (this.data.freeMode !== !!app.globalData.freeMode && !this._latestRawItems) {
-      this.setData({ freeMode: !!app.globalData.freeMode });
+      update(this,{ freeMode: !!app.globalData.freeMode });
     }
 
     // 1. 尝试读本地缓存，秒开
@@ -53,7 +54,7 @@ Page({
       const cached = wx.getStorageSync('cached_templates_data');
       if (!this.data.allTemplates.length && cached && Array.isArray(cached.items) && cached.items.length > 0) {
         this._renderData(cached.groups || [], cached.items);
-        this.setData({ loaded: true });
+        update(this,{ loaded: true });
       }
     } catch (e) {}
 
@@ -63,7 +64,7 @@ Page({
       if (version !== this._fetchVersion || !config) return;
       const prices = config.prices || {};
       app.globalData.freeMode = !!config.free_mode;
-      this.setData({ freeMode: !!config.free_mode,
+      update(this,{ freeMode: !!config.free_mode,
         priceLight: prices.light != null ? prices.light : this.data.priceLight,
         priceFine: prices.fine != null ? prices.fine : this.data.priceFine });
       if (this._latestRawItems) this._renderData(this._latestGroups, this._latestRawItems);
@@ -79,7 +80,7 @@ Page({
         const rawItems = (data && data.items) || [];
         try { wx.setStorageSync('cached_templates_data', data); } catch (e) {}
         this._renderData(groups, rawItems);
-        this.setData({ loading: false, loaded: true, loadError: '' });
+        update(this,{ loading: false, loaded: true, loadError: '' });
         this._lastFetchedAt = Date.now();
         if (typeof callback === 'function') callback();
       })
@@ -89,7 +90,7 @@ Page({
           return;
         }
         console.warn('获取模板列表失败', err);
-        this.setData({ loading: false, loadError: '模板加载失败，请检查网络后重试' });
+        update(this,{ loading: false, loadError: '模板加载失败，请检查网络后重试' });
         if (typeof callback === 'function') callback();
       });
   },
@@ -97,6 +98,7 @@ Page({
   _renderData(groups, rawItems) {
     this._latestGroups = groups;
     this._latestRawItems = rawItems;
+    const prior=new Map(this.data.allTemplates.map(x=>[x.id,x]));this._coverSources={};
     const items = rawItems.map((item) => {
       const low=Math.min(this.data.priceLight,this.data.priceFine);
       const high=Math.max(this.data.priceLight,this.data.priceFine);
@@ -104,8 +106,12 @@ Page({
       const rawCovers = Array.isArray(item.covers) && item.covers.length > 0
         ? item.covers
         : (item.cover ? [item.cover] : []);
-      const coverUrls = rawCovers.map((c) => api.absolute(c)).filter(Boolean);
+      const old=this._coverRetries&&this._coverRetries.has(item.id)?null:prior.get(item.id),version=item.cover_version;
+      this._coverSources[item.id]={urls:rawCovers.map(c=>api.absolute(c)),version};
+      const coverUrls = rawCovers.map((c,i) => typeof api.stableImageUrl==='function'
+        ? api.stableImageUrl(c,old&&old.covers&&old.covers[i],version,old&&old.cover_version) : api.absolute(c)).filter(Boolean);
       return Object.assign({}, item, {
+        cover: coverUrls[0] || '',
         covers: coverUrls,
         coverUrl: coverUrls[0] || (item.cover ? api.absolute(item.cover) : '/images/logo.jpg'),
         costText: cost
@@ -126,21 +132,31 @@ Page({
     });
 
     const category = cats.some((c) => c.id === this.data.activeCategory) ? this.data.activeCategory : 'all';
-    this.setData({
+    // Sort before comparing/committing, so identical data never remounts the grid.
+    items.sort((a,b) => (Number(b.usage_count)||0) - (Number(a.usage_count)||0));
+    update(this,{
       allTemplates: items,
       categories: cats,
       activeCategory: category
     });
-    // Stable sort keeps the existing curated order when popularity is tied.
-    items.sort((a,b) => (Number(b.usage_count)||0) - (Number(a.usage_count)||0));
-
     this.filterByCategory(category);
+  },
+
+  onTemplateImageLoad(e) {
+    const source=this._coverSources&&this._coverSources[e.currentTarget.dataset.id];
+    if(source&&typeof api.rememberCommunityImage==='function')api.rememberCommunityImage(source.urls[0],source.version).catch(()=>{});
+  },
+  onTemplateImageError(e) {
+    const id=e.currentTarget.dataset.id,source=this._coverSources&&this._coverSources[id];
+    this._coverRetries=this._coverRetries||new Set();if(this._coverRetries.has(id)||!source)return;this._coverRetries.add(id);
+    if(typeof api.forgetCommunityImage==='function')api.forgetCommunityImage(source.urls[0],source.version);
+    return this.fetchTemplates(null,true);
   },
 
   onSelectCategory(e) {
     const cid = e.currentTarget.dataset.id;
     if (cid === this.data.activeCategory) return;
-    this.setData({ activeCategory: cid });
+    update(this,{ activeCategory: cid });
     this.filterByCategory(cid);
   },
 
@@ -152,7 +168,7 @@ Page({
         Array.isArray(item.tags) ? item.tags.join(' ') : item.tags || ''].join(' ').toLowerCase();
       return words.every(word => text.includes(word));
     });
-    this.setData({ filteredTemplates: list });
+    update(this,{ filteredTemplates: list });
   },
 
   onRetryTemplates() {
@@ -160,12 +176,12 @@ Page({
   },
 
   onSearchInput(e) {
-    this.setData({searchQuery: (e.detail.value || '').slice(0, 40)});
+    update(this,{searchQuery: (e.detail.value || '').slice(0, 40)});
     this.filterByCategory(this.data.activeCategory);
   },
 
   onClearSearch() {
-    this.setData({searchQuery: ''});
+    update(this,{searchQuery: ''});
     this.filterByCategory(this.data.activeCategory);
   },
 
@@ -178,13 +194,13 @@ Page({
   },
 
   onCloseDetail() {
-    this.setData({ selectedItem: null });
+    update(this,{ selectedItem: null });
   },
 
   onApplyTemplate() {
     const tpl = this.data.selectedItem;
     if (!tpl) return;
-    this.setData({ selectedItem: null });
+    update(this,{ selectedItem: null });
     wx.navigateTo({
       url: `/pages/style-detail/style-detail?id=${encodeURIComponent(tpl.id)}`
     });

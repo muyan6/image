@@ -1,5 +1,6 @@
 const app = getApp();
 const api = require('../../utils/api.js');
+const update=(page,patch)=>typeof api.setDataStable==='function'?api.setDataStable(page,patch):page.setData(patch);
 const reusablePreview = url => !!url &&
   (typeof api.isReusableMediaUrl !== 'function' || api.isReusableMediaUrl(url));
 
@@ -58,8 +59,9 @@ Page({
   refreshUserData(force = false) {
     const list = app.globalData.historyList || [];
     const previewList = list.slice(0, 3).map(w => {
-      const local = w.jobId && app.globalData.mediaCache && app.globalData.mediaCache[w.jobId] &&
+      let local = w.jobId && app.globalData.mediaCache && app.globalData.mediaCache[w.jobId] &&
         app.globalData.mediaCache[w.jobId].result;
+      if(local&&typeof api.isLocalImageAvailable==='function'&&!api.isLocalImageAvailable(local))local='';
       const preview = local || (reusablePreview(w.preview) ? w.preview :
         (reusablePreview(w.result) ? w.result : ''));
       return Object.assign({}, w, {preview});
@@ -68,19 +70,19 @@ Page({
     if (!force && this._lastProfileSync && Date.now() - this._lastProfileSync < 30000 &&
         keys === this._lastHistoryKeys && !list.some(w => w.status === 'processing') &&
         !this.data.previewWorks.some(w => w.preview && !reusablePreview(w.preview))) {
-      this.setData({lightPoints: app.globalData.lightPoints || 0,
+      update(this,{lightPoints: app.globalData.lightPoints || 0,
         nickName: app.globalData.nickname || this.data.nickName});
       return;
     }
     const version = (this._profileLoadVersion || 0) + 1;
     this._profileLoadVersion = version;
-    if (keys !== this._lastHistoryKeys || !this.data.historyList.length) this.setData({
+    if (keys !== this._lastHistoryKeys || !this.data.historyList.length) update(this,{
       userId: app.globalData.userId || '登录后显示',
       nickName: app.globalData.nickname || this.data.nickName,
       lightPoints: app.globalData.lightPoints || 0,
       freeMode: !!app.globalData.freeMode,
       historyList: list,
-      previewWorks: previewList,
+        previewWorks: previewList.map(({jobId,preview,quality})=>({jobId,preview,quality})),
       processingCount: list.filter(w => w.status === 'processing').length
     });
 
@@ -91,7 +93,7 @@ Page({
       this._videoAdUnitId = ads.rewarded_video_unit_id || '';
       const prices = c.prices || {};
       app.globalData.freeMode = !!c.free_mode;
-      this.setData({ videoAdReady: !!ads.rewarded_video_ready,
+      update(this,{ videoAdReady: !!ads.rewarded_video_ready,
         freeMode: !!c.free_mode,
         priceLight: prices.light != null ? prices.light : this.data.priceLight,
         priceFine: prices.fine != null ? prices.fine : this.data.priceFine });
@@ -105,15 +107,17 @@ Page({
       const localOnly = prior.filter(w => !w.jobId);
       const cloud = result.jobs.map(j => {
         const old = byId.get(j.id) || {};
-        const local = app.globalData.mediaCache && app.globalData.mediaCache[j.id] &&
+        let local = app.globalData.mediaCache && app.globalData.mediaCache[j.id] &&
           app.globalData.mediaCache[j.id].result;
+        if(local&&typeof api.isLocalImageAvailable==='function'&&!api.isLocalImageAvailable(local))local='';
         const fresh = api.absolute(j.result_url || '');
         return Object.assign({}, old, {
         jobId: j.id, original: api.absolute(j.orig_url || ''),
         result: j.status === 'succeeded' ? fresh : '',
-        preview: j.status === 'succeeded' &&
+        preview: j.status === 'succeeded' && !!j.result_url &&
           (typeof api.isJobCosUrl !== 'function' || api.isJobCosUrl(j.result_url))
-          ? (local || (old.status === 'succeeded' && reusablePreview(old.preview) ? old.preview : fresh)) : '',
+          ? (local || (typeof api.stableImageUrl==='function'?api.stableImageUrl(fresh,old.preview):
+              (old.status === 'succeeded' && reusablePreview(old.preview) ? old.preview : fresh))) : '',
         status: j.status, quality: j.quality, provider: j.provider,
         templateName: j.template_name || '', createdAt: j.created_at || 0
         });
@@ -121,7 +125,7 @@ Page({
       const merged = localOnly.concat(cloud).sort((a,b) => (b.createdAt || 0) - (a.createdAt || 0));
       app.globalData.historyList = merged;
       app.persist();
-      this.setData({ historyList: merged, previewWorks: merged.slice(0,3),
+      update(this,{ historyList: merged, previewWorks: merged.slice(0,3).map(({jobId,preview,quality})=>({jobId,preview,quality})),
         processingCount: merged.filter(w => w.status === 'processing').length });
       this._lastProfileSync = Date.now();
       this._lastHistoryKeys = merged.map(w => w.jobId || w.result || '').join('|');
@@ -131,7 +135,7 @@ Page({
     api.me().then((d) => {
       if (!d) return;
       if (typeof d.balance === 'number') app.setBalance(d.balance);
-      this.setData({
+      update(this,{
         userId: d.user_id || app.globalData.userId || '登录后显示',
         nickName: d.nickname || '微信用户',
         lightPoints: app.globalData.lightPoints,
@@ -143,6 +147,10 @@ Page({
 
   onHide() {
     this._profileLoadVersion = (this._profileLoadVersion || 0) + 1;
+  },
+  onPreviewLoad(e) {
+    const w=this.data.previewWorks.find(x=>x.jobId===e.currentTarget.dataset.jobId);
+    if(w&&typeof api.rememberCommunityImage==='function')api.rememberCommunityImage(w.preview).catch(()=>{});
   },
 
   onPreviewError(e) {
@@ -157,7 +165,7 @@ Page({
       const list = this.data.historyList.map(w => w.jobId === jobId ? Object.assign({},w,{preview:url,result:url}) : w);
       app.globalData.historyList = list;
       app.persist();
-      this.setData({historyList:list,previewWorks:list.slice(0,3)});
+      update(this,{historyList:list,previewWorks:list.slice(0,3)});
     }).catch(() => {});
   },
 
@@ -178,23 +186,23 @@ Page({
   },
 
   onEditProfile() {
-    this.setData({showProfileEditor:true, profileDraft:this.data.nickName === '微信用户' ? '' : this.data.nickName});
+    update(this,{showProfileEditor:true, profileDraft:this.data.nickName === '微信用户' ? '' : this.data.nickName});
   },
 
-  onCloseProfile() { this.setData({showProfileEditor:false}); },
-  onProfileInput(e) { this.setData({profileDraft:e.detail.value || ''}); },
+  onCloseProfile() { update(this,{showProfileEditor:false}); },
+  onProfileInput(e) { update(this,{profileDraft:e.detail.value || ''}); },
   async onSaveProfile() {
     if (this.data.profileSaving) return;
     const nickname = this.data.profileDraft.trim();
     if (!nickname) { wx.showToast({title:'请输入昵称',icon:'none'}); return; }
-    this.setData({profileSaving:true});
+    update(this,{profileSaving:true});
     try {
       const result = await api.updateProfile(nickname);
       if (typeof app.setNickname === 'function') app.setNickname(result.nickname);
-      this.setData({nickName:result.nickname,showProfileEditor:false});
+      update(this,{nickName:result.nickname,showProfileEditor:false});
       wx.showToast({title:'昵称已保存',icon:'success'});
     } catch (err) { wx.showToast({title:err.message || '保存失败',icon:'none'}); }
-    finally { this.setData({profileSaving:false}); }
+    finally { update(this,{profileSaving:false}); }
   },
 
   /* 二级页面跳转 */

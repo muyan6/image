@@ -1,5 +1,6 @@
 const app = getApp();
 const api = require('../../utils/api.js');
+const update=(page,patch)=>typeof api.setDataStable==='function'?api.setDataStable(page,patch):page.setData(patch);
 
 const DEMO_ORIG = 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800';
 const DEMO_RESULT = 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&q=80';
@@ -46,7 +47,7 @@ Page({
       winW = info.windowWidth || winW;
     } catch (e) { /* 取不到就用默认值，onReady 会立刻纠正 */ }
 
-    this.setData({
+    update(this,{
       originalUrl: demo ? DEMO_ORIG : (this._jobId ? (this._mediaCache.orig || '') : orig),
       resultUrl: demo ? DEMO_RESULT : (this._jobId ? (this._mediaCache.result || '') : res),
       quality: quality,
@@ -73,45 +74,47 @@ Page({
     if (!this._jobId || this.data.demo) return Promise.resolve(false);
     if (this._refreshPromise) return this._refreshPromise;
     if (!force && this._lastMediaRefreshAt && Date.now() - this._lastMediaRefreshAt < 60000 &&
-        this.data.resultUrl && !this.data.resultError) return Promise.resolve(true);
+        this.data.resultUrl && !this.data.resultError &&
+        (typeof api.isLocalImageAvailable!=='function'||api.isLocalImageAvailable(this.data.resultUrl))) return Promise.resolve(true);
     this._mediaCache = this._mediaCache || {};
-    this.setData({loadingMedia: true});
+    update(this,{loadingMedia: !this.data.resultUrl});
     this._refreshPromise = api.request('/api/jobs/' + encodeURIComponent(this._jobId))
       .then(async (job) => {
         if (this._unloaded) return false;
         if (!job || job.status !== 'succeeded') throw new Error('作品尚未完成');
         if (!job.result_url) throw new Error('作品已到保存期限');
         const load = (kind, url) => {
-          if (this._mediaCache[kind]) return Promise.resolve(this._mediaCache[kind]);
+          if (this._mediaCache[kind] && (typeof api.isLocalImageAvailable!=='function'||api.isLocalImageAvailable(this._mediaCache[kind]))) return Promise.resolve(this._mediaCache[kind]);
+          delete this._mediaCache[kind];
           return api.downloadJobMedia(this._jobId, kind, url).then((path) => {
             if (!this._unloaded) this._mediaCache[kind] = path;
             return path;
           });
         };
         const dimensions = job.width && job.height ? `${job.width} × ${job.height}` : '';
-        this.setData({originalUnavailable: !job.orig_url,originalCompressed:!!job.comparison_compressed,textGenerated:job.input_mode==='text',
+        update(this,{originalUnavailable: !job.orig_url,originalCompressed:!!job.comparison_compressed,textGenerated:job.input_mode==='text',
           label: (job.input_mode === 'text' ? 'AI 文生图' : (job.provider === 'local' ? '本地增强' : 'AI 修复')) + (dimensions ? ' · ' + dimensions : '')});
         // 两侧独立更新：原图下载缓慢/故障也不能阻断成品展示。
         const outcomes = await Promise.all([
           load('result', job.result_url).then(path => {
-            if (!this._unloaded) this.setData(Object.assign({resultUrl:path, resultError:''},
+            if (!this._unloaded) update(this,Object.assign({resultUrl:path, resultError:''},
               job.orig_url ? {} : {originalUrl:path}));
             return {path};
           }, error => {
-            if (!this._unloaded) this.setData({resultError:error.message || '结果图加载失败'});
+            if (!this._unloaded) update(this,{resultError:error.message || '结果图加载失败'});
             return {error};
           }),
           job.orig_url ? load('orig', job.orig_url).then(path => {
-            if (!this._unloaded) this.setData({originalUrl:path, originalError:''});
+            if (!this._unloaded) update(this,{originalUrl:path, originalError:''});
             return {path};
           }, error => {
-            if (!this._unloaded) this.setData({originalError:error.message || '原图加载失败'});
+            if (!this._unloaded) update(this,{originalError:error.message || '原图加载失败'});
             return {error};
           }) : Promise.resolve({expired:true})
         ]);
         if (this._unloaded) return false;
         const result = outcomes[0], original = outcomes[1];
-        this.setData({ originalUrl: original.expired ? (result.path || '') : (original.path || ''),
+        update(this,{ originalUrl: original.expired ? (result.path || '') : (original.path || ''),
           resultUrl: result.path || '',
           resultError: result.error ? result.error.message || '结果图加载失败' : '',
           originalError: original.error ? original.error.message || '原图加载失败' : '',
@@ -123,11 +126,11 @@ Page({
         return !!result.path;
       })
       .catch((err) => {
-        if (!this._unloaded) this.setData({resultError: err.message || '图片加载失败，请重试'});
+        if (!this._unloaded) update(this,{resultError: err.message || '图片加载失败，请重试'});
         return false;
       }).finally(() => {
         this._refreshPromise = null;
-        if (!this._unloaded) this.setData({loadingMedia: false});
+        if (!this._unloaded) update(this,{loadingMedia: false});
       });
     return this._refreshPromise;
   },
@@ -152,7 +155,7 @@ Page({
           if (rect && rect.width > 0) {
             this._rect = rect;
             if (rect.width !== this.data.stageW) {
-              this.setData({ stageW: rect.width });
+              update(this,{ stageW: rect.width });
             }
           }
           resolve(this._rect || null);
@@ -162,7 +165,7 @@ Page({
   },
 
   onTouchStart(e) {
-    this.setData({ isDragging: true });
+    update(this,{ isDragging: true });
     try {
       wx.vibrateShort({ type: 'light' });
     } catch (err) {}
@@ -174,7 +177,7 @@ Page({
   },
 
   onTouchEnd() {
-    this.setData({ isDragging: false });
+    update(this,{ isDragging: false });
   },
 
   /** 左右拖动滑块 */
@@ -186,7 +189,7 @@ Page({
     const raw = ((touch.clientX - rect.left) / rect.width) * 100;
     const percent = Math.max(0, Math.min(100, Math.round(raw)));
     if (percent === this.data.splitPercent) return;
-    this.setData({ splitPercent: percent });
+    update(this,{ splitPercent: percent });
   },
 
   /** 长按即时查看原图 (Lightroom 交互) */
@@ -194,11 +197,11 @@ Page({
     try {
       wx.vibrateShort({ type: 'light' });
     } catch (err) {}
-    this.setData({ isPressingOriginal: true });
+    update(this,{ isPressingOriginal: true });
   },
 
   onPressOriginalEnd() {
-    this.setData({ isPressingOriginal: false });
+    update(this,{ isPressingOriginal: false });
   },
 
   onChangePhoto() {
@@ -224,7 +227,7 @@ Page({
     delete this._mediaCache[kind];
     const field = kind === 'result' ? 'resultError' : 'originalError';
     if (this._reloadAttempts[kind]) {
-      this.setData({[field]: '图片加载失败，点击重试'}); return;
+      update(this,{[field]: '图片加载失败，点击重试'}); return;
     }
     this._reloadAttempts[kind] = 1;
     this.refreshUrls(true);
@@ -248,11 +251,11 @@ Page({
       wx.vibrateShort({ type: 'medium' });
     } catch (err) {}
 
-    this.setData({ saving: true });
+    update(this,{ saving: true });
     wx.showLoading({ title: '正在导出原画...', mask: true });
 
     const done = () => {
-      this.setData({ saving: false });
+      update(this,{ saving: false });
       wx.hideLoading();
     };
 
@@ -263,7 +266,7 @@ Page({
         target = await api.downloadJobMedia(this._jobId, 'result', this._jobId ? '' : this.data.resultUrl);
         this._mediaCache = this._mediaCache || {};
         this._mediaCache.result = target;
-        this.setData({resultUrl: target, resultError: ''});
+        update(this,{resultUrl: target, resultError: ''});
       }
       this.saveToAlbum(target, done);
     } catch (err) {
@@ -298,7 +301,7 @@ Page({
           api.downloadJobMedia(this._jobId, 'result', '').then((path) => {
             this._mediaCache = this._mediaCache || {};
             this._mediaCache.result = path;
-            this.setData({resultUrl: path, resultError: ''});
+            update(this,{resultUrl: path, resultError: ''});
             this.saveToAlbum(path, done, true);
           }).catch((e) => {
             done();wx.showModal({title: '图片下载失败', content: e.message || 'COS 下载失败', showCancel: false});

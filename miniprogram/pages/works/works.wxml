@@ -30,7 +30,7 @@
       data-index="{{ item.sourceIndex }}"
     >
       <view class="work-photo-box">
-        <image class="work-img" src="{{ item.preview }}" mode="aspectFit" lazy-load binderror="onWorkImageError" data-index="{{ item.sourceIndex }}"></image>
+        <image class="work-img" src="{{ item.preview }}" mode="aspectFit" lazy-load bindload="onWorkImageLoad" binderror="onWorkImageError" data-index="{{ item.sourceIndex }}"></image>
         <view class="work-processing-badge" wx:if="{{ item.status === 'succeeded' && !item.preview }}"><text>{{ item.error || '图片正在恢复…' }}</text></view>
         <view class="work-quality-tag" wx:if="{{ item.status !== 'processing' && item.result }}">
           <text>{{ item.width && item.height ? item.width + '×' + item.height : (item.quality === 'fine' ? '精细修复' : '标准修复') }}</text>

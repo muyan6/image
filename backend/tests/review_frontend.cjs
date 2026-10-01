@@ -666,7 +666,7 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     const html=fs.readFileSync(path.join(ROOT,'backend/admin.html'),'utf8');
     const start=html.indexOf('async function loadUsers() {');
     const end=html.indexOf('/* ---------- 用户操作',start);
-    const script=html.slice(start,end);
+    const script=html.slice(html.indexOf('function tableColumns('),html.indexOf('const fmtTime'))+html.slice(start,end);
     const elements={'users-source':{value:'wechat'},'users-summary':{},'users-table':{tBodies:[{rows:[],appendChild(row){this.rows.push(row);}}]}};
     let requested;
     const sandbox={$:id=>elements[id],console:silent,esc:v=>String(v),fmtTime:()=> 'time',document:{createElement:()=>({})},

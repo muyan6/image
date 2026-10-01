@@ -217,16 +217,42 @@ function downloadImage(url, header) {
 // Session-only, bounded image cache. Immutable submission paths include the revision.
 // Keep query strings for editorial URLs; strip only COS authentication identities.
 function communityMediaKey(url) {
-  return /[?&]q-signature=/i.test(url || '') ? url.split('?')[0] : url;
+  if (!/[?&]q-signature=/i.test(url || '')) return url;
+  const parts=url.split('?'),auth=/^(q-sign-algorithm|q-ak|q-sign-time|q-key-time|q-header-list|q-url-param-list|q-signature|x-cos-security-token)$/i;
+  const query=(parts[1]||'').split('&').filter(x=>!auth.test(x.split('=')[0]));
+  return parts[0]+(query.length?'?'+query.join('&'):'');
+}
+function imageCacheKey(url, version) { return communityMediaKey(url)+(version == null?'':'|version='+version); }
+function isLocalImageAvailable(url) {
+  if (!/^(wxfile:|https?:\/\/(tmp|usr)\/)/i.test(url || '')) return false;
+  try { wx.getFileSystemManager().accessSync(url); return true; } catch (err) { return false; }
+}
+function stableImageUrl(url, previous, version, previousVersion) {
+  if (!url) return '';
+  if (/^\/images\//.test(url)) return url;
+  if (/^(wxfile:|https?:\/\/(tmp|usr)\/)/i.test(url)) return isLocalImageAvailable(url) ? url : '';
+  const fresh=absolute(url),sameVersion=version===previousVersion;
+  // An already displayed valid source must not change just because auth rotated.
+  if (sameVersion && previous && communityMediaKey(fresh)===communityMediaKey(previous) &&
+      (!/[?&]q-signature=/i.test(previous) || isReusableMediaUrl(previous))) return previous;
+  return communityImage(fresh, version);
+}
+function setDataStable(page, patch) {
+  const changed={};
+  Object.keys(patch).forEach(key=>{
+    if (JSON.stringify(page.data[key])!==JSON.stringify(patch[key])) changed[key]=patch[key];
+  });
+  if (Object.keys(changed).length) page.setData(changed);
 }
 function communityMediaCache() {
   const app = getApp();
   app.globalData.mediaCache = app.globalData.mediaCache || {};
   return app.globalData.mediaCache.__community || (app.globalData.mediaCache.__community = {});
 }
-function communityImage(url) {
+function communityImage(url, version) {
   if (!url) return '';
-  const src = absolute(url), key = communityMediaKey(src), entry = communityMediaCache()[key];
+  if (/^(wxfile:|https?:\/\/(tmp|usr)\/)/i.test(url)) return isLocalImageAvailable(url) ? url : '';
+  const src = absolute(url), key = imageCacheKey(src,version), entry = communityMediaCache()[key];
   if (entry && entry.path) {
     try { wx.getFileSystemManager().accessSync(entry.path); entry.at=Date.now(); return entry.path; }
     catch (err) { delete communityMediaCache()[key]; }
@@ -234,10 +260,12 @@ function communityImage(url) {
   return src;
 }
 let communityImageTasks = {};
-function rememberCommunityImage(url) {
-  const src = absolute(url), key = communityMediaKey(src);
+function rememberCommunityImage(url, version) {
+  if (/^\/images\//.test(url || '')) return Promise.resolve(url);
+  if (/^(wxfile:|https?:\/\/(tmp|usr)\/)/i.test(url || '')) return Promise.resolve(isLocalImageAvailable(url) ? url : '');
+  const src = absolute(url), key = imageCacheKey(src,version);
   if (!src) return Promise.resolve('');
-  const cached = communityImage(src);
+  const cached = communityImage(src,version);
   if (cached !== src) return Promise.resolve(cached);
   if (communityImageTasks[key]) return communityImageTasks[key];
   const cache = communityMediaCache();
@@ -254,7 +282,7 @@ function rememberCommunityImage(url) {
   }).finally(()=>{delete communityImageTasks[key];});
   return communityImageTasks[key];
 }
-function forgetCommunityImage(url) { delete communityMediaCache()[communityMediaKey(absolute(url))]; }
+function forgetCommunityImage(url, version) { delete communityMediaCache()[imageCacheKey(absolute(url),version)]; }
 
 function isJobCosUrl(url) {
   return /^https:\/\//i.test(url || '') &&
@@ -616,6 +644,9 @@ module.exports = {
   communityImage,
   rememberCommunityImage,
   forgetCommunityImage,
+  stableImageUrl,
+  setDataStable,
+  isLocalImageAvailable,
   request,
   isJobCosUrl,
   isReusableMediaUrl,

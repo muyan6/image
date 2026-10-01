@@ -94,7 +94,7 @@
         wx:key="jobId"
         class="work-card gallery-card"
       >
-        <image class="work-thumb" src="{{ item.preview }}" mode="aspectFill" binderror="onPreviewError" data-job-id="{{ item.jobId }}"></image>
+        <image class="work-thumb" src="{{ item.preview }}" mode="aspectFill" bindload="onPreviewLoad" binderror="onPreviewError" data-job-id="{{ item.jobId }}"></image>
         <view class="work-tag">
           <text>{{ item.quality === 'fine' ? '精细生成' : '轻量生成' }}</text>
         </view>
