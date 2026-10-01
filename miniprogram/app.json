@@ -4,6 +4,7 @@
     "pages/templates/templates",
     "pages/style-detail/style-detail",
     "pages/adjust/adjust",
+    "pages/text-generation/text-generation",
     "pages/community/community",
     "pages/my/my",
     "pages/credits/credits",

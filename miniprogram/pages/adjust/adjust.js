@@ -31,6 +31,8 @@ Page({
 
     // 模板文字排版字段（模板非空时展示，值随任务提交给后端排版引擎）
     textValues: {},
+    customPrompt: '',
+    showCustomPrompt: false,
     templateOutputMode: 'template',
     showOutputHelp: false,
     singleOutputAvailable: false,
@@ -307,6 +309,14 @@ Page({
   },
 
   /** 点击【开始生成】 */
+  onCustomPromptInput(e) {
+    this.setData({ customPrompt: e.detail.value || '' });
+  },
+
+  onToggleCustomPrompt() {
+    this.setData({showCustomPrompt: !this.data.showCustomPrompt});
+  },
+
   onSelectTemplateOutput(e) {
     if (!this.data.selectedTemplate || this.data.processing) return;
     const mode = e.currentTarget.dataset.mode;
@@ -445,6 +455,7 @@ Page({
         }
       } else {
         formData.aspect_ratio = this.data.currentRatioKey;
+        if (this.data.showCustomPrompt && this.data.customPrompt.trim()) formData.custom_prompt = this.data.customPrompt.trim();
       }
 
       this.setData({

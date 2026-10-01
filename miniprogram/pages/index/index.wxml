@@ -93,6 +93,10 @@
         </view>
       </scroll-view>
     </view>
+    <view class="text-generation-entry" bindtap="onOpenTextGeneration">
+      <view class="entry-copy"><text class="entry-label">文字生图</text><text class="entry-note">从一句描述开始创作</text></view>
+      <text class="entry-arrow">→</text>
+    </view>
     <!-- 历史记录置于所有创作入口之后 -->
     <view
       class="history-entry"

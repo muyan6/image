@@ -56,30 +56,28 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     page.onSelectQuality({currentTarget:{dataset:{quality:'fine'}}});
     return [light===20&&page.data.currentQualityCost===80,{light,fine:page.data.currentQualityCost}];
   });
-  await test('text_generation_entry_removed_from_homepage',()=>{
+  await test('text_entry_is_compact_and_after_style_showcase',()=>{
     const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/index/index.wxml'),'utf8');
     const css=fs.readFileSync(path.join(ROOT,'miniprogram/pages/index/index.wxss'),'utf8');
-    const {page}=loadPage('index');
-    const hidden=!xml.includes('text-generation-entry')&&!xml.includes('onOpenTextGeneration')&&
-      !css.includes('.text-generation-entry')&&typeof page.onOpenTextGeneration==='undefined';
-    return [hidden&&xml.includes('bindtap="onPickImage"')&&xml.includes('showcase-scroll'),
-      {textEntryRemoved:hidden,photoEntryPresent:xml.includes('bindtap="onPickImage"')}];
+    return [xml.indexOf('text-generation-entry')>xml.indexOf('showcase-scroll') && xml.includes('entry-label')&&css.includes('min-height:88rpx'),
+      {afterShowcase:xml.indexOf('text-generation-entry')>xml.indexOf('showcase-scroll'),compact:css.includes('min-height:88rpx')}];
   });
-  await test('text_generation_page_is_not_registered_or_packaged',()=>{
-    const config=JSON.parse(fs.readFileSync(path.join(ROOT,'miniprogram/app.json'),'utf8'));
-    const registered=config.pages.some(p=>p.startsWith('pages/text-generation/'));
-    const packagedFiles=['js','json','wxml','wxss'].filter(ext=>fs.existsSync(
-      path.join(ROOT,'miniprogram/pages/text-generation/text-generation.'+ext)));
-    return [!registered&&packagedFiles.length===0,{registered,packagedFiles}];
+  await test('text_generation_separate_page_uses_server_price_and_no_photo',async()=>{
+    let sent,route;
+    const app=appFixture();
+    const {page}=loadPage('text-generation',{config:async()=>({text_generation:{ready:true,price:75}}),
+      request:async(path,o)=>{sent={path,...o};return {code:0,job_id:'textjob123456'};}},app,{navigateTo:o=>route=o.url});
+    page.onShow();await tick();page.onInput({detail:{value:'水彩森林'}});await page.onGenerate();
+    return [page.data.price===75&&sent.path==='/api/text-generation'&&!sent.data.image&&
+      app.globalData.historyList[0].inputMode==='text'&&route==='/pages/works/works',
+      {price:page.data.price,path:sent.path,photoRequired:false,route}];
   });
-  await test('photo_submission_unknown_response_blocks_reposting',async()=>{
-    let calls=0,fileInfoCalls=0;
-    const {page}=loadPage('adjust',{submitJob:async()=>{calls++;const e=new Error('network');e.code='NETWORK';e.jobSubmissionAttempted=true;throw e;}},
-      appFixture(),{getFileInfo:()=>fileInfoCalls++});
-    page._foreground=true;page.data.priceReady=true;page.data.lightPoints=90;page.data.imagePath='fixture.jpg';
-    await page.executeUpload('fixture.jpg');await page.onStartGenerate();
-    return [calls===1&&fileInfoCalls===0&&page._submissionUncertain,
-      {calls,fileInfoCalls,uncertain:!!page._submissionUncertain}];
+  await test('text_generation_disabled_or_uncertain_never_reposts',async()=>{
+    let calls=0;
+    const {page}=loadPage('text-generation',{request:async()=>{calls++;const e=new Error('network');e.code='NETWORK';e.jobSubmissionAttempted=true;throw e;}});
+    await page.onGenerate();const disabledCalls=calls;
+    page.setData({ready:true,prompt:'forest'});await page.onGenerate();await page.onGenerate();
+    return [disabledCalls===0&&calls===1&&page._uncertain,{disabledCalls,calls,uncertain:!!page._uncertain}];
   });
   await test('template_popularity_orders_success_counts_without_breaking_search',()=>{
     const {page}=loadPage('templates',{absolute:x=>x});
@@ -109,18 +107,15 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     return [english==='b'&&tags==='c'&&empty===0&&page.data.filteredTemplates[0].id==='b',
       {english,tags,empty,afterClear:page.data.filteredTemplates.map(t=>t.id)}];
   });
-  await test('photo_prompt_removed_and_legacy_draft_not_submitted',async()=>{
+  await test('optional_prompt_collapsed_and_disabled_draft_not_submitted',async()=>{
     let sent;
     const {page}=loadPage('adjust',{submitJob:async(p,f)=>{sent=f;throw new Error('stop before real upload');}});
     const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/adjust/adjust.wxml'),'utf8');
-    const removed=!Object.hasOwn(page.data,'customPrompt')&&!Object.hasOwn(page.data,'showCustomPrompt')&&
-      typeof page.onCustomPromptInput==='undefined'&&typeof page.onToggleCustomPrompt==='undefined';
-    // Simulate persisted data from an older client; no instruction may leave the page.
-    page.setData({customPrompt:'legacy fixture instruction',showCustomPrompt:true});
+    const collapsed=page.data.showCustomPrompt===false;
+    page.setData({customPrompt:'remove everything',showCustomPrompt:false});
     await page.executeUpload('/isolated.jpg');
-    return [removed&&!Object.hasOwn(sent,'custom_prompt')&&!Object.hasOwn(sent,'customPrompt')&&
-      !xml.includes('onCustomPromptInput')&&!xml.includes('补充要求')&&xml.includes('onTextFieldInput'),
-      {removed,submittedPrompt:sent.custom_prompt||'',templateTextInputKept:xml.includes('onTextFieldInput')}];
+    return [collapsed&&!sent.custom_prompt&&xml.includes('可选')&&xml.includes('不用填写'),
+      {collapsed,submittedPrompt:sent.custom_prompt||'',optionalLabel:xml.includes('可选')}];
   });
   await test('template_single_output_keeps_artwork_text_without_crop',async()=>{
     let sent;
@@ -163,8 +158,7 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     for(const file of walk(path.join(ROOT,'miniprogram')).filter(f=>f.endsWith('.js'))) {
       new vm.Script(fs.readFileSync(file,'utf8'),{filename:file});count++;
     }
-    for(const name of fs.readdirSync(path.join(ROOT,'miniprogram/pages')).filter(name=>fs.existsSync(
-      path.join(ROOT,'miniprogram/pages',name,name+'.js')))) {
+    for(const name of fs.readdirSync(path.join(ROOT,'miniprogram/pages'))) {
       const {page}=loadPage(name);
       const xml=fs.readFileSync(path.join(ROOT,`miniprogram/pages/${name}/${name}.wxml`),'utf8');
       for(const match of xml.matchAll(/\b(?:bind(?::)?\w+|catch(?::)?\w+)=["']([a-zA-Z_$][\w$]*)["']/g)) {

@@ -3,6 +3,7 @@ const api = require('../../utils/api.js');
 const update=(page,patch)=>typeof api.setDataStable==='function'?api.setDataStable(page,patch):page.setData(patch);
 
 Page({
+  onOpenTextGeneration() {wx.navigateTo({url:'/pages/text-generation/text-generation'});},
   data: {
     lightPoints: 0,
     freeMode: false,

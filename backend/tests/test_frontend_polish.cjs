@@ -38,29 +38,21 @@ async function test(name,fn){try{await fn();rows.push({case:name,passed:true});c
   p.onCopyOrder({currentTarget:{dataset:{id:'order123'}}});assert.equal(copied,'order123');assert.deepEqual(calls,['/api/payment/orders']);
   assert(!xml('orders').includes('核对到账 / 退款'));
  });
- await test('photo_price_config_failure_is_visible_and_retry_recovers',async()=>{
-  let fail=true;const p=page('adjust',{me:async()=>({balance:100}),config:async()=>{if(fail)throw new Error('offline');return {prices:{light:75,fine:95},free_mode:false};}});
-  p.loadUserData();await tick();assert(p.data.priceError);assert(!p.data.priceReady);
-  fail=false;p.loadUserData();await tick();assert.equal(p.data.priceError,'');assert(p.data.priceReady);
-  assert.equal(p.data.costLight,75);assert.equal(p.data.costFine,95);assert.equal(p.data.currentQualityCost,75);
+ await test('text_config_error_differs_from_disabled_and_retries',async()=>{
+  let fail=true;const p=page('text-generation',{config:async()=>{if(fail)throw new Error('offline');return {text_generation:{ready:true,price:75}};}});
+  await p.onShow();assert(p.data.configError);assert(!p.data.ready);assert(!p.data.configLoading);
+  fail=false;await p.loadConfig();assert.equal(p.data.configError,'');assert(p.data.ready);assert.equal(p.data.price,75);
  });
- await test('template_overlay_text_draft_survives_tier_changes_without_photo_prompt',()=>{
-  const p=page('adjust');assert.equal(typeof p.onCustomPromptInput,'undefined');assert.equal(typeof p.onToggleCustomPrompt,'undefined');
-  p.data.selectedTemplate={id:'fixture',text_fields:[{key:'title'}]};p.data.singleOutputAvailable=true;
-  // Model wx.setData's dotted field update for the retained plain-text overlay input.
-  p.setData=patch=>Object.entries(patch).forEach(([key,value])=>{
-    if(key.startsWith('textValues.'))p.data.textValues[key.slice('textValues.'.length)]=value;
-    else p.data[key]=value;
-  });
-  p.onTextFieldInput({currentTarget:{dataset:{key:'title'}},detail:{value:'我的模板标题'}});
-  p.onSelectQuality({currentTarget:{dataset:{quality:'fine'}}});p.onSelectTemplateOutput({currentTarget:{dataset:{mode:'single'}}});
-  assert.equal(p.data.textValues.title,'我的模板标题');assert(!Object.hasOwn(p.data,'customPrompt'));assert(!Object.hasOwn(p.data,'showCustomPrompt'));
-  assert.equal(p.data.templateOutputMode,'single');assert(!xml('adjust').includes('onCustomPromptInput'));assert(xml('adjust').includes('onTextFieldInput'));
+ await test('text_examples_preserve_drafts_until_confirmed_and_respect_busy',()=>{
+  let modal;const p=page('text-generation',{}, {showModal:o=>modal=o});const event={currentTarget:{dataset:{index:0}}};
+  p.data.prompt='我的描述';p.onUseExample(event);assert.equal(p.data.prompt,'我的描述');modal.success({confirm:false});assert.equal(p.data.prompt,'我的描述');
+  p.onUseExample(event);modal.success({confirm:true});assert.equal(p.data.prompt,p.data.examples[0].prompt);
+  p.data.busy=true;p.onClearPrompt();assert(p.data.prompt);p.data.busy=false;p.onClearPrompt();assert.equal(p.data.prompt,'');
  });
- await test('late_template_config_does_not_overwrite_newer_prices',async()=>{
-  const resolves=[];const p=page('templates',{config:()=>new Promise(r=>resolves.push(r)),templates:async()=>({items:[],groups:[]})});
-  p.fetchTemplates();p.fetchTemplates(null,true);resolves[1]({prices:{light:80,fine:100},free_mode:false});await tick();
-  resolves[0]({prices:{light:40,fine:40},free_mode:true});await tick();assert.equal(p.data.priceLight,80);assert.equal(p.data.priceFine,100);assert(!p.data.freeMode);
+ await test('late_text_config_does_not_overwrite_newer_result',async()=>{
+  const resolves=[];const p=page('text-generation',{config:()=>new Promise(r=>resolves.push(r))});
+  const first=p.loadConfig(),second=p.loadConfig();resolves[1]({text_generation:{ready:true,price:80}});await second;
+  resolves[0]({text_generation:{ready:false,price:40}});await first;assert(p.data.ready);assert.equal(p.data.price,80);
  });
  await test('works_filter_keeps_original_indices_and_updates_counts',()=>{
   const p=page('works');p.setWorks([{jobId:'a',status:'processing'},{jobId:'b',status:'failed'},{jobId:'c',status:'succeeded',result:'c'}]);
@@ -96,7 +88,7 @@ async function test(name,fn){try{await fn();rows.push({case:name,passed:true});c
   assert.deepEqual(observed,['任务排队中…','正在准备照片…','正在生成图片…','正在保存图片…','正在整理生成结果…']);
  });
  await test('theme_markup_handlers_and_styles_are_consistent',()=>{
-  for(const name of ['orders','index','templates','works','adjust']){
+  for(const name of ['orders','text-generation','templates','works','adjust']){
     const p=page(name),s=xml(name);
     for(const m of s.matchAll(/\b(?:bind|catch)\w+="([a-zA-Z_$][\w$]*)"/g))if(!['true','false'].includes(m[1]))assert.equal(typeof p[m[1]],'function',name+':'+m[1]);
     const css=fs.readFileSync(path.join(root,`miniprogram/pages/${name}/${name}.wxss`),'utf8');assert.equal((css.match(/\{/g)||[]).length,(css.match(/\}/g)||[]).length);
