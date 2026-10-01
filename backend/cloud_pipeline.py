@@ -131,7 +131,9 @@ class CloudPipeline:
                     'base':provider['base_url'],'key_fingerprint':key_fingerprint(provider),
                     'template':copy.deepcopy(template or {}),'text_values':dict(text_values or {}),
                     'source':dict(source or {}),'normalize_long_side':m.settings.normalize_long_side()}
-            if text:packet['estimated_cost_cny']=provider.get('price_light_cny',0)
+            # Photon sale price and provider CNY cost are separate units. Freeze
+            # the selected connection's reference price before queueing work.
+            packet['estimated_cost_cny']=provider.get('price_light_cny' if text else 'price_'+quality+'_cny',0)
             prefix=openid[:8]+'/'+jid
             try:
                 m.jobs.create(jid,openid=openid,status='processing',stage='queued',cloud_pipeline=True,
@@ -282,11 +284,17 @@ class CloudPipeline:
             raise ValueError('供应商生成失败：'+reason+'；本次光子退回')
         if state not in ('completed','succeeded'):
             m.jobs.update(job['id'],cloud_next_at=time.time()+self.config()['poll_interval']);return
+        completed={'provider':'worldcodes','provider_completed_at':job.get('provider_completed_at') or time.time()}
+        if 'estimated_cost_cny' in p and job.get('cost_cny') is None:
+            # Completion confirms generation, not delivery. Retain this clearly
+            # estimated expense even if import, geometry or output audit fails.
+            completed.update(cost_cny=p['estimated_cost_cny'],cost_estimated=True)
+        m.jobs.update(job['id'],**completed)
         result=data.get('result') or {};items=result.get('data') or []
         if len(items)!=1 or not isinstance(items[0],dict) or not items[0].get('url'):
             raise ValueError('供应商未返回单张云端图片地址')
         key=cos.mirror_key(items[0]['url'],MEDIA_HOST,IMPORT_PREFIX)
-        m.jobs.update(job['id'],cloud_phase='import',vendor_result_key=key,stage='store_cos',cloud_next_at=0,provider_completed_at=time.time())
+        m.jobs.update(job['id'],cloud_phase='import',vendor_result_key=key,stage='store_cos',cloud_next_at=0)
 
     def import_result(self,job):
         from cloud_import import import_result
@@ -340,7 +348,7 @@ class CloudPipeline:
                  'processing_ms':round((now-job.get('started_at',now))*1000)}
         m.jobs.update(job['id'],status='succeeded',stage='done',cloud_phase='done',provider='worldcodes',
                       width=final['width'],height=final['height'],completed_at=now,timings=timings,processing_mode='cloud_only')
-        if job.get('input_mode')=='text' and 'estimated_cost_cny' in p:
+        if 'estimated_cost_cny' in p and job.get('cost_cny') is None:
             m.jobs.update(job['id'],cost_cny=p['estimated_cost_cny'],cost_estimated=True)
         current=m.jobs.get(job['id'])
         if current.get('deleted_at') or current['status']!='succeeded':raise RuntimeError('作品已取消，停止交付')

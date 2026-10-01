@@ -839,8 +839,8 @@ async function loadOverview() {
     $("stats").innerHTML =
       stat(s.today_total, "今日任务") + stat(s.today_succeeded, "今日成功") +
       stat(s.today_failed, "今日失败") + stat(s.running, "进行中") +
-      stat("¥" + (s.today_cost_cny ?? 0).toFixed(2), "今日网关成本") +
-      stat("$" + (s.today_cost_usd ?? 0).toFixed(3), "今日 fal 成本") +
+      stat("≈¥" + (s.today_cost_cny ?? 0).toFixed(2), "今日网关参考成本") +
+      stat("≈$" + (s.today_cost_usd ?? 0).toFixed(3), "今日 fal 参考成本") +
       stat(s.wechat_users_total ?? s.users_total ?? 0, "微信小程序账号") +
       stat(s.web_users_total ?? 0, "网页访客（单独统计）");
     $("chain-line").textContent = "降级链：" + o.chain.join(" → ") +
@@ -1598,16 +1598,22 @@ function jobTimingText(j,now=Date.now()/1000){
   if(j.status==='processing'&&j.created_at)add('累计',(now-j.created_at)*1000);
   return parts.length?parts.join(' / '):(j.status==='processing'?'等待阶段计时':'未记录分阶段耗时');
 }
+function jobCostText(j) {
+  const cny=Number(j.cost_cny),usd=Number(j.cost_usd),prefix=j.cost_estimated?'≈':'';
+  if(j.cost_cny!=null&&Number.isFinite(cny)&&cny>=0)
+    return prefix+'¥'+cny.toFixed(cny>0&&cny<.01?4:2);
+  if(j.cost_usd!=null&&Number.isFinite(usd)&&usd>=0)return prefix+'$'+usd.toFixed(4);
+  return '—';
+}
 async function loadJobs() {
   try {
     const data = await api("/jobs?offset=" + JOBS_OFFSET + "&limit=50");
     const t = $("jobs-table");
     t.innerHTML = tableColumns([120,140,70,170,115,85,155,230,85,270]) + "<thead><tr><th>时间</th><th>ID</th><th>档位</th><th>模板</th><th>供应商</th>" +
-                  "<th>状态</th><th>当前／失败阶段</th><th>阶段耗时</th><th>成本</th><th>错误</th></tr></thead><tbody></tbody>";
+                  "<th>状态</th><th>当前／失败阶段</th><th>阶段耗时</th><th title='≈ 表示提交时网关参考价估算；— 表示历史成本未记录。'>成本</th><th>错误</th></tr></thead><tbody></tbody>";
     const tbody = t.tBodies[0];
     data.items.forEach((j) => {
-      const cost = j.cost_cny != null ? (j.cost_estimated?"≈¥":"¥") + (+j.cost_cny).toFixed(2)
-                 : j.cost_usd != null ? "$" + (+j.cost_usd).toFixed(4) : "—";
+      const cost = jobCostText(j);
       const badge = j.status === "succeeded" ? '<span class="badge green">成功</span>'
                   : j.status === "failed" ? '<span class="badge red">失败</span>'
                   : '<span class="badge amber">进行中</span>';

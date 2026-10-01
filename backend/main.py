@@ -1352,14 +1352,20 @@ def _run_pipeline(job_id: str, quality: str, style: str,
                 else:
                     client.enhance(norm, tmp, quality=quality, style=style)
                 provider_returned = True
-                _validate_output(tmp)
-                enhanced = True
-                provider_used = name
                 cost_cny = getattr(client, "last_cost_cny", None)
                 cost_usd = getattr(client, "last_cost_usd", None)
                 scale = getattr(client, "last_scale", None)
                 jobs.update(job_id, provider=name, cost_cny=cost_cny,
-                            cost_usd=cost_usd, scale=scale)
+                            cost_usd=cost_usd, scale=scale,
+                            cost_estimated=bool((name=='worldcodes' and cost_cny is not None) or
+                                                (name=='fal' and cost_usd is not None)),
+                            cost_source=('configured_reference' if name=='worldcodes' and cost_cny is not None
+                                         else 'provider_model_estimate' if name=='fal' and cost_usd is not None else ''))
+                # Keep the completed generation's reference expense even when
+                # validation or later delivery fails; it is separate from refunds.
+                _validate_output(tmp)
+                enhanced = True
+                provider_used = name
                 notice = getattr(client, "last_notice", None)
                 if notice:
                     log.warning("[%s] %s", job_id, notice)

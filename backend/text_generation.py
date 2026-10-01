@@ -26,6 +26,10 @@ def run_text_job(m,jid,conf,provider,prompt,size):
         m.jobs.update(jid,stage='enhance',started_at=time.time())
         phase=time.monotonic()
         OpenAIImagesEnhance(provider).generate(temp,prompt,conf['model'],size,conf['endpoint'])
+        # The queued provider mapping is a snapshot, not a current price lookup.
+        # Generation has completed; a later audit/storage failure still incurred
+        # this reference expense, but an ambiguous/rejected submit records none.
+        m.jobs.update(jid,provider='worldcodes',cost_cny=provider.get('price_light_cny',0),cost_estimated=True)
         timings['provider_ms']=round((time.monotonic()-phase)*1000);phase=time.monotonic()
         m._finalize(temp,out);width,height=m._validate_output(out)
         with open(out,'rb') as f:rejected=m._moderate_or_reject(f.read(),jid,job['openid'])

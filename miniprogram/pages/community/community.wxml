@@ -6,7 +6,7 @@
     <text class="salon-desc">发现喜欢的效果，试试同款风格</text>
   </view>
 
-  <view class="salon-actions"><button class="btn-ink" bindtap="onContribute">投稿我的作品 ↗</button><button class="salon-mine" bindtap="onMySubmissions">我的投稿 ›</button></view>
+  <view class="salon-actions"><button class="salon-action" bindtap="onContribute">投稿我的作品 ›</button><button class="salon-action" bindtap="onMySubmissions">我的投稿 ›</button></view>
   <view wx:if="{{loadError}}" class="ui-state"><text>{{loadError}}</text><button class="ui-state-action" bindtap="onRetry">重新加载</button></view>
   <!-- 展区筛选胶囊：没有展品时不显示筛选条 -->
   <scroll-view

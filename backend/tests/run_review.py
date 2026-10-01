@@ -102,6 +102,8 @@ if not args.legacy:
         ('test_full_review_account.py', 'full_review_account_results.json'),
         ('test_full_review_frontend.cjs', 'full_review_frontend_results.json'),
         ('test_full_review_media.py', 'full_review_media_results.json'),
+        ('test_gateway_cost_tracking.py', 'gateway_cost_tracking_results.json'),
+        ('test_community_action_cost_display.cjs', 'community_action_cost_display_results.json'),
     ):
         path = Path(__file__).with_name(script)
         if path.is_file():

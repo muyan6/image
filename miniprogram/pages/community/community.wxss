@@ -325,8 +325,32 @@
 }
 
 .salon-actions { display:flex;gap:18rpx;margin:24rpx 0 32rpx; }
-.salon-actions button { flex:1;min-width:0;margin:0;padding:18rpx 12rpx;font-size:25rpx;line-height:1.6;border-radius:2rpx; }
-.salon-mine { border:1rpx solid var(--paper-border-dark);background:var(--paper-card-subtle);color:var(--ink-title); }
+.salon-actions button {
+  flex:1 1 0;
+  min-width:0;
+  height:80rpx;
+  min-height:80rpx;
+  margin:0;
+  padding:0 12rpx;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-family:var(--font-serif);
+  font-size:25rpx;
+  font-weight:600;
+  letter-spacing:1rpx;
+  line-height:1;
+  white-space:nowrap;
+  border-width:1rpx;
+  border-style:solid;
+  border-color:var(--paper-border-dark);
+  border-radius:2rpx;
+  background:var(--paper-card-subtle);
+  color:var(--ink-title);
+  box-shadow:none;
+}
+.salon-actions button::after { border:none; }
+.salon-actions button:active { transform:none;opacity:.95; }
 .compare-frame-single { grid-template-columns:1fr; }
 .compare-frame-single .frame-photo-box { width:100%;flex:1; }
 .featured-tag { display:inline-block;padding:4rpx 12rpx;margin-bottom:12rpx;border:1rpx solid var(--accent-gold);color:var(--accent-gold);font-size:21rpx;letter-spacing:2rpx; }
