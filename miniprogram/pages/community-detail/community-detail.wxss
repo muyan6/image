@@ -1,4 +1,4 @@
-.detail-page { min-height:100vh;background:var(--paper-bg);padding:32rpx 32rpx calc(190rpx + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:24rpx; }
+.detail-page { min-height:100vh;background:var(--paper-bg);padding:32rpx 32rpx calc(48rpx + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:24rpx; }
 .detail-eyebrow { font-family:var(--font-mono);font-size:20rpx;letter-spacing:2rpx;color:var(--accent-gold); }
 .art-frame { padding:20rpx;position:relative;margin-top:10rpx; }
 .hero-image { width:100%;display:block;background:#ebe7de;min-height:240rpx; }
@@ -24,18 +24,22 @@
 .quiet-button::after { border:none; }
 .liked { color:var(--accent-rust); }
 .post-actions .quiet-button:last-child,.comment-actions .quiet-button:last-child { margin-left:auto; }
-.comments-head { border-top:1rpx solid var(--paper-border);padding-top:28rpx; }
+.comments-section { display:flex;flex-direction:column;gap:20rpx;border-top:1rpx solid var(--paper-border);padding-top:28rpx; }
+.comments-head .section-title { font-size:30rpx; }
 .comment-count,.muted { font-size:21rpx;color:var(--ink-faint); }
 .comment-card { padding:24rpx 28rpx; }
 .comment-meta { align-items:flex-start;flex-wrap:wrap;gap:8rpx; }
 .comment-author { font-size:25rpx;font-weight:600;color:var(--ink-title);overflow-wrap:anywhere; }
 .comment-content { display:block;font-size:25rpx;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere;margin:16rpx 0; }
 .comment-actions { border-top:1rpx dashed var(--paper-border);padding-top:10rpx; }
-.empty-comments { padding:40rpx 28rpx;display:flex;flex-direction:column;gap:12rpx;text-align:center;font-size:26rpx; }
+.empty-comments { padding:28rpx;display:flex;flex-direction:column;gap:8rpx;text-align:center;font-size:24rpx; }
 .comment-note { text-align:center;font-size:21rpx;color:var(--ink-muted);line-height:1.6; }
 .more-comments { margin:0; }.loading-comments { text-align:center; }
-.composer { position:fixed;left:0;right:0;z-index:100;padding:20rpx 32rpx calc(20rpx + env(safe-area-inset-bottom));background:var(--paper-bg);border-top:1rpx solid var(--paper-border); }
-.composer-row { display:flex;align-items:center;gap:16rpx; }
-.comment-input { flex:1;min-width:0;background:white;border:1rpx solid var(--paper-border-dark);height:76rpx;padding:0 20rpx;font-size:25rpx; }
-.send-button { margin:0;font-size:24rpx;padding:0 24rpx;height:78rpx;line-height:78rpx;border-radius:0;flex-shrink:0; }
-.send-error { display:block;color:var(--accent-rust);font-size:22rpx;line-height:1.5;margin-bottom:12rpx; }
+.composer { position:static;width:100%; }
+.composer-row { display:flex;align-items:center;gap:16rpx;padding:12rpx 12rpx 12rpx 20rpx;background:var(--paper-card);border:1rpx solid var(--paper-border-dark); }
+.composer .comment-input { flex:1 1 0%;width:0;min-width:0;height:80rpx;padding:0;border:0;background:transparent;font-size:25rpx; }
+.comment-placeholder { color:var(--ink-faint);font-size:24rpx;font-weight:400; }
+.composer .send-button { flex:0 0 128rpx;width:128rpx;min-width:0;height:64rpx;min-height:64rpx;margin:0;padding:0 8rpx;font-family:var(--font-sans);font-size:22rpx;font-weight:500;line-height:1;letter-spacing:1rpx;gap:6rpx;border-radius:0;box-shadow:none;white-space:nowrap;transition:background-color 0.15s ease,color 0.15s ease; }
+.composer .send-button::after { border:none; }
+.composer .send-button-muted { background:var(--paper-card-subtle);border-color:var(--paper-border);color:var(--ink-faint);box-shadow:none; }
+.send-error { display:block;color:var(--accent-rust);font-size:22rpx;line-height:1.5;margin-top:12rpx; }

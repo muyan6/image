@@ -6,7 +6,7 @@ const dateLabel=at=>{const d=new Date(at*1000),pad=x=>String(x).padStart(2,'0');
 
 Page({
   data:{post:null,loading:true,error:'',unavailable:false,comments:[],commentTotal:0,hasMore:false,commentsLoading:false,
-    commentError:'',draft:'',sending:false,sendError:'',keyboardHeight:0},
+    commentError:'',draft:'',sending:false,sendError:''},
   onLoad(options){
     this._id=options.id||'';
     const preview=app.globalData.communityPreview;
@@ -47,7 +47,6 @@ Page({
   onRetryComments(){return this.loadComments();},
   onMoreComments(){return this.loadComments(true);},
   onDraft(e){update(this,{draft:e.detail.value,sendError:''});},
-  onKeyboard(e){update(this,{keyboardHeight:e.detail.height||0});},
   async onSend(){
     if(this.data.sending||!this.data.post)return;
     const content=this.data.draft.trim();if(!content){wx.showToast({title:'请写下留言',icon:'none'});return;}

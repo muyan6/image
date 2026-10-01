@@ -120,6 +120,27 @@ function apiModule(wx,app){let module={exports:{}};vm.runInNewContext(fs.readFil
   const xml=fs.readFileSync(path.join(root,'miniprogram/pages/community/community.wxml'),'utf8');assert(xml.includes('catchtap="onMakeSame"'));assert(xml.includes('data-template-id="{{ item.templateId }}"'));
   const t=page('community');t.p.onMakeSame({currentTarget:{dataset:{templateId:'t_film',name:'胶片'}}});assert.equal(t.app.globalData.selectedTemplate.id,'t_film');
  });
+ await test('comment_composer_belongs_to_comments_and_never_uses_keyboard_offset',()=>{
+  const xml=fs.readFileSync(path.join(root,'miniprogram/pages/community-detail/community-detail.wxml'),'utf8');
+  const css=fs.readFileSync(path.join(root,'miniprogram/pages/community-detail/community-detail.wxss'),'utf8');
+  assert(xml.indexOf('class="comments-section"')<xml.indexOf('class="composer"'));
+  assert(xml.indexOf('class="comments-head"')<xml.indexOf('class="composer"'));
+  assert(xml.indexOf('class="composer"')<xml.indexOf('class="empty-comments gallery-card"'));
+  assert(css.includes('.composer { position:static;width:100%; }'));
+  assert(!xml.includes('keyboardHeight'));assert(!xml.includes('bindkeyboardheightchange'));
+  assert(xml.includes('adjust-position="{{true}}"'));assert(xml.includes('cursor-spacing="24"'));
+  assert(!css.includes('190rpx'));assert(!('keyboardHeight' in page('community-detail').p.data));
+ });
+ await test('comment_input_is_primary_and_send_button_does_not_inherit_large_cta',()=>{
+  const css=fs.readFileSync(path.join(root,'miniprogram/pages/community-detail/community-detail.wxss'),'utf8');
+  const button=css.match(/\.composer \.send-button\s*\{([^}]+)\}/)[1];
+  for(const declaration of ['flex:0 0 128rpx','width:128rpx','height:64rpx','margin:0','line-height:1','box-shadow:none','font-size:22rpx'])assert(button.includes(declaration),declaration);
+  const input=css.match(/\.composer \.comment-input\s*\{([^}]+)\}/)[1];
+  for(const declaration of ['flex:1 1 0%','width:0','min-width:0','height:80rpx'])assert(input.includes(declaration),declaration);
+  assert(css.includes('.composer .send-button-muted'));assert(css.includes('.composer .send-button::after { border:none; }'));
+  const xml=fs.readFileSync(path.join(root,'miniprogram/pages/community-detail/community-detail.wxml'),'utf8');
+  assert(xml.includes('bindconfirm="onSend"'));assert(xml.includes('bindtap="onSend"'));assert(xml.includes('maxlength="500"'));
+ });
  fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'community_detail_frontend_results.json'),JSON.stringify({cases},null,2));
  console.log(`COMMUNITY_DETAIL_FRONTEND_SUMMARY total=${cases.length} passed=${cases.filter(x=>x.passed).length} failed=${cases.filter(x=>!x.passed).length}`);
  process.exit(cases.every(x=>x.passed)?0:1);

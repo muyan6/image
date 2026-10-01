@@ -13,13 +13,21 @@
     <view wx:if="{{post.origUrl}}" class="original-card gallery-card" bindtap="onPreview" data-kind="orig"><image class="original-thumb" src="{{post.origUrl}}" mode="aspectFill" bindload="onImageLoad" binderror="onImageError" data-kind="orig"/><view><text class="recipe-caption">修护前原片</text><text class="original-hint">作者授权公开 · 点击查看</text></view><text>↗</text></view>
     <view wx:if="{{post.templateId}}" class="recipe-card gallery-card" bindtap="onMakeSame"><view><text class="recipe-caption">使用配方</text><text class="recipe-name">{{post.templateName}}</text></view><text class="recipe-arrow">→</text></view>
     <view class="post-actions"><button class="quiet-button {{post.liked ? 'liked' : ''}}" bindtap="onLikePost">{{post.liked ? '♥' : '♡'}} {{post.likes}}</button><button class="quiet-button" open-type="share">↗ 分享作品</button><button class="quiet-button" data-kind="post" bindtap="onReport">举报</button></view>
-    <view class="comments-head"><text class="section-title">作品留言</text><text class="comment-count">{{commentTotal}} 条</text></view>
-    <view wx:if="{{commentError}}" class="ui-state"><text>{{commentError}}</text><button class="ui-state-action" bindtap="onRetryComments">重试</button></view>
-    <view wx:if="{{!commentsLoading && !commentError && !comments.length}}" class="empty-comments gallery-card"><text>还没有留言</text><text class="muted">聊聊你喜欢的色彩与创作灵感吧。</text></view>
-    <view class="comment-card gallery-card" wx:for="{{comments}}" wx:key="id"><view class="comment-meta"><text class="comment-author">{{item.author_name}}</text><text class="muted">{{item.dateLabel}}</text></view><text class="comment-content">{{item.content}}</text><view class="comment-actions"><button class="quiet-button {{item.liked ? 'liked' : ''}}" bindtap="onLikeComment" data-id="{{item.id}}">{{item.liked ? '♥' : '♡'}} {{item.likes}}</button><button wx:if="{{item.mine}}" class="quiet-button" data-id="{{item.id}}" bindtap="onDeleteComment">删除</button><button class="quiet-button" data-kind="comment" data-id="{{item.id}}" bindtap="onReport">举报</button></view></view>
-    <button wx:if="{{hasMore}}" class="ui-state-action more-comments" loading="{{commentsLoading}}" bindtap="onMoreComments">更多留言</button>
-    <text wx:elif="{{commentsLoading}}" class="muted loading-comments">正在读取留言…</text>
-    <text class="comment-note">留言经微信自动审核后展示，管理员可删除不适宜内容。</text>
-    <view class="composer" style="bottom:{{keyboardHeight}}px"><text wx:if="{{sendError}}" class="send-error">{{sendError}}</text><view class="composer-row"><input class="comment-input" value="{{draft}}" placeholder="留下一点创作灵感…" maxlength="500" disabled="{{sending}}" bindinput="onDraft" bindkeyboardheightchange="onKeyboard" adjust-position="{{false}}" confirm-type="send" bindconfirm="onSend"/><button class="btn-ink send-button" loading="{{sending}}" disabled="{{sending || !draft}}" bindtap="onSend">{{sending ? '审核中' : '留言'}}</button></view></view>
+    <view class="comments-section">
+      <view class="comments-head"><text class="section-title">作品留言</text><text class="comment-count">{{commentTotal}} 条</text></view>
+      <view class="composer">
+        <view class="composer-row">
+          <input class="comment-input" value="{{draft}}" placeholder="留下一点创作灵感…" placeholder-class="comment-placeholder" maxlength="500" disabled="{{sending}}" bindinput="onDraft" adjust-position="{{true}}" cursor-spacing="24" confirm-type="send" bindconfirm="onSend"/>
+          <button class="btn-ink send-button {{sending || !draft ? 'send-button-muted' : ''}}" loading="{{sending}}" disabled="{{sending || !draft}}" bindtap="onSend">{{sending ? '审核中' : '留言'}}</button>
+        </view>
+        <text wx:if="{{sendError}}" class="send-error">{{sendError}}</text>
+      </view>
+      <view wx:if="{{commentError}}" class="ui-state"><text>{{commentError}}</text><button class="ui-state-action" bindtap="onRetryComments">重试</button></view>
+      <view wx:if="{{!commentsLoading && !commentError && !comments.length}}" class="empty-comments gallery-card"><text>还没有留言</text><text class="muted">聊聊你喜欢的色彩与创作灵感吧。</text></view>
+      <view class="comment-card gallery-card" wx:for="{{comments}}" wx:key="id"><view class="comment-meta"><text class="comment-author">{{item.author_name}}</text><text class="muted">{{item.dateLabel}}</text></view><text class="comment-content">{{item.content}}</text><view class="comment-actions"><button class="quiet-button {{item.liked ? 'liked' : ''}}" bindtap="onLikeComment" data-id="{{item.id}}">{{item.liked ? '♥' : '♡'}} {{item.likes}}</button><button wx:if="{{item.mine}}" class="quiet-button" data-id="{{item.id}}" bindtap="onDeleteComment">删除</button><button class="quiet-button" data-kind="comment" data-id="{{item.id}}" bindtap="onReport">举报</button></view></view>
+      <button wx:if="{{hasMore}}" class="ui-state-action more-comments" loading="{{commentsLoading}}" bindtap="onMoreComments">更多留言</button>
+      <text wx:elif="{{commentsLoading}}" class="muted loading-comments">正在读取留言…</text>
+      <text class="comment-note">留言经微信自动审核后展示，管理员可删除不适宜内容。</text>
+    </view>
   </block>
 </view>
