@@ -112,6 +112,14 @@ function apiModule(wx,app){let module={exports:{}};vm.runInNewContext(fs.readFil
    JSON.parse(fs.readFileSync(path.join(root,`miniprogram/pages/${name}/${name}.json`),'utf8'));
   }
  });
+ await test('community_cta_is_compact_right_aligned_and_keeps_action',()=>{
+  const css=fs.readFileSync(path.join(root,'miniprogram/pages/community/community.wxss'),'utf8');
+  const rule=css.match(/\.exhibit-foot \.make-same-btn\s*\{([^}]+)\}/);assert(rule);
+  for(const value of ['margin: 0','width: 264rpx','height: 60rpx','font-size: 23rpx','line-height: 1','flex: 0 0 264rpx'])assert(rule[1].includes(value),value);
+  assert(css.includes('min-width: 0'));assert(css.includes('gap: 20rpx'));
+  const xml=fs.readFileSync(path.join(root,'miniprogram/pages/community/community.wxml'),'utf8');assert(xml.includes('catchtap="onMakeSame"'));assert(xml.includes('data-template-id="{{ item.templateId }}"'));
+  const t=page('community');t.p.onMakeSame({currentTarget:{dataset:{templateId:'t_film',name:'胶片'}}});assert.equal(t.app.globalData.selectedTemplate.id,'t_film');
+ });
  fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'community_detail_frontend_results.json'),JSON.stringify({cases},null,2));
  console.log(`COMMUNITY_DETAIL_FRONTEND_SUMMARY total=${cases.length} passed=${cases.filter(x=>x.passed).length} failed=${cases.filter(x=>!x.passed).length}`);
  process.exit(cases.every(x=>x.passed)?0:1);

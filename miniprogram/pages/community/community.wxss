@@ -241,12 +241,15 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 20rpx;
   padding-top: 18rpx;
   border-top: 1rpx dashed var(--paper-border);
 }
 
 .interaction-group {
   display: flex;
+  flex: 1;
+  min-width: 0;
   align-items: center;
   gap: 18rpx;
   flex-wrap: wrap;
@@ -281,11 +284,23 @@
   color: var(--ink-muted);
 }
 
-.make-same-btn {
-  font-size: 24rpx;
-  padding: 14rpx 20rpx;
-  flex-shrink: 0;
+.exhibit-foot .make-same-btn {
+  /* Override native button auto margins: share the recipe badge's right edge. */
+  flex: 0 0 264rpx;
+  width: 264rpx;
+  min-width: 0;
+  height: 60rpx;
+  min-height: 60rpx;
+  margin: 0;
+  padding: 0 20rpx;
+  font-size: 23rpx;
+  line-height: 1;
+  letter-spacing: 1rpx;
+  white-space: nowrap;
+  box-shadow: 0 4rpx 12rpx rgba(26, 25, 23, 0.12);
+  transition: background-color 0.15s ease, opacity 0.15s ease;
 }
+.exhibit-foot .make-same-btn::after { border: none; }
 
 /* 底部注记 */
 .salon-footer {
