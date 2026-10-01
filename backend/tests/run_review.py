@@ -106,6 +106,8 @@ if not args.legacy:
         ('test_community_action_cost_display.cjs', 'community_action_cost_display_results.json'),
         ('test_text_generation_frontend_disabled.cjs', 'text_generation_frontend_disabled_results.json'),
         ('test_text_generation_api_preserved.py', 'text_generation_api_preserved_results.json'),
+        ('test_photo_prompt_frontend_disabled.cjs', 'photo_prompt_frontend_disabled_results.json'),
+        ('test_photo_prompt_backend_preserved.py', 'photo_prompt_backend_preserved_results.json'),
     ):
         path = Path(__file__).with_name(script)
         if path.is_file():

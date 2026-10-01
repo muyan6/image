@@ -109,15 +109,18 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     return [english==='b'&&tags==='c'&&empty===0&&page.data.filteredTemplates[0].id==='b',
       {english,tags,empty,afterClear:page.data.filteredTemplates.map(t=>t.id)}];
   });
-  await test('optional_prompt_collapsed_and_disabled_draft_not_submitted',async()=>{
+  await test('photo_prompt_removed_and_legacy_draft_not_submitted',async()=>{
     let sent;
     const {page}=loadPage('adjust',{submitJob:async(p,f)=>{sent=f;throw new Error('stop before real upload');}});
     const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/adjust/adjust.wxml'),'utf8');
-    const collapsed=page.data.showCustomPrompt===false;
-    page.setData({customPrompt:'remove everything',showCustomPrompt:false});
+    const removed=!Object.hasOwn(page.data,'customPrompt')&&!Object.hasOwn(page.data,'showCustomPrompt')&&
+      typeof page.onCustomPromptInput==='undefined'&&typeof page.onToggleCustomPrompt==='undefined';
+    // Simulate persisted data from an older client; no instruction may leave the page.
+    page.setData({customPrompt:'legacy fixture instruction',showCustomPrompt:true});
     await page.executeUpload('/isolated.jpg');
-    return [collapsed&&!sent.custom_prompt&&xml.includes('可选')&&xml.includes('不用填写'),
-      {collapsed,submittedPrompt:sent.custom_prompt||'',optionalLabel:xml.includes('可选')}];
+    return [removed&&!Object.hasOwn(sent,'custom_prompt')&&!Object.hasOwn(sent,'customPrompt')&&
+      !xml.includes('onCustomPromptInput')&&!xml.includes('补充要求')&&xml.includes('onTextFieldInput'),
+      {removed,submittedPrompt:sent.custom_prompt||'',templateTextInputKept:xml.includes('onTextFieldInput')}];
   });
   await test('template_single_output_keeps_artwork_text_without_crop',async()=>{
     let sent;

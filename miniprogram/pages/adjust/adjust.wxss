@@ -659,19 +659,7 @@ page {
   color: #1a1917;
 }
 
-.custom-prompt-input {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 190rpx;
-  padding: 20rpx;
-  border: 1rpx solid #d8d2c4;
-  border-radius: 10rpx;
-  background: #fff;
-  color: #1a1917;
-  font-size: 24rpx;
-  line-height: 1.6;
-}
-.prompt-hint, .violation-notice {
+.violation-notice {
   display: block;
   color: #8d4038;
   font-size: 21rpx;
@@ -763,7 +751,6 @@ page {
 }
 .violation-secondary { background: #fff; color: #1a1917; border: 1rpx solid #d7cec2; }
 .violation-primary { background: #1a1917; color: #fff; border: 1rpx solid #1a1917; }
-.prompt-toggle { padding-bottom:12rpx; }
 .output-unavailable { opacity:0.55; }
 
 /* 成品形式用示意图区分，模型档位保留参数卡片。 */

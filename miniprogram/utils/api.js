@@ -145,6 +145,18 @@ function authedCall(fn) {
   });
 }
 
+function withoutPhotoInstructions(data) {
+  if (typeof data === 'string') {
+    try { return JSON.stringify(withoutPhotoInstructions(JSON.parse(data))); }
+    catch (err) { return data; }
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+  const clean = Object.assign({}, data);
+  delete clean.custom_prompt;
+  delete clean.customPrompt;
+  return clean;
+}
+
 function request(path, options) {
   // This mini-program does not expose text-to-image. Keep the independent
   // backend service available, but reject even accidental client helper calls.
@@ -153,8 +165,10 @@ function request(path, options) {
     error.code = 'FEATURE_DISABLED';
     return Promise.reject(error);
   }
+  const safeOptions = /^\/api\/rescue(?:\/by-upload)?(?:[/?]|$)/.test(path) && options && options.data != null
+    ? Object.assign({}, options, {data: withoutPhotoInstructions(options.data)}) : options;
   const protectedPath = /^\/api\/(me(?:\/|$)|my\/|jobs\/|uploads(?:\/|$)|rescue(?:\/|$)|text-generation(?:\/|$)|payment\/|community\/(?:submissions|posts|comments)(?:\/|$)|auth\/wechat-web\/approve)/.test(path);
-  return protectedPath ? authedCall(() => rawRequest(path, options)) : rawRequest(path, options);
+  return protectedPath ? authedCall(() => rawRequest(path, safeOptions)) : rawRequest(path, safeOptions);
 }
 
 function rawRequest(path, options) {
@@ -371,7 +385,7 @@ function rawUpload(filePath, formData, options) {
       url: apiBase() + '/api/rescue',
       filePath: filePath,
       name: 'image',
-      formData: formData || {},
+      formData: withoutPhotoInstructions(formData) || {},
       header: getToken() ? { 'Authorization': 'Bearer ' + getToken() } : {},
       timeout: opts.timeout || UPLOAD_TIMEOUT,
       success(res) {
@@ -594,7 +608,7 @@ async function _submitViaCos(filePath, formData) {
   await completeUpload(up.upload_id);
 
   const body = {};
-  ['quality', 'style', 'template_id', 'text_fields', 'aspect_ratio', 'custom_prompt', 'template_output_mode', 'expected_price'].forEach((k) => {
+  ['quality', 'style', 'template_id', 'text_fields', 'aspect_ratio', 'template_output_mode', 'expected_price'].forEach((k) => {
     if (formData && formData[k] !== undefined && formData[k] !== '') {
       body[k] = formData[k];
     }
@@ -615,7 +629,7 @@ async function _submitViaCos(filePath, formData) {
  * 成功时响应里的 balance 已同步进 app.globalData。
  */
 async function submitJob(filePath, formData) {
-  const form = _stringifyFormData(formData);
+  const form = _stringifyFormData(withoutPhotoInstructions(formData));
   // 登录与公开配置互不依赖，并行准备；任一失败都不开始上传。
   const [, cfg] = await Promise.all([ensureLogin(), config()]);
   if(form.template_id&&(!cfg||!Array.isArray(cfg.template_quality_options)||!cfg.template_quality_options.includes('light')||!cfg.template_quality_options.includes('fine'))){

@@ -146,3 +146,10 @@ Nginx/Caddy 应保留原 Host，正确传递 X-Forwarded-Proto；只有可信代
 - 新版小程序移除首页文字生图入口、页面注册和对应四个页面源文件；已知旧页面路径也不能打开。官方小程序接口封装对 `/api/text-generation` 在本地返回 `FEATURE_DISABLED`，即使后端 ready=true 也不会提交此类请求。
 - 后端 `/api/text-generation`、文字模型配置、鉴权和记账逻辑保持不变，供独立后端调用；照片修复、模板生成、模板文字字段和已有作品保留。
 - 此调整以重新编译、上传并发布新版小程序生效；无需关闭后端文生图开关。专项为 `test_text_generation_frontend_disabled.cjs`、`test_text_generation_api_preserved.py`。
+
+
+### 小程序关闭照片修复补充指令
+
+- 照片修复页移除“补充要求”展开控件、输入框、草稿状态及相关事件，不再向修复任务提交用户指令。
+- 小程序接口封装对照片 multipart、COS 直传及 JSON 提交统一去除 `custom_prompt` 和旧驼峰别名；即使旧草稿状态残留也不会上传。照片、画幅、档位、光子价格确认、模板选择和模板文字叠加字段保持。
+- 后端 `custom_prompt` 参数及独立接口能力保持不变；此调整需发布新版小程序生效。专项为 `test_photo_prompt_frontend_disabled.cjs`、`test_photo_prompt_backend_preserved.py`。

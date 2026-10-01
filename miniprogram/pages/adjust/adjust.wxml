@@ -144,21 +144,7 @@
       </view>
     </view>
 
-    <!-- 原片修复自定义需求 -->
     <text class="section-hint" wx:if="{{ selectedTemplate && !templateTiersAvailable }}">当前后端尚未支持模板双档，请更新后端后生成。</text>
-    <view class="card-section" wx:if="{{ !selectedTemplate }}">
-      <view class="section-header prompt-toggle" bindtap="onToggleCustomPrompt">
-        <text class="section-title">补充要求 · 可选</text>
-        <text class="section-headline">{{ showCustomPrompt ? '收起补充要求 ∧' : '有明确修改需求再展开 ›' }}</text>
-      </view>
-      <text class="section-hint">不用填写，直接生成即可自动优化清晰度、曝光与色彩。</text>
-      <block wx:if="{{ showCustomPrompt }}">
-        <textarea class="custom-prompt-input" value="{{ customPrompt }}" maxlength="500"
-          placeholder="输入明确请求，例如：移除背景中的路人，美化皮肤等"
-          bindinput="onCustomPromptInput" />
-        <text class="prompt-hint">不确定怎么写就留空。过多或相互冲突的要求可能降低效果；收起后不提交补充文字。</text>
-      </block>
-    </view>
 
     <!-- 卡片 4：模板自定义文字（代码叠加中文，保证文字正确） -->
     <view

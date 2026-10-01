@@ -44,14 +44,18 @@ async function test(name,fn){try{await fn();rows.push({case:name,passed:true});c
   fail=false;p.loadUserData();await tick();assert.equal(p.data.priceError,'');assert(p.data.priceReady);
   assert.equal(p.data.costLight,75);assert.equal(p.data.costFine,95);assert.equal(p.data.currentQualityCost,75);
  });
- await test('photo_prompt_and_template_text_drafts_survive_display_and_tier_changes',()=>{
-  const p=page('adjust');p.onCustomPromptInput({detail:{value:'保持主体，优化照片光线'}});
-  p.onToggleCustomPrompt();assert(p.data.showCustomPrompt);p.onToggleCustomPrompt();assert(!p.data.showCustomPrompt);
-  assert.equal(p.data.customPrompt,'保持主体，优化照片光线');
-  p.data.selectedTemplate={id:'fixture',text_fields:[{key:'title'}]};p.data.textValues={title:'我的模板标题'};p.data.singleOutputAvailable=true;
+ await test('template_overlay_text_draft_survives_tier_changes_without_photo_prompt',()=>{
+  const p=page('adjust');assert.equal(typeof p.onCustomPromptInput,'undefined');assert.equal(typeof p.onToggleCustomPrompt,'undefined');
+  p.data.selectedTemplate={id:'fixture',text_fields:[{key:'title'}]};p.data.singleOutputAvailable=true;
+  // Model wx.setData's dotted field update for the retained plain-text overlay input.
+  p.setData=patch=>Object.entries(patch).forEach(([key,value])=>{
+    if(key.startsWith('textValues.'))p.data.textValues[key.slice('textValues.'.length)]=value;
+    else p.data[key]=value;
+  });
+  p.onTextFieldInput({currentTarget:{dataset:{key:'title'}},detail:{value:'我的模板标题'}});
   p.onSelectQuality({currentTarget:{dataset:{quality:'fine'}}});p.onSelectTemplateOutput({currentTarget:{dataset:{mode:'single'}}});
-  assert.equal(p.data.textValues.title,'我的模板标题');assert.equal(p.data.customPrompt,'保持主体，优化照片光线');
-  assert.equal(p.data.templateOutputMode,'single');assert(xml('adjust').includes('onCustomPromptInput'));assert(xml('adjust').includes('onTextFieldInput'));
+  assert.equal(p.data.textValues.title,'我的模板标题');assert(!Object.hasOwn(p.data,'customPrompt'));assert(!Object.hasOwn(p.data,'showCustomPrompt'));
+  assert.equal(p.data.templateOutputMode,'single');assert(!xml('adjust').includes('onCustomPromptInput'));assert(xml('adjust').includes('onTextFieldInput'));
  });
  await test('late_template_config_does_not_overwrite_newer_prices',async()=>{
   const resolves=[];const p=page('templates',{config:()=>new Promise(r=>resolves.push(r)),templates:async()=>({items:[],groups:[]})});

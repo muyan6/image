@@ -174,17 +174,21 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
     assert.equal(p.data.priceLabel,'✦ 2–5 光子');
     assert.equal(p.data.template.coverUrl,'cover.jpg');
   });
-  await test('custom_prompt_copy_does_not_limit_requirement_count',()=>{
+  await test('supplemental_photo_prompt_ui_removed_template_overlay_kept',()=>{
     const xml=fs.readFileSync(path.join(root,'miniprogram/pages/adjust/adjust.wxml'),'utf8');
-    assert(xml.includes('placeholder="输入明确请求，例如：移除背景中的路人，美化皮肤等"'));
-    assert(!xml.includes('仅补充一项'));
-    assert(xml.includes('maxlength="500"'));assert(xml.includes('bindinput="onCustomPromptInput"'));
+    const css=fs.readFileSync(path.join(root,'miniprogram/pages/adjust/adjust.wxss'),'utf8');
+    assert(!xml.includes('补充要求'));assert(!xml.includes('onToggleCustomPrompt'));assert(!xml.includes('onCustomPromptInput'));
+    assert(!xml.includes('custom-prompt-input'));assert(!css.includes('.custom-prompt-input'));assert(!css.includes('.prompt-toggle'));
+    assert(xml.includes('bindinput="onTextFieldInput"'));assert(xml.includes('value="{{ textValues[item.key] }}"'));
+    assert(xml.includes('生成后叠加在画面上'));
   });
-  await test('plain_restore_sends_custom_requirement',async()=>{
+  await test('plain_restore_ignores_legacy_requirements_and_keeps_photo_options',async()=>{
     let sent;
     const p=page('adjust',{submitJob:async(_,form)=>{sent=form;throw new Error('fixture');}});
-    p._foreground=true;p.data.customPrompt='移除背景中的路人，美化皮肤，保留主体特征';p.onToggleCustomPrompt();
-    await p.executeUpload('photo.jpg');assert.equal(sent.custom_prompt,p.data.customPrompt);
+    p._foreground=true;p.data.customPrompt='legacy fixture instruction';p.data.showCustomPrompt=true;
+    p.data.quality='fine';p.data.costFine=80;p.refreshCurrentCost();p.data.currentRatioKey='9:16';
+    await p.executeUpload('photo.jpg');assert(!Object.hasOwn(sent,'custom_prompt'));assert(!Object.hasOwn(sent,'customPrompt'));
+    assert.equal(sent.quality,'fine');assert.equal(sent.aspect_ratio,'9:16');assert.equal(sent.expected_price,80);
   });
   await test('violation_dialog_routes_feedback_to_wechat_service',async()=>{
     const violation={code:'CONTENT_VIOLATION',violation_id:'event123',message:'图片内容未通过安全审核',charged:1,weekly_count:2,banned:false};
