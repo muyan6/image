@@ -435,7 +435,7 @@ Page({
     const submissionToken = {};
     this._submissionToken = submissionToken;
     const tpl = this.data.selectedTemplate;
-    const generation = (this._generation || 0) + 1;
+    let generation = (this._generation || 0) + 1;
     this._generation = generation;
     const inactive = () => this._foreground === false || this._unloaded || this._generation !== generation || !this.data.processing;
 
@@ -496,11 +496,17 @@ Page({
       }
       if (app.globalData.historyList.length > 50) app.globalData.historyList.length = 50;
       app.persist();
+      // A late response must not release another upload's lock or change its UI.
+      if (this._submissionToken !== submissionToken) return;
       this._submissionPending = false;
       this._submissionToken = null;
 
-      if (this._foreground === false || this._unloaded || this._generation !== generation) return;
+      if (this._foreground === false || this._unloaded) return;
+      // Hide invalidates old polling, not the in-flight submission. If the user
+      // returned before acceptance, resume this accepted job in the current visit.
+      generation = this._generation;
       this.setData({
+        processing: true,
         currentJobId: jobId,
         processingText: '任务已提交，等待生成…'
       });
@@ -520,7 +526,7 @@ Page({
         const msg = String((waitErr && waitErr.message) || '');
         if (waitErr.code === 'USER_BACKGROUND' || msg.includes('canceled') || msg.includes('abort') || !this.data.processing) {
           console.log('切屏或后台等待，任务已在云端继续运行:', jobId);
-          this.setData({ processing: false });
+          if (!this._unloaded && this._generation === generation) this.setData({ processing: false });
           return;
         }
         throw waitErr;
@@ -563,7 +569,9 @@ Page({
     } catch (err) {
       // 即使请求结束时页面在后台，也要保留待核对标记，返回后不重复提交。
       if (err && err.jobSubmissionAttempted) this._submissionUncertain = true;
-      if (this._foreground === false || this._unloaded || this._generation !== generation) return;
+      const currentSubmission = this._submissionToken === submissionToken;
+      if (this._foreground === false || this._unloaded ||
+          (this._generation !== generation && !currentSubmission)) return;
       console.error('生成失败', err);
       this.setData({ processing: false });
       this.setData({ lightPoints: app.globalData.lightPoints });

@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException
 import cos_store as cos
 from cloud_origin import MEDIA_HOST, IMPORT_PREFIX
-from cloud_layout import text_rule
+from cloud_layout import text_rule, processing_batches
 from gateway_async import AsyncImages, GatewayAsyncError, key_fingerprint, failure_diagnostic
 from gateway_profiles import text_gateway
 from image_processing import normalization_rule
@@ -100,6 +100,11 @@ class CloudPipeline:
         if not self.ready(quality,text=bool(text)):raise HTTPException(503,detail='云端生成通道未就绪：请核对所选生成网关配置和 COS 限定回源规则')
         template=m.select_template_quality(template,quality) if template else None
         if template:aspect_ratio=''
+        if text_values:
+            try:
+                text_rule(1024, 1536, template or {}, dict(text_values))
+            except ValueError as exc:
+                raise HTTPException(400, detail=str(exc)) from exc
         provider=text_gateway(m.settings) if text else m.settings.gateway_for(quality)
         model=(text or {}).get('model') or provider.get('model_'+quality)
         if not model:raise HTTPException(503,detail='生成模型尚未配置')
@@ -114,6 +119,11 @@ class CloudPipeline:
             cfg=self.config()
             if len(self.pending())>=cfg['max_queued']+cfg['generation_concurrency']:
                 raise HTTPException(429,detail='云端任务队列已满，请稍后重试')
+            deadline = time.time() + cfg['timeout_seconds']
+            if source:
+                # The permit's original one-hour expiry must not delete the
+                # accepted input while it waits for a metadata/generation slot.
+                m.cleanup.retain_until('cos', source['key'], deadline + 300)
             try:balance=m.users.reserve_job(openid,jid,charged,m.settings.quota(),free)
             except m.AdmissionError as exc:raise HTTPException(exc.status,detail=str(exc)) from exc
             packet={'prompt':prompt,'model':model,'size':(text or {}).get('size',''),
@@ -131,7 +141,7 @@ class CloudPipeline:
                     input_mode='text' if text else 'photo',orig_file='',result_file='',
                     orig_cos=('origins/'+prefix+source['ext']) if source else None,
                     result_cos='results/'+prefix+'.jpg',norm_cos=('norms/'+prefix+'.jpg') if source else None,
-                    deadline=time.time()+cfg['timeout_seconds'],cloud_next_at=0,
+                    deadline=deadline,cloud_next_at=0,
                     cloud_audit_mode=cfg.get('audit_mode','wechat_auto'))
                 m.users.confirm_job(jid,'云端异步生成 '+model)
             except Exception:
@@ -294,9 +304,27 @@ class CloudPipeline:
         self.require_live(job['id'])
         m.cleanup.schedule('cos',job['result_cos'],time.time()+2*m.JOB_TTL_SECONDS)
         if not job.get('cloud_output_prepared'):
-            prepared_meta=cos.process_image(m.settings,key,job['result_cos'],rule)
+            batches=processing_batches(rule)
+            stem,ext=job['result_cos'].rsplit('.',1)
+            intermediate=[f'{stem}_layout_{i+1:03d}.{ext}' for i in range(len(batches)-1)]
+            targets=intermediate+[job['result_cos']]
+            m.jobs.update(job['id'],cloud_layout_keys=intermediate)
+            for target in intermediate:
+                m.cleanup.schedule('cos',target,job['deadline']+3600)
+            done=int(job.get('cloud_output_batches_done') or 0)
+            prepared_meta=None
+            for index in range(done,len(batches)):
+                self.require_live(job['id'])
+                source=key if index==0 else targets[index-1]
+                prepared_meta=cos.process_image(m.settings,source,targets[index],batches[index])
+                # Acknowledged batches survive retries/restarts. Each target is
+                # independent, so replaying an unacknowledged batch is idempotent.
+                m.jobs.update(job['id'],cloud_output_batches_done=index+1)
+            if prepared_meta is None:
+                prepared_meta=cos.object_metadata(m.settings,job['result_cos'])
             final=cos.image_info(m.settings,job['result_cos'])
             m.jobs.update(job['id'],cloud_output_prepared=True,cloud_output_info=final,cloud_output_meta=prepared_meta)
+            for target in intermediate:m.cleanup.schedule('cos',target,time.time())
         else:final=job.get('cloud_output_info') or cos.image_info(m.settings,job['result_cos'])
         meta=job.get('cloud_output_meta') if job.get('cloud_output_prepared') else prepared_meta
         if not isinstance(meta,dict):meta=cos.object_metadata(m.settings,job['result_cos'])
@@ -344,7 +372,7 @@ class CloudPipeline:
                       failed_phase=job.get('cloud_phase'),failed_stage=job.get('stage'),failed_at=time.time()):
             return
         m.users.refund_job(job['openid'],job['id'])
-        for key in (job.get('result_cos'),job.get('norm_cos'),job.get('orig_cos'),job['cloud_request']['source'].get('key')):
+        for key in (job.get('result_cos'),job.get('norm_cos'),job.get('orig_cos'),job['cloud_request']['source'].get('key'),*(job.get('cloud_layout_keys') or [])):
             if key:m.cleanup.schedule('cos',key,time.time())
 
     def wait_audit(self,job):
@@ -377,7 +405,7 @@ class CloudPipeline:
                     self.fail(current,str(exc) if isinstance(exc,(ValueError,cos.CosError,RuntimeError)) else '云端处理未完成，本次光子退回')
             elif current and (current.get('deleted_at') or current.get('status')=='failed'):
                 # A delete may race a cloud copy; delete unique targets after that copy finishes.
-                for key in (current.get('result_cos'),current.get('norm_cos'),current.get('orig_cos')):
+                for key in (current.get('result_cos'),current.get('norm_cos'),current.get('orig_cos'),*(current.get('cloud_layout_keys') or [])):
                     if key:m.cleanup.schedule('cos',key,time.time())
                 if current.get('deleted_at'):
                     m.cleanup.delete_cos_now(m.settings,m._job_cos_keys(current))

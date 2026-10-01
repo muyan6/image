@@ -497,9 +497,13 @@ def make_admin_router(*, settings: SettingsStore,
         return {"items": users.recent_audit(min(max(1, limit), 200))}
 
     @router.get("/violations")
-    def list_violations(request: Request, limit: int = 100) -> Dict[str, Any]:
+    def list_violations(request: Request, limit: int = 100, offset: int = 0,
+                        feedback_only: bool = False, status: str = "all") -> Dict[str, Any]:
         _guard(request)
-        return {"items": users.list_violations(min(max(1, limit), 200))}
+        try:
+            return users.violation_page(limit, offset, feedback_only, status)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.post("/violations/{violation_id}/review")
     async def review_violation(violation_id: str, request: Request) -> Dict[str, Any]:
@@ -640,12 +644,12 @@ def make_admin_router(*, settings: SettingsStore,
         current = templates.get_template(tpl_id)
         if current is None:
             raise HTTPException(status_code=404, detail="模板不存在")
-        next_v = int(current.get("cover_v", 0) or 0) + 1
-
-        # COS 用版本化对象键（covers/{id}_s{slot}_v{n}.jpg），免缓存刷新
-        cover_key = "covers/%s_s%d_v%d.jpg" % (tpl_id, slot, next_v)
-        cover_ref = "local:%s_s%d_v%d.jpg" % (tpl_id, slot, next_v)
-        local_name = "%s_s%d_v%d.jpg" % (tpl_id, slot, next_v)
+        # The metadata version is incremented only when the slot is committed.
+        # Give each in-flight upload its own immutable asset, including fallback,
+        # so different upload/commit orders cannot overwrite another request's image.
+        local_name = "%s_s%d_%s.jpg" % (tpl_id, slot, secrets.token_hex(12))
+        cover_key = "covers/" + local_name
+        cover_ref = "local:" + local_name
         if settings.cos_ready():
             try:
                 from cos_store import CosError, put_object as cos_put
@@ -653,8 +657,7 @@ def make_admin_router(*, settings: SettingsStore,
                 cover_ref = "cos:%s" % cover_key
             except CosError as exc:
                 log.warning("封面传 COS 失败，退本地存储: %s", exc)
-                cover_ref = "local:%s_s%d.jpg" % (tpl_id, slot)
-                local_name = "%s_s%d.jpg" % (tpl_id, slot)
+                cover_ref = "local:" + local_name
         with open(os.path.join(covers_dir(), local_name), "wb") as fh:
             fh.write(jpg)   # 本地永远留一份降级副本
         updated = templates.set_cover_slot(tpl_id, slot, cover_ref)

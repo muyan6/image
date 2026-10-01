@@ -65,7 +65,7 @@ from settings_store import AnnouncementStore, SettingsStore
 from templates_store import TemplateStore, covers_dir
 from text_overlay import apply as apply_text_overlay, collect_values
 from tencent_cs import ModerationError, moderate_image_bytes, moderate_text
-from user_store import AdmissionError, UserStore
+from user_store import AdmissionError, UserStore, business_midnight
 from reward_verifier import verify_video
 import wechat_sec
 from wechat_sec import WechatSecError
@@ -379,8 +379,7 @@ def _check_quota(openid: str) -> Optional[str]:
         users.audit(openid, "rate_limited")
         return "提交太频繁，歇一会儿再来喵"
     if quota.get("daily", 0) > 0 and not settings.free_mode():
-        lt = time.localtime(now)
-        midnight = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+        midnight = business_midnight(now)
         if users.jobs_in_window(openid, midnight) >= quota["daily"]:
             users.audit(openid, "quota_exhausted")
             return "今日次数已用完，明天再来吧"
@@ -796,8 +795,11 @@ class JobStore:
                     job["error"] += "（历史扣款记录待核对）"
                     users.audit(job.get("openid") or "", "charge_reconciliation_required", "job=" + job["id"])
                 interrupted.append(job)
-            all_statuses[job["id"]] = ("cancelled_charged" if job.get("cancel_without_refund") else
-                                       "deleted" if job.get("deleted_at") else job["status"])
+            # A deliverable remains paid even when its owner deletes it before
+            # the separate ledger commit. Its deletion tombstone is not failure.
+            all_statuses[job["id"]] = ("succeeded" if job["status"] == "succeeded" else
+                                       "cancelled_charged" if job.get("cancel_without_refund") else
+                                        "deleted" if job.get("deleted_at") else job["status"])
             if now > self._expires_at(job):
                 self._startup_evicted.append(job)
                 continue
@@ -1001,6 +1003,14 @@ class JobStore:
             matched.sort(key=lambda j: j.get("created_at", 0), reverse=True)
             return matched[offset:offset + limit]
 
+    def counts_for_openid(self, openid: str) -> Dict[str, int]:
+        """Authoritative totals; the mini-program only needs one thumbnail page."""
+        with self._lock:
+            matched = [job for job in self._data.values()
+                       if job.get("openid") == openid and not job.get("deleted_at")]
+            return {"total": len(matched), "processing_count": sum(
+                job.get("status") == "processing" for job in matched)}
+
 
 def _cleanup_job_files(evicted_jobs: List[Dict[str, Any]]) -> None:
     """Invalidate deliverables locally and persist all remote deletions for retry."""
@@ -1021,6 +1031,7 @@ def _cleanup_job_files(evicted_jobs: List[Dict[str, Any]]) -> None:
 
 def _job_cos_keys(job):
     keys=[job.get(f) for f in ('orig_cos','result_cos','norm_cos','comparison_cos')]
+    keys.extend(job.get('cloud_layout_keys') or [])
     keys.append((job.get('cloud_request') or {}).get('source',{}).get('key'))
     coordinator=globals().get('cloud')
     if coordinator and job.get('cloud_pipeline'):keys.extend(coordinator.audits.cancel(job['id']))
@@ -1582,9 +1593,7 @@ def _default_style_for(quality: str) -> str:
 def _admin_stats() -> Dict[str, Any]:
     """后台仪表盘统计：按本地自然日聚合。"""
     now = time.time()
-    lt = time.localtime(now)
-    midnight = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday,
-                            0, 0, 0, 0, 0, -1))
+    midnight = business_midnight(now)
     items, total = jobs.list_recent(0, 10 ** 6)
     today = [j for j in items if j.get("created_at", 0) >= midnight]
     out = {
@@ -2482,7 +2491,8 @@ def get_my_jobs(request: Request, limit: int = 30, offset: int = 0):
             "result_url": _job_media_url(job, "result"),
             "created_at": job.get("created_at"),
         })
-    return {"jobs": res,"has_more":more,"next_offset":offset+len(res)}
+    return {"jobs": res,"has_more":more,"next_offset":offset+len(res),
+            **jobs.counts_for_openid(user["openid"])}
 
 
 @app.delete("/api/my/jobs/{job_id}")
@@ -2491,7 +2501,11 @@ def delete_my_job(job_id: str, request: Request):
     job = jobs.delete_for_openid(_safe_job_id(job_id), user["openid"])
     if job is None:
         raise HTTPException(status_code=404, detail="作品不存在")
-    if job.get('cancel_without_refund'):
+    if job.get("status") == "succeeded":
+        # Close the publication/ledger window before deleting a paid result.
+        # Startup also recognizes succeeded tombstones if this commit is interrupted.
+        users.complete_charge(job_id)
+    elif job.get('cancel_without_refund'):
         users.settle_cancelled_charge(job_id)
     elif job.get("status") == "failed":
         users.refund_job(user["openid"], job_id)

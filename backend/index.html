@@ -517,7 +517,7 @@
     if (balanceBadge) balanceBadge.textContent = '✦ ' + n + ' 光子';
   }
 
-  let loginTimer=null,loginBlob=null,loginBusy=false;
+  let loginTimer=null,loginBlob=null,loginBusy=false,loginGeneration=0;
   const loginPanel=document.createElement('div');
   loginPanel.id='wechatLoginPanel';
   loginPanel.style.cssText='display:none;position:fixed;inset:0;background:#0008;z-index:100;align-items:center;justify-content:center';
@@ -526,6 +526,7 @@
   document.getElementById('wechatLoginRefresh').onclick=()=>openWechatLogin(true);
   async function openWechatLogin(refresh){
     if(loginBusy||(!refresh&&loginPanel.style.display==='flex'))return;
+    const generation=++loginGeneration;
     loginBusy=true;loginPanel.style.display='flex';clearInterval(loginTimer);
     const message=document.getElementById('wechatLoginMessage');message.textContent='正在获取登录码…';
     try{
@@ -537,18 +538,21 @@
       loginBlob=URL.createObjectURL(await q.blob());document.getElementById('wechatLoginQr').src=loginBlob;
       message.textContent='请用微信扫一扫，登录码 5 分钟内有效。';
       let checking=false;
-      loginTimer=setInterval(async()=>{
+      const timer=setInterval(async()=>{
+        if(generation!==loginGeneration)return;
         if(checking)return;checking=true;
         try{
           const s=await fetch('/api/auth/wechat-web/'+d.id+'/status',{credentials:'same-origin',headers:{'X-Web-Login':'1'}});
-          const v=await s.json();if(!s.ok)throw new Error(v.detail||'登录码已失效');
+          const v=await s.json();if(generation!==loginGeneration)return;
+          if(!s.ok)throw new Error(v.detail||'登录码已失效');
           if(v.state==='approved'){
             webToken=v.token;try{localStorage.setItem('pr_web_token',webToken);}catch(e){}
-            setBalance(v.balance);clearInterval(loginTimer);loginPanel.style.display='none';
-          }else if(v.state==='denied'){clearInterval(loginTimer);message.textContent='已取消登录，请刷新登录码。';}
-        }catch(e){clearInterval(loginTimer);message.textContent=e.message;}
+            setBalance(v.balance);clearInterval(timer);loginPanel.style.display='none';
+          }else if(v.state==='denied'){clearInterval(timer);message.textContent='已取消登录，请刷新登录码。';}
+        }catch(e){if(generation!==loginGeneration)return;clearInterval(timer);message.textContent=e.message;}
         finally{checking=false;}
       },2000);
+      loginTimer=timer;
     }catch(e){message.textContent=e.message;}
     finally{loginBusy=false;}
   }

@@ -100,6 +100,18 @@ def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFon
     return lines or [""]
 
 
+def _body_block(draw, text, max_width, size, max_height):
+    """Wrap every paragraph and fit the whole block without truncating text."""
+    size=max(1,int(size))
+    while True:
+        font=_font(size)
+        lines=_wrap_text(draw,text.replace('\r\n','\n').replace('\r','\n'),font,max_width)
+        leading=size+max(1,int(size*.25))
+        if len(lines)*leading<=max_height or size==1:
+            return font,lines,leading
+        size=max(1,int(size*.9))
+
+
 def _today_str() -> str:
     import time
     return time.strftime("%Y.%m.%d")
@@ -163,6 +175,12 @@ def _draw_postcard_bottom(img: Image.Image, draw: ImageDraw.ImageDraw,
     """明信片：底部白色卡带。标题（左，加粗黑）+ 日期（右，灰小字）。"""
     w, h = img.size
     band_h = max(int(h * 0.13), 56)
+    header_h=band_h
+    body=role.get('body','')
+    body_font,body_lines,body_leading=(None,[],0)
+    if body:
+        body_font,body_lines,body_leading=_body_block(draw,body,w*.89,max(12,int(h*.020)),max(1,int(h*.40)))
+        band_h+=len(body_lines)*body_leading+int(h*.025)
     band_top = h - band_h
     draw.rectangle([0, band_top, w, h], fill=(250, 249, 246, 255))
     draw.line([(0, band_top), (w, band_top)], fill=(31, 41, 55, 60), width=max(2, h // 900))
@@ -177,25 +195,30 @@ def _draw_postcard_bottom(img: Image.Image, draw: ImageDraw.ImageDraw,
 
     # 左侧：标题（自动缩到卡带宽度一半以内）+ 副标题
     if title:
-        size = max(int(band_h * 0.42), 18)
+        size = max(int(header_h * 0.42), 18)
         font = _shrink_to_fit(draw, title, w * 0.62, size)
-        draw.text((pad, band_top + int(band_h * 0.16)), title, font=font, fill=ink)
+        draw.text((pad, band_top + int(header_h * 0.16)), title, font=font, fill=ink)
         if subtitle:
-            sub_font = _font(max(int(band_h * 0.24), 11))
-            sub_y = band_top + int(band_h * 0.16) + font.size + int(band_h * 0.08)
+            sub_font = _font(max(int(header_h * 0.24), 11))
+            sub_y = band_top + int(header_h * 0.16) + font.size + int(header_h * 0.08)
             if sub_y + sub_font.size < h - 4:
                 draw.text((pad, sub_y), subtitle, font=sub_font, fill=gray)
     elif subtitle:
-        font = _shrink_to_fit(draw, subtitle, w * 0.62, max(int(band_h * 0.32), 14))
-        draw.text((pad, band_top + int(band_h * 0.3)), subtitle, font=font, fill=ink)
+        font = _shrink_to_fit(draw, subtitle, w * 0.62, max(int(header_h * 0.32), 14))
+        draw.text((pad, band_top + int(header_h * 0.3)), subtitle, font=font, fill=ink)
 
     # 右侧：日期 / 落款
     right = role.get("date") or sign
     if right:
-        font = _font(max(int(band_h * 0.26), 12))
+        font = _font(max(int(header_h * 0.26), 12))
         rw = _text_width(draw, right, font)
-        draw.text((w - pad - rw, band_top + int(band_h * 0.34)),
+        draw.text((w - pad - rw, band_top + int(header_h * 0.34)),
                   right, font=font, fill=gray)
+    if body_font:
+        y=band_top+header_h
+        for line in body_lines:
+            draw.text((pad,y),line,font=body_font,fill=ink)
+            y+=body_leading
 
 
 def _draw_poster_center(img: Image.Image, draw: ImageDraw.ImageDraw,
@@ -212,6 +235,9 @@ def _draw_poster_center(img: Image.Image, draw: ImageDraw.ImageDraw,
     title_font = _font(int(h * 0.075)) if title else None
     sub_font = _font(int(h * 0.028)) if subtitle else None
     small_font = _font(int(h * 0.022)) if (date or sign) else None
+    body_font,body_lines,body_leading=(None,[],0)
+    if body:
+        body_font,body_lines,body_leading=_body_block(draw,body,w*.86,max(12,int(h*.022)),max(1,int(h*.48)))
     block_h = 0
     if title_font:
         block_h += title_font.size
@@ -219,6 +245,8 @@ def _draw_poster_center(img: Image.Image, draw: ImageDraw.ImageDraw,
         block_h += int(sub_font.size * 1.7)
     if small_font:
         block_h += int(small_font.size * 1.6)
+    if body_font:
+        block_h+=len(body_lines)*body_leading+int(h*.015)
     block_h = max(block_h, int(h * 0.12))
 
     scrim_top = h - block_h - int(h * 0.07)
@@ -245,6 +273,12 @@ def _draw_poster_center(img: Image.Image, draw: ImageDraw.ImageDraw,
         draw.text((cx - tw / 2, y), subtitle, font=font,
                   fill=(214, 211, 209, 255))
         y += int(font.size * 1.7)
+    if body_font:
+        for line in body_lines:
+            tw=_text_width(draw,line,body_font)
+            draw.text((cx-tw/2,y),line,font=body_font,fill=(214,211,209,255))
+            y+=body_leading
+        y+=int(h*.015)
     if date or sign:
         text = " · ".join(x for x in (date, sign) if x)
         font = _font(small_font.size)
@@ -258,18 +292,25 @@ def _draw_stamp_corner(img: Image.Image, draw: ImageDraw.ImageDraw,
     w, h = img.size
     date = role.get("date", "")
     place = role.get("subtitle") or role.get("sign") or ""
-    if not (date or place):
+    body=role.get('body','')
+    if not (date or place or body):
         return
 
     line1 = date or place
     line2 = place if (date and place) else ""
     font1 = _font(max(int(h * 0.026), 13))
     font2 = _font(max(int(h * 0.02), 10))
+    body_font,body_lines,body_leading=(None,[],0)
+    if body:
+        body_font,body_lines,body_leading=_body_block(draw,body,w*.42,max(12,int(h*.020)),max(1,int(h*.45)))
 
     w1 = _text_width(draw, line1, font1)
     w2 = _text_width(draw, line2, font2) if line2 else 0
     box_w = int(max(w1, w2) + h * 0.05)
     box_h = int(font1.size * 1.5 + (font2.size * 1.5 if line2 else 0) + h * 0.02)
+    if body_font:
+        box_w=int(max(w1,w2,*(_text_width(draw,line,body_font) for line in body_lines))+h*.05)
+        box_h+=len(body_lines)*body_leading+int(h*.012)
     x1, y1 = w - int(w * 0.05) - box_w, int(h * 0.05)
 
     # 白底 + 双线框（外实内虚，邮票感）
@@ -287,3 +328,8 @@ def _draw_stamp_corner(img: Image.Image, draw: ImageDraw.ImageDraw,
         tx = x1 + (box_w - w2) / 2
         draw.text((tx, y1 + int(font1.size * 1.5) + int(h * 0.006)),
                   line2, font=font2, fill=(107, 114, 128, 255))
+    if body_font:
+        y=y1+int(font1.size*1.5)+(int(font2.size*1.5) if line2 else 0)+int(h*.012)
+        for line in body_lines:
+            draw.text((x1+h*.025,y),line,font=body_font,fill=(31,41,55,255))
+            y+=body_leading

@@ -118,3 +118,16 @@ Nginx/Caddy 应保留原 Host，正确传递 X-Forwarded-Proto；只有可信代
 - 社区在 30 秒内切回不重复请求，刷新时保留现有卡片；图片使用最多 36 个会话内临时路径缓存，COS 认证签名变化不改变图片缓存身份。缓存不是永久照片保存，重启、清理缓存、临时文件失效后重新获取；详情及评论接口仍每次校验帖子可见性。
 - `/api/me/invites` 只返回当前账号邀请明细、绑定时间和实际奖励。`invite_bindings.reward` 为兼容旧库的可空新增列，旧记录显示「历史金额未记录」，不以当前奖励推算、不重复记账；新增邀请在原有余额事务内记录当时奖励。
 - 新增 `community_comments`、`community_comment_likes`、`community_reports`、`community_interaction_events` 表及索引，不重置原有余额。先部署后端，再发布小程序；代码回退保留新增表与历史奖励。专项为 `test_community_interactions.py`、`test_community_detail_frontend.cjs`，已纳入 `run_review.py`。
+
+
+## 2026-10-01 全审阅修复后的运行约定
+
+- 已交付作品即使被删除，重启恢复仍结算原扣款；删除标记不作为成功任务退款依据。
+- 设置读取权限/I/O 故障不会重置有效配置。签到、日额度、奖励和后台日统计统一按北京时间（UTC+8）计算，不依赖主机时区。
+- 已受理直传源图的留存期限随任务截止时间延长，避免排队期间按旧上传许可期限删除。
+- 文字叠加超过 COS 单请求十层限制时分批持久化处理，批次可恢复；中间对象在完成、失败、删除后均进入清理队列。正文保留可读字号；确实超出排版容量时在预扣/生成之前拒绝。
+- `/api/my/jobs` 增加 `total` 与 `processing_count`，旧字段保持；“我的”只拉最近一页缩略图，计数采用服务端汇总。
+- 后台反馈接口新增 `feedback_only`、`status`、`offset`，先过滤再分页；封面每次上传使用独立对象键，不覆盖其它在途上传。
+- 关闭云端的历史本地排版完整绘制正文，百度业务鉴权错误110/111仅刷新重试一次；网络超时和5xx不重放付费请求。
+- 发布顺序仍为先更新后端、再更新小程序。通过开发者工具验收原片修复、模板“仅生成后图”、模板“按模板生成”、文生图四组任务时，可在受理后切换页面并发等待；核对任务模式、结果图加载、页面响应和扣款状态。
+- 全审阅专项为 `test_full_review_main.py`、`test_full_review_account.py`、`test_full_review_frontend.cjs`、`test_full_review_media.py`，已纳入 `run_review.py`。

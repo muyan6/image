@@ -33,6 +33,7 @@ Page({
     priceLight: 40,
     priceFine: 40,
     historyList: [],
+    worksTotal: 0,
     previewWorks: [],
     processingCount: 0,
     creditRecordCount: '—',
@@ -82,6 +83,7 @@ Page({
       lightPoints: app.globalData.lightPoints || 0,
       freeMode: !!app.globalData.freeMode,
       historyList: list,
+      worksTotal: list.length,
         previewWorks: previewList.map(({jobId,preview,quality})=>({jobId,preview,quality})),
       processingCount: list.filter(w => w.status === 'processing').length
     });
@@ -122,11 +124,21 @@ Page({
         templateName: j.template_name || '', createdAt: j.created_at || 0
         });
       });
-      const merged = localOnly.concat(cloud).sort((a,b) => (b.createdAt || 0) - (a.createdAt || 0));
+      // This is a recent page, not an authoritative full list when has_more is
+      // true. Keep older cached works; the works page performs full reconciliation.
+      const cloudIds = new Set(cloud.map(w => w.jobId));
+      const older = result.has_more ? prior.filter(w => w.jobId && !cloudIds.has(w.jobId)) : [];
+      const merged = localOnly.concat(cloud, older).sort((a,b) => (b.createdAt || 0) - (a.createdAt || 0));
       app.globalData.historyList = merged;
       app.persist();
-      update(this,{ historyList: merged, previewWorks: merged.slice(0,3).map(({jobId,preview,quality})=>({jobId,preview,quality})),
-        processingCount: merged.filter(w => w.status === 'processing').length });
+      // Counts come from one server summary; do not download every history page
+      // merely to render the profile. Only current page items form the preview.
+      const previews=localOnly.concat(cloud).sort((a,b) => (b.createdAt || 0) - (a.createdAt || 0));
+      update(this,{ historyList: merged, previewWorks: previews.slice(0,3).map(({jobId,preview,quality})=>({jobId,preview,quality})),
+        worksTotal: Number.isInteger(result.total) && result.total >= 0 ? result.total + localOnly.length : merged.length,
+        processingCount: Number.isInteger(result.processing_count) && result.processing_count >= 0
+          ? result.processing_count + localOnly.filter(w => w.status === 'processing').length
+          : merged.filter(w => w.status === 'processing').length });
       this._lastProfileSync = Date.now();
       this._lastHistoryKeys = merged.map(w => w.jobId || w.result || '').join('|');
     }).catch(() => {});

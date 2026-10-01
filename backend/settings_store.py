@@ -367,16 +367,18 @@ class SettingsStore:
     # 持久化
     # ------------------------------------------------------------------ #
     def _load_or_init(self, defaults: Dict[str, Any]) -> None:
-        if not os.path.exists(self._path):
-            self._save_locked(defaults)
-            log.info("设置初始化: %s", self._path)
-            return
         try:
             with open(self._path, "r", encoding="utf-8") as fh:
                 loaded = json.load(fh)
             if not isinstance(loaded, dict):
                 raise ValueError("根节点不是对象")
-        except (OSError, ValueError) as exc:
+        except FileNotFoundError:
+            self._save_locked(defaults)
+            log.info("设置初始化: %s", self._path)
+            return
+        except ValueError as exc:
+            # A failed read is not evidence of corrupt JSON. OSError propagates
+            # without renaming/replacing a valid configuration or its credentials.
             stamp = time.strftime("%Y%m%d_%H%M%S")
             backup = "%s.corrupt_%s" % (self._path, stamp)
             try:

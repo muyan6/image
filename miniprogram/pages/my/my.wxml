@@ -38,7 +38,7 @@
   <!-- 3. 数据指标条 (3 列数据) -> 点击分别跳二级页面 -->
   <view class="stats-card gallery-card">
     <view class="stat-col" bindtap="onGoWorks">
-      <text class="stat-number">{{ historyList.length }}</text>
+      <text class="stat-number">{{ worksTotal }}</text>
       <text class="stat-label">作品</text>
     </view>
     <view class="stat-divider"></view>
@@ -81,8 +81,8 @@
       <view class="section-title-wrap">
         <text class="section-title">我的作品</text>
       </view>
-      <view class="section-more-link" bindtap="onGoWorks" wx:if="{{ historyList.length > 0 }}">
-        <text>全部作品 ({{ historyList.length }})</text>
+      <view class="section-more-link" bindtap="onGoWorks" wx:if="{{ worksTotal > 0 }}">
+        <text>全部作品 ({{ worksTotal }})</text>
         <text class="more-arrow">›</text>
       </view>
     </view>

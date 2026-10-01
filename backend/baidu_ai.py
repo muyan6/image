@@ -164,6 +164,7 @@ class BaiduImageEnhance:
 
         payload = {"image": img_b64}
         last_error: Optional[Exception] = None
+        token_refreshed = False
 
         for attempt in range(RETRIES + 1):
             try:
@@ -181,7 +182,10 @@ class BaiduImageEnhance:
             if resp.status_code == 401:
                 with self._lock:
                     self._token_expires_at = 0.0
+                if token_refreshed or attempt >= RETRIES:
+                    raise BaiduError('access_token 刷新后仍被拒绝',code='AUTH',status=401)
                 token = self.get_token()
+                token_refreshed = True
                 last_error = BaiduError("access_token 失效，已刷新", code="AUTH")
                 continue
 
@@ -211,6 +215,16 @@ class BaiduImageEnhance:
 
             if not isinstance(result,dict):
                 raise BaiduError('百度结果元数据无效',code='BAD_RESPONSE',uncertain=True)
+
+            if str(result.get('error_code')) in ('110','111'):
+                with self._lock:
+                    self._token_expires_at = 0.0
+                if token_refreshed or attempt >= RETRIES:
+                    raise BaiduError('access_token 刷新后仍失效',code='AUTH')
+                token = self.get_token()
+                token_refreshed = True
+                last_error = BaiduError('access_token 失效，已刷新',code='AUTH')
+                continue
 
             if result.get("image"):
                 try:

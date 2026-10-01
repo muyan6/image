@@ -664,8 +664,13 @@
         </div>
         <div class="card">
           <div class="card-head"><h2>误判反馈<small>用户提交后存入服务端违规记录，人工复核在这里处理</small></h2>
-            <button class="btn-ghost btn-small" onclick="loadViolationFeedback()">刷新反馈</button></div>
+            <select id="violation-status" onchange="loadViolationFeedback(true)" style="width:auto;margin-left:auto;margin-right:12px">
+              <option value="active">待复核</option><option value="all">全部反馈</option>
+              <option value="overturned">已撤销误判</option><option value="upheld">维持违规</option>
+            </select><button class="btn-ghost btn-small" onclick="loadViolationFeedback(true)">刷新反馈</button></div>
           <div class="table-wrap"><table id="violations-table"></table></div>
+          <div class="pager"><button class="btn-ghost btn-small" id="violation-prev" onclick="violationPage(-1)">上一页</button>
+            <span class="muted" id="violation-page"></span><button class="btn-ghost btn-small" id="violation-next" onclick="violationPage(1)">下一页</button></div>
         </div>
       </section>
       <div id="page-save-home"><div id="page-save-bar" hidden>
@@ -1795,10 +1800,19 @@ async function loadUsers() {
   } catch (e) { console.error(e); }
 }
 
-async function loadViolationFeedback() {
+let VIOLATION_OFFSET=0,VIOLATION_LOAD_SEQ=0;
+async function loadViolationFeedback(reset) {
+  if(reset)VIOLATION_OFFSET=0;
+  const sequence=++VIOLATION_LOAD_SEQ;
   try {
-    const data = await api('/violations?limit=100');
-    const items = (data.items || []).filter(v => v.feedback);
+    const state=$('violation-status').value||'active';
+    const data = await api('/violations?feedback_only=true&status='+encodeURIComponent(state)+'&limit=30&offset='+VIOLATION_OFFSET);
+    if(sequence!==VIOLATION_LOAD_SEQ)return;
+    const items = data.items || [];
+    if(!items.length&&VIOLATION_OFFSET>0){
+      VIOLATION_OFFSET=Math.max(0,Math.floor((Math.max(1,data.total)-1)/30)*30);
+      return loadViolationFeedback();
+    }
     const table = $('violations-table');
     table.innerHTML = tableColumns([135,135,200,350,100,180]) + '<thead><tr><th>提交时间</th><th>账号</th><th>审核原因</th><th>误判说明</th><th>状态</th><th>复核</th></tr></thead><tbody></tbody>';
     const tbody = table.tBodies[0];
@@ -1814,8 +1828,11 @@ async function loadViolationFeedback() {
       tbody.appendChild(tr);
     }
     if (!items.length) tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无误判反馈</td></tr>';
+    $('violation-page').textContent=`共 ${data.total} 条 · 第 ${Math.floor(VIOLATION_OFFSET/30)+1} 页`;
+    $('violation-prev').disabled=VIOLATION_OFFSET===0;$('violation-next').disabled=!data.has_more;
   } catch (err) { toast(err.message, 'bad'); }
 }
+function violationPage(step){VIOLATION_OFFSET=Math.max(0,VIOLATION_OFFSET+30*step);loadViolationFeedback();}
 
 async function reviewViolation(id, accepted) {
   if (!confirm(accepted ? '确认这是误判？系统将退回本次扣点并重新计算封禁状态。' : '确认维持本次违规判定？')) return;

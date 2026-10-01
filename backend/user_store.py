@@ -44,9 +44,22 @@ def invite_code_of(openid: str) -> str:
         ("inv:" + openid).encode("utf-8")).hexdigest()[:8].upper()
 
 
+BUSINESS_TIMEZONE = datetime.timezone(datetime.timedelta(hours=8))
+
+
+def business_date(timestamp: float) -> datetime.date:
+    """The product's calendar day is Beijing time, independent of host timezone."""
+    return datetime.datetime.fromtimestamp(timestamp, BUSINESS_TIMEZONE).date()
+
+
+def business_midnight(now: Optional[float] = None) -> float:
+    current = datetime.datetime.fromtimestamp(time.time() if now is None else now, BUSINESS_TIMEZONE)
+    return current.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+
+
 def _local_midnight() -> float:
-    lt = time.localtime(time.time())
-    return time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    """Compatibility alias for callers that historically used the host's midnight."""
+    return business_midnight()
 
 
 class UserStore:
@@ -96,6 +109,8 @@ class UserStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_violations_user_ts
                     ON violations(openid, created_at);
+                CREATE INDEX IF NOT EXISTS idx_violations_feedback_status_ts
+                    ON violations(status, created_at DESC, id DESC) WHERE feedback<>'';
                 CREATE TABLE IF NOT EXISTS invite_bindings (
                     invitee TEXT PRIMARY KEY, inviter TEXT NOT NULL,
                     created_at REAL NOT NULL
@@ -296,11 +311,32 @@ class UserStore:
                 'status':row[3],'feedback_submitted':bool(row[4]),'weekly_count':count,'banned':bool(banned)}
 
     def list_violations(self, limit: int = 100) -> List[Dict[str, Any]]:
+        return self.violation_page(limit=limit)["items"]
+
+    def violation_page(self, limit: int = 100, offset: int = 0,
+                       feedback_only: bool = False, status: str = "all") -> Dict[str, Any]:
+        """Filter the review queue before pagination; ordinary violations cannot hide it."""
+        if status not in ("all", "active", "upheld", "overturned"):
+            raise ValueError("违规状态无效")
+        limit = max(1, min(200, int(limit)))
+        offset = max(0, int(offset))
+        filters = []
+        params = []
+        if feedback_only:
+            filters.append("feedback<>''")
+        if status != "all":
+            filters.append("status=?")
+            params.append(status)
+        where = " WHERE " + " AND ".join(filters) if filters else ""
         with self._lock:
+            total = self._conn.execute("SELECT COUNT(*) FROM violations" + where, params).fetchone()[0]
             rows = self._conn.execute("SELECT id,openid,created_at,kind,reason,charged,status,feedback "
-                                      "FROM violations ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
-        return [dict(zip(("id", "openid", "created_at", "kind", "reason", "charged", "status", "feedback"), r))
-                for r in rows]
+                                      "FROM violations" + where + " ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",
+                                      (*params, limit, offset)).fetchall()
+        items = [dict(zip(("id", "openid", "created_at", "kind", "reason", "charged", "status", "feedback"), r))
+                 for r in rows]
+        return {"items": items, "total": total, "offset": offset,
+                "next_offset": offset + len(items), "has_more": offset + len(items) < total}
 
     def resolve_violation(self, violation_id: str, accepted: bool) -> Optional[Dict[str, Any]]:
         """管理员确认误判时原路退回处罚点数，并在无有效违规时解除自动封禁。"""
@@ -568,10 +604,10 @@ class UserStore:
             openid, "earn_" + kind, _local_midnight())
 
     def _checkin_status_locked(self, openid: str, now: float) -> Dict[str, Any]:
-        today = datetime.date.fromtimestamp(now).toordinal()
+        today = business_date(now).toordinal()
         rows = self._conn.execute("SELECT ts FROM audit WHERE openid=? AND action='earn_checkin'",
                                   (openid,)).fetchall()
-        days = {datetime.date.fromtimestamp(ts).toordinal() for (ts,) in rows}
+        days = {business_date(ts).toordinal() for (ts,) in rows}
         done = today in days
         cursor = today if done else today - 1
         streak = 0
