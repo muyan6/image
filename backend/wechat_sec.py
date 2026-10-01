@@ -70,20 +70,23 @@ def wechat_text_ready(settings: SettingsStore) -> bool:
     return bool(settings.moderation().get("enabled") and conf.get("app_id") and conf.get("app_secret"))
 
 
-def check_text(settings: SettingsStore, content: str, openid: str) -> Tuple[str, str, int]:
+def check_text(settings: SettingsStore, content: str, openid: str, *, scene: int = 3) -> Tuple[str, str, int]:
     """微信 msgSecCheck v2 同步文本审核；仅用于已登录的小程序用户。"""
     try:
         resp = requests.post(_TEXT_CHECK_URL,
                              params={"access_token": get_access_token(settings)},
-                             json={"content": content, "version": 2, "scene": 3, "openid": openid},
+                             json={"content": content, "version": 2, "scene": scene, "openid": openid},
                              timeout=(10, 15))
+        resp.raise_for_status()
         data = resp.json()
     except (requests.RequestException, ValueError) as exc:
         raise WechatSecError("文字审核网络或响应错误", code="NETWORK") from exc
+    if not isinstance(data, dict):
+        raise WechatSecError("文字审核响应格式错误", code="BAD_RESPONSE")
     if data.get("errcode"):
         raise WechatSecError("文字审核接口错误", code="API_%s" % data["errcode"])
     result = data.get("result") or {}
-    if not result.get("suggest"):
+    if not isinstance(result, dict) or result.get("suggest") not in ("pass", "risk", "review"):
         raise WechatSecError("文字审核缺少判定结果", code="BAD_RESPONSE")
     return str(result["suggest"]), str(result.get("label") or ""), 0
 

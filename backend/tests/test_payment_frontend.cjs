@@ -55,10 +55,12 @@ async function test(name,f){try{await f();rows.push({case:name,passed:true});}ca
   await t.p.buy({...pkg,amount_fen:99});assert.equal(t.sdk(),1);
   assert(content.includes('官方虚拟支付'));assert(content.includes('联系客服'));assert(!content.includes('App Store'));
  });
- await test('pay_personal_rules_visible_and_admin_cannot_select_sandbox',()=>{
+ await test('pay_merchant_rules_admin_only_and_no_sandbox_selection',()=>{
   const xml=fs.readFileSync(path.join(root,'miniprogram/pages/credits/credits.wxml'),'utf8');
-  for(const term of ['10 万元','1%','12%','T+3','45–60 天','App Store','不另加收'])assert(xml.includes(term),term);
+  assert(xml.includes('App Store'));assert(xml.includes('官方虚拟支付'));assert(!xml.includes('个人主体支付规则'));
+  for(const term of ['10 万元','T+3','45–60 天'])assert(!xml.includes(term),term+' should be admin-only');
   const admin=fs.readFileSync(path.join(root,'backend/admin.html'),'utf8');
+  for(const term of ['10 万元','1%','12%','T+3','45–60 天'])assert(admin.includes(term),term);
   const select=admin.match(/<select id="pay-env"[^>]*>([\s\S]*?)<\/select>/);assert(select);assert(!select[1].includes('value="1"'));
   assert(admin.includes('env:0'));assert(admin.includes('开启苹果 IAP'));assert(!admin.includes('id="pay-sandbox-key"'));
  });

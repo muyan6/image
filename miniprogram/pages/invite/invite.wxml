@@ -15,14 +15,17 @@
     </view>
   </view>
 
-  <!-- 邀请统计与明细尚无服务端接口，不展示虚构数量或记录。 -->
+  <view wx:if="{{recordsLoaded}}" class="stats-row"><view class="stat-col"><text class="stat-val">{{total}}</text><text class="stat-lbl">成功邀请</text></view><view class="stat-sep"></view><view class="stat-col"><text class="stat-val">{{recordedReward}}</text><text class="stat-lbl">{{historicalUnknown ? '已记录奖励光子' : '累计奖励光子'}}</text></view></view>
   <view class="section-box">
     <text class="section-title">邀请明细</text>
+    <view wx:if="{{recordsError}}" class="ui-state"><text>{{recordsError}}</text><button class="ui-state-action" bindtap="onRetryRecords">重新加载</button></view>
     <view class="invite-list gallery-card">
-      <view class="invite-item">
-        <text>当前暂不展示邀请明细；绑定成功的奖励以光子余额为准。</text>
-      </view>
+      <view wx:for="{{records}}" wx:key="id" class="invite-item"><view class="inv-meta"><text class="inv-name">{{item.nickname}}</text><text class="inv-date">{{item.dateLabel}} · 绑定成功</text></view><view class="inv-reward"><text class="inv-status-tag">{{item.reward === null ? '已到账' : '+' + item.reward + ' 光子'}}</text><text wx:if="{{item.reward === null}}" class="inv-date">历史金额未记录</text><text wx:else class="inv-date">奖励已到账</text></view></view>
+      <view wx:if="{{!records.length && recordsLoaded && !recordsError && !recordsLoading}}" class="invite-item invite-empty"><text>还没有成功邀请记录，分享邀请码邀请好友吧。</text></view>
+      <view wx:if="{{recordsLoading && !records.length}}" class="invite-item invite-empty"><text>正在读取邀请明细…</text></view>
     </view>
+    <button wx:if="{{hasMore}}" class="ui-state-action" loading="{{recordsLoading}}" bindtap="onMoreRecords">查看更多邀请</button>
+    <text wx:if="{{historicalUnknown}}" class="rule-hint">有 {{historicalUnknown}} 条历史记录未保存奖励金额，不按当前奖励推算；原有余额不受影响。</text>
   </view>
 
   <text class="rule-hint">每位新用户仅可绑定一次邀请码；绑定成功后双方各获 {{ inviteReward }} 光子。</text>

@@ -31,7 +31,13 @@ Page({
   },
 
   onShow() {
-    if (this._communityLoaded) this.loadCommunity(true);
+    if (app.globalData.communityUpdated) {
+      const delta=app.globalData.communityUpdated;
+      this.setData({items:this.data.items.map(x=>x.id===delta.id?{...x,...delta}:x)});
+      this.filterItems(this.data.activeFilter);app.globalData.communityUpdated=null;
+    }
+    if (this._communityLoaded) this.loadCommunity(!!app.globalData.communityDirty);
+    app.globalData.communityDirty=false;
   },
 
   onPullDownRefresh() {
@@ -42,9 +48,10 @@ Page({
   /** 拉取沙龙展品：后端未开启或无内容时返回空列表，不做任何本地兜底 */
   loadCommunity(force = false) {
     if (!force && this._lastLoadedAt && Date.now() - this._lastLoadedAt < 30000) return Promise.resolve();
+    if (this._loadingCommunity) return this._loadingCommunity;
     const version=(this._loadVersion||0)+1;this._loadVersion=version;
-    this.setData({loading:true,loadError:''});
-    return (async()=>{
+    this.setData({loading:!this.data.items.length,loadError:''});
+    this._loadingCommunity=(async()=>{
       let offset=0,items=[],d;
       do{
         d=await api.request('/api/community'+(offset?'?offset='+offset:''),{timeout:8000});
@@ -52,12 +59,23 @@ Page({
         items.push(...((d&&d.items)||[]));
         if(d&&d.has_more){const next=Number(d.next_offset);if(!Number.isInteger(next)||next<=offset)throw new Error('社区分页异常');offset=next;}
       }while(d&&d.has_more);
-      items=items.map(item=>({...item,resultUrl:api.absolute(item.resultUrl),origUrl:api.absolute(item.origUrl),authorAvatar:item.authorAvatar?api.absolute(item.authorAvatar):''}));
+      items=items.map(item=>{
+        const prior=this.data.items.find(x=>x.id===item.id);
+        const display=(url,old)=>{
+          const next=api.absolute(url);
+          if(typeof api.communityImage==='function')return api.communityImage(next);
+          return old&&old===next?old:next;
+        };
+        return {...item,resultRemote:api.absolute(item.resultUrl),origRemote:api.absolute(item.origUrl),
+          resultUrl:display(item.resultUrl,prior&&prior.resultUrl),origUrl:display(item.origUrl,prior&&prior.origUrl),
+          authorAvatar:item.authorAvatar?api.absolute(item.authorAvatar):''};
+      });
       this._communityLoaded=true;
       this.setData({enabled:!!(d&&d.enabled),featuredReward:d&&typeof d.featured_reward==='number'?d.featured_reward:this.data.featuredReward,
         items:[...new Map(items.map(x=>[x.id,x])).values()],loading:false});
       this.filterItems(this.data.activeFilter);this._lastLoadedAt=Date.now();
-    })().catch(()=>{if(!this._unloaded&&version===this._loadVersion)this.setData({loading:false,loadError:'社区加载失败，请重试'});});
+    })().catch(()=>{if(!this._unloaded&&version===this._loadVersion)this.setData({loading:false,loadError:'社区加载失败，请重试'});}).finally(()=>{this._loadingCommunity=null;});
+    return this._loadingCommunity;
   },
   onRetry(){return this.loadCommunity(true);},
   onUnload(){this._unloaded=true;this._loadVersion=(this._loadVersion||0)+1;},
@@ -96,8 +114,21 @@ Page({
 
   onCommunityImageError(e) {
     const id=e.currentTarget.dataset.id;if(!id)return;
+    const item=this.data.items.find(x=>x.id===id);
+    if(item&&typeof api.forgetCommunityImage==='function')api.forgetCommunityImage(item[e.currentTarget.dataset.kind+'Remote']);
     this._mediaRetries=this._mediaRetries||new Set();if(this._mediaRetries.has(id))return;
     this._mediaRetries.add(id);this.loadCommunity(true);
+  },
+
+  onCommunityImageLoad(e) {
+    const {id,kind}=e.currentTarget.dataset,item=this.data.items.find(x=>x.id===id);
+    if(!item||typeof api.rememberCommunityImage!=='function')return;
+    api.rememberCommunityImage(item[kind+'Remote']).catch(()=>{});
+  },
+  onOpenPost(e) {
+    const id=e.currentTarget.dataset.id,item=this.data.items.find(x=>x.id===id);if(!item)return;
+    app.globalData.communityPreview=item;
+    wx.navigateTo({url:'/pages/community-detail/community-detail?id='+encodeURIComponent(id)});
   },
 
   onPreviewExhibit(e) {

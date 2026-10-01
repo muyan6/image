@@ -248,7 +248,8 @@
 .interaction-group {
   display: flex;
   align-items: center;
-  gap: 24rpx;
+  gap: 18rpx;
+  flex-wrap: wrap;
 }
 
 .like-btn {
@@ -282,7 +283,8 @@
 
 .make-same-btn {
   font-size: 24rpx;
-  padding: 14rpx 28rpx;
+  padding: 14rpx 20rpx;
+  flex-shrink: 0;
 }
 
 /* 底部注记 */

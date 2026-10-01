@@ -325,6 +325,9 @@ Page({
         if (res.confirm) {
           wx.clearStorage({
             success: () => {
+              app.globalData.mediaCache={};
+              app.globalData.communityPreview=null;
+              app.globalData.communityDirty=true;
               app.onLaunch();
               this.refreshUserData();
               wx.showToast({ title: '缓存清理完毕', icon: 'success' });

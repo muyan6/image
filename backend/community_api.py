@@ -6,6 +6,8 @@ from pydantic import BaseModel, StrictBool, Field
 import cos_store as cos
 from community_store import CommunityStore, CATEGORIES
 from community_submissions import store_for, PENDING_TTL
+from community_interactions import interactions_for, REPORT_REASONS
+import wechat_sec
 
 
 class SubmissionBody(BaseModel):
@@ -23,6 +25,71 @@ class RevisionBody(BaseModel):
 
 class LikeBody(BaseModel):
     liked: StrictBool
+
+
+class CommentBody(BaseModel):
+    content: str = Field(min_length=1, max_length=500)
+    request_id: str = Field(pattern=r'^[A-Za-z0-9_-]{8,64}$')
+
+
+class ReportBody(BaseModel):
+    reason: str = Field(max_length=30)
+
+
+def viewer_id(m, request):
+    if request.headers.get('authorization'):
+        try:return m._current_user(request)['openid']
+        except HTTPException:pass
+    return None
+
+
+def visible_post(m, sid):
+    row=store_for(m.users).get(sid)
+    if row:
+        author=m.users.get_user(row['owner'])
+        if row['status']!='published' or not author or author.get('banned') or not m.settings.cos_ready():
+            raise HTTPException(404,detail='帖子已下架或不存在')
+        return row
+    row=next((p for p in CommunityStore(m.settings).list(status='published',limit=200)['items'] if p['id']==sid),None)
+    if not row:raise HTTPException(404,detail='帖子已下架或不存在')
+    return row
+
+
+def visible_comment(m, cid):
+    row=interactions_for(m.users).get(cid)
+    author=m.users.get_user(row['owner']) if row else None
+    if not row or row['status']!='published' or not author or author.get('banned'):
+        raise HTTPException(404,detail='评论已删除或不存在')
+    visible_post(m,row['post_id'])
+    return row
+
+
+def admin_posts(m, status='all', q='', offset=0, limit=30):
+    result=CommunityStore(m.settings).list(status,q,0,200)
+    all_submissions=store_for(m.users).list(status='published',limit=200)[0]
+    stats=result['stats'];stats['total']+=len(all_submissions);stats['published']+=len(all_submissions)
+    stats['pinned']+=sum(bool(r['featured']) for r in all_submissions)
+    items=[dict(p,source='editorial') for p in result['items']]
+    if status!='paused':
+        for row in all_submissions:
+            p=row['payload']
+            if q.strip().lower() not in ' '.join(str(p.get(k,'')) for k in ('title','story','author_name','template_name')).lower():continue
+            items.append(dict(owner_view(m,row),source='submission',status='published',
+                              category_name=CATEGORIES[p['category']],template_name=p['template_name'],
+                              pinned=bool(row['featured']),sort=100,created_at=row['submitted'],updated_at=row['updated']))
+    items.sort(key=lambda p:(not p.get('pinned'),p.get('sort',100),-p.get('created_at',0),p['id']))
+    offset=max(0,offset);limit=max(1,min(200,limit))
+    return {'items':items[offset:offset+limit],'total':len(items),'stats':stats}
+
+
+def admin_delete_post(m, sid):
+    s=store_for(m.users)
+    with s.flow_lock:
+        row=s.get(sid)
+        if not row:return CommunityStore(m.settings).delete(sid)
+        s.withdraw(sid,row['owner'],row['revision']);enqueue_removal(m,row)
+    m.cleanup.delete_cos_now(m.settings,keys(row))
+    return {'ok':True,'affected':1}
 
 
 def keys(row):
@@ -162,6 +229,74 @@ def make_community_router(runtime):
             s.set_like(sid,u['openid'],body.liked);count,liked=s.likes([sid],u['openid'])[sid] if body.liked else s.likes([sid],u['openid']).get(sid,(0,False))
             return {'id':sid,'likes':base+count,'liked':liked}
 
+    @router.get('/api/community/posts/{sid}')
+    def detail(sid:str,request:Request):
+        m=runtime();row=visible_post(m,sid);viewer=viewer_id(m,request)
+        item=post_view(m,row);count,liked=store_for(m.users).likes([sid],viewer).get(sid,(0,False))
+        item['likes']+=count;item['liked']=liked
+        item['comments']=interactions_for(m.users).counts([sid]).get(sid,0)
+        return {'post':item}
+
+    @router.get('/api/community/posts/{sid}/comments')
+    def comments(sid:str,request:Request,offset:int=0,limit:int=30):
+        m=runtime();visible_post(m,sid)
+        return interactions_for(m.users).comments(post_id=sid,viewer=viewer_id(m,request),offset=offset,limit=limit)
+
+    @router.post('/api/community/posts/{sid}/comments')
+    def add_comment(sid:str,body:CommentBody,request:Request):
+        m=runtime();u=community_user(m,request);s=store_for(m.users);i=interactions_for(m.users)
+        content=body.content.strip()
+        if not content:raise HTTPException(400,detail='请写下留言')
+        if u['openid'].startswith('web-') or not wechat_sec.wechat_text_ready(m.settings):
+            raise HTTPException(503,detail='微信评论审核尚未就绪，请稍后再试')
+        if m.settings.maintenance().get('enabled'):raise HTTPException(503,detail='服务维护中，请稍后再试')
+        try:
+            with s.flow_lock:
+                visible_post(m,sid);row,needed=i.reserve_comment(sid,u['openid'],body.request_id,content)
+            if not needed:return {'ok':True,'id':row['id'],'duplicate':True}
+        except ValueError as exc:raise HTTPException(429,detail=str(exc)) from exc
+        try:
+            suggestion,label,_=wechat_sec.check_text(m.settings,content,u['openid'],scene=2)
+        except wechat_sec.WechatSecError as exc:
+            i.finish_comment(row['id'],'failed',exc.code)
+            raise HTTPException(503,detail='微信审核暂未完成，评论尚未发布，请重试') from exc
+        if suggestion.lower()!='pass':
+            i.finish_comment(row['id'],'rejected',suggestion+':'+label)
+            raise HTTPException(400,detail='评论未通过微信审核，请调整内容')
+        with s.flow_lock:
+            try:
+                visible_post(m,sid);community_user(m,request)
+            except HTTPException:
+                i.finish_comment(row['id'],'deleted','post_unavailable');raise
+            final=i.finish_comment(row['id'],'published','wechat:pass:'+label)
+            if final['status']!='published':raise HTTPException(409,detail='评论已删除，停止发布')
+        return {'ok':True,'id':row['id'],'duplicate':False}
+
+    @router.delete('/api/community/comments/{cid}')
+    def delete_comment(cid:str,request:Request):
+        m=runtime();u=m._current_user(request)
+        try:interactions_for(m.users).delete_comment(cid,u['openid']);return {'ok':True}
+        except KeyError:raise HTTPException(404,detail='评论不存在')
+
+    @router.put('/api/community/comments/{cid}/like')
+    def comment_like(cid:str,body:LikeBody,request:Request):
+        m=runtime();u=community_user(m,request)
+        with store_for(m.users).flow_lock:
+            visible_comment(m,cid)
+            try:return interactions_for(m.users).like(cid,u['openid'],body.liked)
+            except KeyError:raise HTTPException(404,detail='评论不存在')
+
+    @router.post('/api/community/posts/{sid}/report')
+    def post_report(sid:str,body:ReportBody,request:Request):
+        m=runtime();u=community_user(m,request);row=visible_post(m,sid)
+        p=row.get('payload',row)
+        return save_report(m,'post',sid,sid,u['openid'],body.reason,p.get('title','')+'\n'+p.get('story',''))
+
+    @router.post('/api/community/comments/{cid}/report')
+    def comment_report(cid:str,body:ReportBody,request:Request):
+        m=runtime();u=community_user(m,request);row=visible_comment(m,cid)
+        return save_report(m,'comment',cid,row['post_id'],u['openid'],body.reason,row['content'])
+
     return router
 
 
@@ -193,13 +328,59 @@ def public_feed(m,request,offset=0,limit=200):
             '_sort':(not row['featured'],100,-row['submitted'],row['id'])})
     items.sort(key=lambda p:p['_sort']);total=len(items);offset=max(0,offset);limit=max(1,min(200,limit));items=items[offset:offset+limit]
     likes=s.likes([p['id'] for p in items],viewer)
+    counts=interactions_for(m.users).counts([p['id'] for p in items])
     for p in items:
         count,liked=likes.get(p['id'],(0,False));p['likes']+=count;p['liked']=liked;p.pop('_sort',None)
+        p['comments']=counts.get(p['id'],0)
     return {'enabled':True,'items':items,'featured_reward':m.settings.rewards()['community_featured'],
             'has_more':offset+len(items)<total,'next_offset':offset+len(items),'total':total,'submissions_enabled':True}
 
 
+def post_view(m,row):
+    if 'payload' in row:
+        p=row['payload']
+        return {'id':row['id'],'title':p['title'],'story':p['story'],'authorName':p['author_name'],'authorAvatar':'',
+                'date':datetime.fromtimestamp(row['submitted'],timezone(timedelta(hours=8))).strftime('%Y.%m.%d'),
+                'category':p['category'],'categoryName':CATEGORIES[p['category']],
+                'templateId':p['template_id'],'templateName':p['template_name'],'quality':p['quality'],
+                'resultUrl':signed(m,p['result_key']),'origUrl':signed(m,p['orig_key']) if p['share_original'] else '',
+                'likes':0,'liked':False,'featured':bool(row['featured']),'pinned':bool(row['featured'])}
+    fields={'authorName':'author_name','authorAvatar':'author_avatar','categoryName':'category_name',
+            'templateId':'template_id','templateName':'template_name','resultUrl':'result_url','origUrl':'orig_url'}
+    return {**{k:row.get(k,'') for k in ('id','title','story','date','category','quality')},
+            **{k:row.get(v,'') for k,v in fields.items()},'likes':m._community_likes(row.get('likes')),
+            'liked':False,'featured':False,'pinned':bool(row.get('pinned'))}
+
+
+def save_report(m,kind,tid,pid,owner,reason,snapshot):
+    if reason not in REPORT_REASONS:raise HTTPException(400,detail='请选择举报原因')
+    try:return interactions_for(m.users).report(kind,tid,pid,owner,reason,snapshot)
+    except ValueError as exc:raise HTTPException(429,detail=str(exc)) from exc
+
+
 def install_admin_routes(router,guard,runtime):
+    @router.get('/community/comments')
+    def admin_comments(request:Request,offset:int=0,limit:int=30):
+        guard(request);return interactions_for(runtime().users).comments(offset=offset,limit=limit,admin=True)
+
+    @router.delete('/community/comments/{cid}')
+    def remove_comment(cid:str,request:Request):
+        guard(request)
+        try:interactions_for(runtime().users).delete_comment(cid);return {'ok':True}
+        except KeyError:raise HTTPException(404,detail='评论不存在')
+
+    @router.get('/community/reports')
+    def reports(request:Request,status:str='open',offset:int=0,limit:int=30):
+        guard(request)
+        try:return interactions_for(runtime().users).reports(status,offset,limit)
+        except ValueError as exc:raise HTTPException(400,detail=str(exc)) from exc
+
+    @router.post('/community/reports/{rid}/resolve')
+    def resolve_report(rid:str,request:Request):
+        guard(request)
+        try:interactions_for(runtime().users).resolve_report(rid);return {'ok':True}
+        except KeyError:raise HTTPException(404,detail='举报不存在')
+
     @router.get('/community/submissions')
     def listing(request:Request,status:str='pending',offset:int=0,limit:int=30):
         guard(request);m=runtime();s=store_for(m.users)

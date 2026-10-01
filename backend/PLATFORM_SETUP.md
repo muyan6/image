@@ -109,3 +109,12 @@ Nginx/Caddy 应保留原 Host，正确传递 X-Forwarded-Proto；只有可信代
 - 数据库以 CREATE TABLE IF NOT EXISTS 添加 community_submissions、community_submission_events、community_likes、community_rewards，不重置旧用户余额、订单、作品或手工策展帖。部署前照常备份 users.db、cleanup.db 与设置文件；代码回退不会删除新增表或逆转已经发放的奖励。
 - 部署顺序：先更新后端，再上传/发布小程序；原有小程序仍可浏览社区，新增投稿/持久点赞需要新版小程序。服务器 COS 凭据需有源图读取、私有复制、签名和删除权限；不需要公开整个存储桶。
 - 离线专项：test_community_submissions.py 与 test_community_submission_frontend.cjs，纳入 run_review.py。真实 COS 权限、手机微信呈现和生产人工审核由部署后验收确认；离线测试不发布真实照片、不发放真实奖励。
+
+### 社区详情、留言与邀请明细（2026-10-01）
+- 社区列表卡片可进入独立详情页，继续沿用米白纸张、黑墨与金色配方标签。帖子和留言均可点赞、举报；作者可删除自己的留言，后台「社区管理」可删除任意留言并处理举报。
+- 留言使用微信 `msg_sec_check` v2（`scene=2`）同步审核，仅 `pass` 发布，`risk` / `review` 不公开。微信配置缺失、审核关闭或接口故障均不放行；无需管理员逐条批准。文字最多 500 字，每用户每分钟 5 条、每小时 30 条，每帖最多 1000 条；客户端提交标识去重，审核故障重试不重复发布。
+- 举报选取原因，按对象和举报人去重，每分钟 3 次、每小时 20 次；后台保留举报时内容快照，支持移除内容并结案或标记已处理，不按举报数量自动下架。
+- 后台「社区帖子」统一统计手工帖子与已发布用户投稿；用户投稿仍保留独立公开授权与一次性精选奖励，批量操作只针对手工帖子。移除用户投稿会停止展示并清理独立图片副本，奖励去重记录保留。
+- 社区在 30 秒内切回不重复请求，刷新时保留现有卡片；图片使用最多 36 个会话内临时路径缓存，COS 认证签名变化不改变图片缓存身份。缓存不是永久照片保存，重启、清理缓存、临时文件失效后重新获取；详情及评论接口仍每次校验帖子可见性。
+- `/api/me/invites` 只返回当前账号邀请明细、绑定时间和实际奖励。`invite_bindings.reward` 为兼容旧库的可空新增列，旧记录显示「历史金额未记录」，不以当前奖励推算、不重复记账；新增邀请在原有余额事务内记录当时奖励。
+- 新增 `community_comments`、`community_comment_likes`、`community_reports`、`community_interaction_events` 表及索引，不重置原有余额。先部署后端，再发布小程序；代码回退保留新增表与历史奖励。专项为 `test_community_interactions.py`、`test_community_detail_frontend.cjs`，已纳入 `run_review.py`。

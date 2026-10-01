@@ -169,6 +169,7 @@
   font-size: 26rpx;
   font-weight: 600;
   color: var(--ink-title);
+  overflow-wrap: anywhere;
 }
 
 .inv-date {
@@ -178,8 +179,13 @@
 
 .inv-status-tag {
   font-size: 22rpx;
-  color: var(--ink-muted);
+  color: var(--accent-gold);
 }
+.invite-item + .invite-item { border-top:1rpx solid var(--paper-border); }
+.inv-meta { min-width:0;flex:1; }
+.inv-reward { display:flex;flex-direction:column;align-items:flex-end;gap:6rpx;flex-shrink:0; }
+.invite-item { gap:20rpx; }
+.invite-empty { font-size:24rpx;color:var(--ink-muted);line-height:1.6; }
 
 .rule-hint {
   font-size: 22rpx;

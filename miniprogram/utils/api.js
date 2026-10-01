@@ -146,7 +146,7 @@ function authedCall(fn) {
 }
 
 function request(path, options) {
-  const protectedPath = /^\/api\/(me(?:\/|$)|my\/|jobs\/|uploads(?:\/|$)|rescue(?:\/|$)|text-generation(?:\/|$)|payment\/|community\/(?:submissions|posts)(?:\/|$)|auth\/wechat-web\/approve)/.test(path);
+  const protectedPath = /^\/api\/(me(?:\/|$)|my\/|jobs\/|uploads(?:\/|$)|rescue(?:\/|$)|text-generation(?:\/|$)|payment\/|community\/(?:submissions|posts|comments)(?:\/|$)|auth\/wechat-web\/approve)/.test(path);
   return protectedPath ? authedCall(() => rawRequest(path, options)) : rawRequest(path, options);
 }
 
@@ -213,6 +213,48 @@ function downloadImage(url, header) {
     });
   });
 }
+
+// Session-only, bounded image cache. Immutable submission paths include the revision.
+// Keep query strings for editorial URLs; strip only COS authentication identities.
+function communityMediaKey(url) {
+  return /[?&]q-signature=/i.test(url || '') ? url.split('?')[0] : url;
+}
+function communityMediaCache() {
+  const app = getApp();
+  app.globalData.mediaCache = app.globalData.mediaCache || {};
+  return app.globalData.mediaCache.__community || (app.globalData.mediaCache.__community = {});
+}
+function communityImage(url) {
+  if (!url) return '';
+  const src = absolute(url), key = communityMediaKey(src), entry = communityMediaCache()[key];
+  if (entry && entry.path) {
+    try { wx.getFileSystemManager().accessSync(entry.path); entry.at=Date.now(); return entry.path; }
+    catch (err) { delete communityMediaCache()[key]; }
+  }
+  return src;
+}
+let communityImageTasks = {};
+function rememberCommunityImage(url) {
+  const src = absolute(url), key = communityMediaKey(src);
+  if (!src) return Promise.resolve('');
+  const cached = communityImage(src);
+  if (cached !== src) return Promise.resolve(cached);
+  if (communityImageTasks[key]) return communityImageTasks[key];
+  const cache = communityMediaCache();
+  communityImageTasks[key] = new Promise((resolve) => {
+    wx.getImageInfo({src, success(info) {
+      // Never retain an unbounded set of downloaded image paths.
+      if (info.path && info.path !== src && cache === communityMediaCache()) {
+        cache[key]={path:info.path,at:Date.now()};
+        const keys=Object.keys(cache).sort((a,b)=>cache[a].at-cache[b].at);
+        keys.slice(0,Math.max(0,keys.length-36)).forEach(k=>delete cache[k]);
+      }
+      resolve(info.path || src);
+    }, fail:()=>resolve(src)});
+  }).finally(()=>{delete communityImageTasks[key];});
+  return communityImageTasks[key];
+}
+function forgetCommunityImage(url) { delete communityMediaCache()[communityMediaKey(absolute(url))]; }
 
 function isJobCosUrl(url) {
   return /^https:\/\//i.test(url || '') &&
@@ -571,6 +613,9 @@ module.exports = {
   apiBase,
   absolute,
   cleanUrl,
+  communityImage,
+  rememberCommunityImage,
+  forgetCommunityImage,
   request,
   isJobCosUrl,
   isReusableMediaUrl,

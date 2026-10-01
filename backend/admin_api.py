@@ -323,7 +323,8 @@ def make_admin_router(*, settings: SettingsStore,
     @router.get("/community/posts")
     def community_posts(request: Request, status: str = "all", q: str = "", offset: int = 0, limit: int = 30):
         _guard(request)
-        try: return community.list(status, q, offset, limit)
+        from community_api import admin_posts
+        try: return admin_posts(submission_runtime(), status, q, offset, limit)
         except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.post("/community/posts")
@@ -350,7 +351,8 @@ def make_admin_router(*, settings: SettingsStore,
     @router.delete("/community/posts/{post_id}")
     def delete_community_post(post_id: str, request: Request):
         _guard(request)
-        try: return community.delete(post_id)
+        from community_api import admin_delete_post
+        try: return admin_delete_post(submission_runtime(), post_id)
         except KeyError as exc: raise HTTPException(status_code=404, detail=str(exc.args[0])) from exc
 
     @router.post("/community/media")

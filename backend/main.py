@@ -2117,6 +2117,12 @@ def bind_invite(body: _InviteBody, request: Request):
             "inviter_balance": inviter_balance}
 
 
+@app.get('/api/me/invites')
+def invite_records(request: Request, offset: int = 0, limit: int = 30):
+    user = _current_user(request)
+    return users.invite_records(user['openid'], offset, limit)
+
+
 
 
 

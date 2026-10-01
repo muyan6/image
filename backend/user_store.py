@@ -113,6 +113,11 @@ class UserStore:
             if "invite_code" not in cols:
                 self._conn.execute(
                     "ALTER TABLE users ADD COLUMN invite_code TEXT NOT NULL DEFAULT ''")
+            binding_cols = {row[1] for row in self._conn.execute('PRAGMA table_info(invite_bindings)')}
+            if 'reward' not in binding_cols:
+                # Old bindings did not retain the historical amount; never invent one.
+                self._conn.execute('ALTER TABLE invite_bindings ADD COLUMN reward INTEGER')
+            self._conn.execute('CREATE INDEX IF NOT EXISTS invite_binding_inviter ON invite_bindings(inviter,created_at)')
             if "banned" not in cols:
                 self._conn.execute(
                     "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0")
@@ -335,7 +340,7 @@ class UserStore:
             bound = self._conn.execute("SELECT 1 FROM audit WHERE openid=? AND action='invite_bound' LIMIT 1", (openid,)).fetchone()
             if bound or self._conn.execute("SELECT 1 FROM invite_bindings WHERE invitee=?", (openid,)).fetchone():
                 raise ValueError("已经绑定过邀请码了")
-            self._conn.execute("INSERT INTO invite_bindings VALUES(?,?,?)", (openid, inviter[0], time.time()))
+            self._conn.execute("INSERT INTO invite_bindings(invitee,inviter,created_at,reward) VALUES(?,?,?,?)", (openid, inviter[0], time.time(), reward))
             for target, action, detail in ((openid, "invite_bound", "by=" + code),
                                             (inviter[0], "invite_reward", "invitee=%s***" % openid[:6])):
                 self._conn.execute("UPDATE users SET balance=balance+? WHERE openid=?", (reward, target))
@@ -343,6 +348,19 @@ class UserStore:
                                    (time.time(), target, action, detail))
             return tuple(int(self._conn.execute("SELECT balance FROM users WHERE openid=?", (target,)).fetchone()[0])
                          for target in (openid, inviter[0]))
+
+    def invite_records(self, openid: str, offset: int = 0, limit: int = 30) -> Dict[str, Any]:
+        offset=max(0,offset);limit=max(1,min(50,limit))
+        with self._lock:
+            total, recorded, unknown = self._conn.execute(
+                'SELECT COUNT(*),COALESCE(SUM(reward),0),COALESCE(SUM(reward IS NULL),0) FROM invite_bindings WHERE inviter=?',
+                (openid,)).fetchone()
+            rows=self._conn.execute('SELECT b.invitee,b.created_at,b.reward,u.nickname FROM invite_bindings b LEFT JOIN users u ON u.openid=b.invitee WHERE b.inviter=? ORDER BY b.created_at DESC,b.invitee LIMIT ? OFFSET ?',
+                                    (openid,limit,offset)).fetchall()
+        items=[{'id':hashlib.sha256((openid+'\0'+r[0]).encode()).hexdigest()[:16],
+                'nickname':r[3] or '新生创作者','bound_at':r[1],'reward':r[2],'status':'credited'} for r in rows]
+        return {'items':items,'total':total,'recorded_reward':recorded,'historical_unknown':unknown,
+                'next_offset':offset+len(items),'has_more':offset+len(items)<total}
 
     def claim_video_reward(self, openid: str, event_id: str, reward: int, limit: int) -> Tuple[bool, int, int]:
         with self._lock, self._conn:

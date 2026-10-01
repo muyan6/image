@@ -45,6 +45,7 @@
       wx:for="{{ filteredItems }}"
       wx:key="id"
       class="exhibit-card gallery-card"
+      bindtap="onOpenPost" data-id="{{item.id}}"
     >
       <view class="washi-tape" wx:if="{{ index === 0 }}"></view>
 
@@ -65,12 +66,12 @@
 
       <!-- 双图对比展框 (原图 vs 新生图) -->
       <view class="compare-frame {{!item.origUrl ? 'compare-frame-single' : ''}}">
-        <view class="frame-photo-box" bindtap="onPreviewExhibit" data-item="{{ item }}" data-type="result">
-          <image class="frame-photo" binderror="onCommunityImageError" data-id="{{item.id}}" src="{{ item.resultUrl }}" mode="aspectFill" lazy-load></image>
+        <view class="frame-photo-box">
+          <image class="frame-photo" bindload="onCommunityImageLoad" binderror="onCommunityImageError" data-kind="result" data-id="{{item.id}}" src="{{ item.resultUrl }}" mode="aspectFill" lazy-load></image>
           <view class="frame-tag frame-tag-after">{{ item.quality === 'fine' ? '精细生成' : '轻量生成' }}</view>
         </view>
-        <view wx:if="{{item.origUrl}}" class="frame-photo-box frame-photo-before" bindtap="onPreviewExhibit" data-item="{{ item }}" data-type="original">
-          <image class="frame-photo" binderror="onCommunityImageError" data-id="{{item.id}}" src="{{ item.origUrl }}" mode="aspectFill" lazy-load></image>
+        <view wx:if="{{item.origUrl}}" class="frame-photo-box frame-photo-before">
+          <image class="frame-photo" bindload="onCommunityImageLoad" binderror="onCommunityImageError" data-kind="orig" data-id="{{item.id}}" src="{{ item.origUrl }}" mode="aspectFill" lazy-load></image>
           <view class="frame-tag frame-tag-before">修护前原片</view>
         </view>
       </view>
@@ -84,17 +85,18 @@
       <!-- 底部互动与一键【做同款】 -->
       <view class="exhibit-foot">
         <view class="interaction-group">
-          <view class="like-btn {{ item.liked ? 'like-btn-active' : '' }}" bindtap="onLikeItem" data-id="{{ item.id }}">
+          <view class="like-btn {{ item.liked ? 'like-btn-active' : '' }}" catchtap="onLikeItem" data-id="{{ item.id }}">
             <text class="like-icon">{{ item.liked ? '♥' : '♡' }}</text>
             <text class="like-count">{{ item.likes }}</text>
           </view>
-          <view class="share-pill" bindtap="onShareExhibit" data-title="{{ item.title }}" data-result-url="{{ item.resultUrl }}">
+          <view class="share-pill" catchtap="onOpenPost" data-id="{{item.id}}"><text>留言 {{item.comments || 0}}</text></view>
+          <view class="share-pill" catchtap="onShareExhibit" data-title="{{ item.title }}" data-result-url="{{ item.resultUrl }}">
             <text class="share-icon">↗</text>
             <text class="share-text">分享</text>
           </view>
         </view>
 
-        <button class="btn-ink make-same-btn" bindtap="onMakeSame" data-template-id="{{ item.templateId }}" data-name="{{ item.templateName }}">
+        <button class="btn-ink make-same-btn" catchtap="onMakeSame" data-template-id="{{ item.templateId }}" data-name="{{ item.templateName }}">
           做同款风格 →
         </button>
       </view>

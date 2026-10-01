@@ -1,4 +1,5 @@
 const api=require('../../utils/api.js');
+const app=getApp();
 const labels={uploading:'保存中，可继续提交',pending:'等待审核',published:'已发布',rejected:'未通过 / 已下架',withdrawn:'已撤回'};
 Page({
   data:{jobId:'',job:null,jobLoading:false,jobError:'',title:'',story:'',categoryIndex:0,
@@ -39,6 +40,7 @@ Page({
       category:this.data.categories[this.data.categoryIndex].id,share_original:this.data.shareOriginal,consent:true};
     try{
       const r=await api.request('/api/community/submissions',{method:'POST',data:body});
+      app.globalData.communityDirty=true;
       if(this._unloaded)return;
       this.setData({consent:false});await this.loadMine();
       if(this._visible!==false)wx.showToast({title:r.submission.status==='published'?'该作品已发布':'投稿已登记，审核后展示',icon:'none'});
@@ -65,7 +67,7 @@ Page({
     wx.showModal({title:'撤回社区投稿',content:'撤回后社区停止展示，独立图片副本会清理；已被他人下载或分享的副本不会随之收回。已发放的精选奖励不重复发放。',confirmText:'确认撤回',
       success:async r=>{
         if(!r.confirm||this._withdrawBusy)return;this._withdrawBusy=true;
-        try{await api.request('/api/community/submissions/'+encodeURIComponent(item.id)+'/withdraw',{method:'POST',data:{revision:item.revision}});if(!this._unloaded)await this.loadMine();}
+        try{await api.request('/api/community/submissions/'+encodeURIComponent(item.id)+'/withdraw',{method:'POST',data:{revision:item.revision}});app.globalData.communityDirty=true;if(!this._unloaded)await this.loadMine();}
         catch(e){if(!this._unloaded)wx.showToast({title:e.message||'撤回失败，请重试',icon:'none'});}
         finally{this._withdrawBusy=false;}
       }});
