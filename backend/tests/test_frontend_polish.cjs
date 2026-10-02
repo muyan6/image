@@ -44,11 +44,14 @@ async function test(name,fn){try{await fn();rows.push({case:name,passed:true});c
   await p.onShow();assert(p.data.configError);assert(!p.data.ready);assert(!p.data.configLoading);
   fail=false;await p.loadConfig();assert.equal(p.data.configError,'');assert(p.data.ready);assert.equal(p.data.price,75);
  });
- await test('text_examples_preserve_drafts_until_confirmed_and_respect_busy',()=>{
-  let modal;const p=page('text-generation',{}, {showModal:o=>modal=o});const event={currentTarget:{dataset:{index:0}}};
-  p.data.prompt='我的描述';p.onUseExample(event);assert.equal(p.data.prompt,'我的描述');modal.success({confirm:false});assert.equal(p.data.prompt,'我的描述');
-  p.onUseExample(event);modal.success({confirm:true});assert.equal(p.data.prompt,p.data.examples[0].prompt);
-  p.data.busy=true;p.onClearPrompt();assert(p.data.prompt);p.data.busy=false;p.onClearPrompt();assert.equal(p.data.prompt,'');
+ await test('text_examples_removed_while_prompt_ratio_draft_and_busy_clear_are_preserved',()=>{
+  const p=page('text-generation'),markup=xml('text-generation');
+  assert(!markup.includes('试试这些描述'));assert(!markup.includes('example-list'));assert(!markup.includes('onUseExample'));
+  assert.equal(p.data.examples,undefined);assert.equal(p.onUseExample,undefined);
+  assert(markup.indexOf('prompt-foot')<markup.indexOf('ratio-title'));assert(markup.includes('bindinput="onInput"'));assert(markup.includes('bindtap="onResumeDraft"'));
+  p.restoreDraft({prompt:'我的描述',aspect_ratio:'2:3'});assert.equal(p.data.prompt,'我的描述');assert.equal(p.data.ratio,'2:3');
+  p.data.busy=true;p.onClearPrompt();assert.equal(p.data.prompt,'我的描述');p.data.busy=false;p.data.submissionPending=true;p.onClearPrompt();assert.equal(p.data.prompt,'我的描述');
+  p.data.submissionPending=false;p.onClearPrompt();assert.equal(p.data.prompt,'');
  });
  await test('late_text_config_does_not_overwrite_newer_result',async()=>{
   const resolves=[];const p=page('text-generation',{config:()=>new Promise(r=>resolves.push(r))});

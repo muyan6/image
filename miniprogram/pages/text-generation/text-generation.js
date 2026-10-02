@@ -4,9 +4,6 @@ const app=getApp();
 Page({
   data:{prompt:'',ratio:'1:1',ready:false,price:40,busy:false,freeMode:false,lightPoints:0,configLoading:true,configError:'',
     draftAvailable:false,submissionPending:false,submissionMessage:'',retryableSubmission:false,
-    examples:[{label:'水彩风景',prompt:'雨后的森林小屋，暖色灯光，水彩插画风格。'},
-      {label:'简约壁纸',prompt:'暖白色背景，一枝浅绿色植物，柔和自然光，简约手机壁纸。'},
-      {label:'旅行插画',prompt:'海边小镇的午后，蓝白房屋与橘色屋顶，清新旅行插画。'}],
     ratios:[{key:'1:1',label:'方形'},{key:'3:2',label:'横图'},{key:'2:3',label:'竖图'}]},
   onLoad(options){
     const draft=creation.readDraft();
@@ -41,13 +38,6 @@ Page({
   onHide(){this._visible=false;this.saveDraft();},
   onUnload(){this._visible=false;this.saveDraft();this._unloaded=true;},
   onInput(e){if(this.data.submissionPending)return;this._completed=false;this.setData({prompt:(e.detail.value||'').slice(0,500)});},
-  onUseExample(e){
-    if(this.data.busy||this.data.submissionPending)return;
-    const example=this.data.examples[e.currentTarget.dataset.index];if(!example)return;
-    const fill=()=>{this._completed=false;this.setData({prompt:example.prompt});};
-    if(this.data.prompt.trim())wx.showModal({title:'使用示例描述',content:'将替换当前描述，填入后仍可修改。',confirmText:'替换',success:r=>{if(r.confirm&&!this.data.busy&&!this._unloaded)fill();}});
-    else fill();
-  },
   onClearPrompt(){if(!this.data.busy&&!this.data.submissionPending){this.setData({prompt:''});creation.clearDraft().catch(()=>{});}},
   onRatio(e){if(!this.data.busy&&!this.data.submissionPending){this._completed=false;this.setData({ratio:e.currentTarget.dataset.key});}},
   onWorks(){wx.navigateTo({url:'/pages/works/works'});},

@@ -7,10 +7,6 @@
     <textarea value="{{ prompt }}" bindinput="onInput" maxlength="500" disabled="{{busy || submissionPending}}" placeholder="例如：雨后的森林小屋，暖色灯光，水彩插画风格。" placeholder-class="prompt-placeholder" />
     <view class="prompt-foot"><text>退出时会保留最近一份草稿</text><button class="clear-prompt" bindtap="onClearPrompt" disabled="{{busy || submissionPending || !prompt}}">清空</button></view>
   </view>
-  <view class="examples-head"><text class="field-title">试试这些描述</text><text class="hint">点击填入，可继续修改</text></view>
-  <view class="example-list">
-    <button class="example-chip" wx:for="{{examples}}" wx:key="label" data-index="{{index}}" bindtap="onUseExample" disabled="{{busy || submissionPending}}">{{item.label}}</button>
-  </view>
   <text class="field-title ratio-title">画面比例</text>
   <view class="ratios">
     <view wx:for="{{ ratios }}" wx:key="key" data-key="{{ item.key }}" bindtap="onRatio" class="ratio {{ ratio === item.key ? 'active' : '' }}">
