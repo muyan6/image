@@ -115,7 +115,10 @@
 
   <!-- 6. 服务与设置菜单列表 (全部导航到二级页面) -->
   <view class="menu-card gallery-card">
-    <view class="menu-item" bindtap="onGoTemplates"><text class="menu-label">我的分享模板</text><text class="menu-arrow">›</text></view>
+    <view class="menu-item" bindtap="onShareTemplate"><text class="menu-label">分享我的模板</text><text class="menu-arrow">›</text></view>
+    <view class="menu-divider"></view>
+    <view class="menu-item" bindtap="onGoTemplates"><text class="menu-label">我的模板</text><text class="menu-arrow">›</text></view>
+    <view class="menu-divider"></view>
     <view class="menu-item" bindtap="onGoCredits">
       <text class="menu-label">光子与订单</text>
       <text class="menu-arrow">›</text>

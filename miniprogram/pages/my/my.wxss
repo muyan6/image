@@ -363,10 +363,13 @@
 }
 
 .menu-item {
+  box-sizing: border-box;
+  min-height: 92rpx;
   padding: 26rpx 28rpx;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16rpx;
   transition: background 0.15s ease;
 }
 
@@ -394,13 +397,18 @@
 .menu-contact-action::after { border: none; }
 
 .menu-label {
+  flex: 1;
+  min-width: 0;
   font-size: 26rpx;
   color: var(--ink-body);
+  line-height: 1.4;
 }
 
 .menu-arrow {
+  flex-shrink: 0;
   font-size: 26rpx;
   color: var(--ink-faint);
+  line-height: 1.4;
 }
 
 .menu-divider {

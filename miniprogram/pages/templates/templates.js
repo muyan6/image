@@ -49,7 +49,7 @@ Page({
       const p=await preferences.load();if(version!==this._preferencesVersion)return;
       update(this,{favoriteIds:p.template_favorites,recentIds:p.recent_templates});
       this.applyPreferences();
-    }catch(e){if(version===this._preferencesVersion)update(this,{preferencesError:e.message||'收藏与最近使用读取失败，请重试'});}
+    }catch(e){if(version===this._preferencesVersion)update(this,{preferencesError:e&&e.status===404?'收藏与最近使用接口未找到（404），请核对后端更新':(e&&e.message)||'收藏与最近使用读取失败，请重试'});}
     finally{if(version===this._preferencesVersion)update(this,{preferencesLoading:false});}
   },
   applyPreferences(){
@@ -228,8 +228,6 @@ Page({
     update(this,{sortMode:mode});this.filterByCategory(this.data.activeCategory);
   },
   onShuffleTemplates(){this._randomRanks={};this.filterByCategory(this.data.activeCategory);},
-  onMyTemplates(){wx.navigateTo({url:'/pages/template-shares/template-shares'});},
-  onSubmitTemplate(){wx.navigateTo({url:'/pages/template-share/template-share'});},
 
   onRetryTemplates() {
     this.fetchTemplates(null, true);

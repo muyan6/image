@@ -235,6 +235,7 @@ Page({
   },
 
   /* 二级页面跳转 */
+  onShareTemplate(){wx.navigateTo({url:'/pages/template-share/template-share'});},
   onGoTemplates(){wx.navigateTo({url:'/pages/template-shares/template-shares'});},
   onGoCredits() {
     wx.navigateTo({

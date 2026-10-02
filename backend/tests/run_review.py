@@ -125,6 +125,9 @@ if not args.legacy:
         ('test_template_share_web.cjs', 'template_share_web_results.json'),
         ('test_template_share_admin.cjs', 'template_share_admin_results.json'),
         ('test_template_share_integration.py', 'template_share_integration_results.json'),
+        ('test_web_ui_alignment.cjs', 'web_ui_alignment_results.json'),
+        ('test_admin_ui_theme.cjs', 'admin_ui_theme_results.json'),
+        ('test_mini_template_entry_layout.cjs', 'mini_template_entry_layout_results.json'),
     ):
         path = Path(__file__).with_name(script)
         if path.is_file():
