@@ -4,6 +4,7 @@
     <text class="catalog-eyebrow">废片新生所 · 风格图鉴</text>
     <text class="catalog-headline">选一个喜欢的风格</text>
     <text class="catalog-desc">上传照片即可使用 · 生成前可选轻量或精细档位</text>
+    <view class="catalog-contribute"><button bindtap="onSubmitTemplate">分享我的模板</button><button bindtap="onMyTemplates">我的模板</button></view>
   </view>
 
   <view class="template-search">
@@ -25,10 +26,14 @@
       bindtap="onSelectCategory"
       data-id="{{ item.id }}"
     >
-      <text class="cat-chip-text">{{ item.id === 'all' ? '全部 · 热门优先' : item.name }}</text>
+      <text class="cat-chip-text">{{ item.id === 'all' ? '全部' : item.name }}</text>
       <text class="cat-chip-count" wx:if="{{ item.count > 0 }}">({{ item.count }})</text>
     </view>
   </scroll-view>
+  <view class="catalog-sort" wx:if="{{activeCategory === 'all' && preferenceMode !== 'recent'}}">
+    <view wx:for="{{sortModes}}" wx:key="id" class="sort-chip {{sortMode === item.id ? 'sort-active' : ''}}" bindtap="onSortMode" data-id="{{item.id}}">{{item.name}}</view>
+    <button wx:if="{{sortMode === 'random'}}" class="sort-shuffle" bindtap="onShuffleTemplates">换一批</button>
+  </view>
 
   <!-- 模板展柜卡片流 (双列艺术画框网格) -->
   <view wx:if="{{ loadError }}" class="ui-inline-state">
@@ -49,6 +54,7 @@
       data-template="{{ item }}"
     >
       <view class="card-cover-box">
+        <text class="card-source-badge {{item.source === 'user' ? 'source-user' : ''}}">{{item.sourceLabel}}</text>
         <image
           class="card-cover-img"
           src="{{ item.coverUrl || '/images/logo.jpg' }}"

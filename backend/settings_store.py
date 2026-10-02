@@ -24,6 +24,7 @@ import uuid
 from urllib.parse import urlsplit
 from gateway_profiles import gateway_profile, materialize_text_gateway
 from credit_packages import default_commerce, validate_commerce
+from template_share_rewards import DEFAULT_TEMPLATE_SHARING, validate_policy as validate_template_sharing
 from typing import Any, Callable, Dict, List, Optional
 
 log = logging.getLogger("rescue.settings")
@@ -74,6 +75,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "prices": {"light": 40, "fine": 40},
     "rewards": {"invite": 40, "checkin": 10, "checkin_seventh_bonus": 30,
                 "community_featured": 50},
+    "template_sharing": copy.deepcopy(DEFAULT_TEMPLATE_SHARING),
     "pricing_revision": 2,
     "commerce": default_commerce(),
     "free_mode": False,
@@ -127,7 +129,7 @@ def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
 # 误删后服务会残废的关键结构：合并后一律用默认值兜底补齐
 _DICT_SECTIONS = ("providers", "wechat", "web_wechat", "payment", "tencent", "moderation", "quota", "processing", "text_generation", "cloud_pipeline",
                   "prompts", "prices", "rewards", "maintenance", "quality_to_style",
-                  "community", "ads", "commerce")
+                  "community", "ads", "commerce", "template_sharing")
 
 
 def _rebase_defaults(candidate: Dict[str, Any]) -> None:
@@ -149,6 +151,7 @@ def _rebase_defaults(candidate: Dict[str, Any]) -> None:
 def _validate(doc: Dict[str, Any]) -> None:
     """整档校验,不合法直接抛 ValueError,调用方放弃本次写入。"""
     validate_commerce(doc.get('commerce'))
+    validate_template_sharing(doc.get('template_sharing'))
     chain = doc.get("chain")
     if not isinstance(chain, list) or not chain:
         raise ValueError("chain 不能为空")
@@ -411,6 +414,7 @@ class SettingsStore:
         # 深合并:文件里缺的新字段用默认补齐,未知字段保留
         self._data = _deep_merge(defaults, loaded)
         validate_commerce(self._data['commerce'])
+        validate_template_sharing(self._data['template_sharing'])
         if materialize_text_gateway(self._data,loaded.get('text_generation',{})):
             self._save_locked(self._data)
         if not loaded.get('cloud_mode_revision'):
@@ -518,6 +522,13 @@ class SettingsStore:
 
     def rewards(self) -> Dict[str, int]:
         return self._section("rewards")
+
+    def template_sharing(self) -> Dict[str, Any]:
+        conf = self._section('template_sharing')
+        validate_template_sharing(conf)
+        # This getter is also the public configuration projection: never expose
+        # unrelated/unknown administrator-only metadata from a preserved JSON.
+        return {key: conf[key] for key in DEFAULT_TEMPLATE_SHARING}
 
     def free_mode(self) -> bool:
         """调试模式：小程序读到 true 就跳过小鱼干扣减，次数不限。"""

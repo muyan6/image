@@ -5,6 +5,8 @@ page {
   color: #1a1a1a;
   box-sizing: border-box;
 }
+.template-author-line { display:flex;align-items:center;justify-content:space-between;gap:20rpx;margin:0 0 24rpx;font-size:24rpx;color:#75684f; }
+.template-author-line button { flex-shrink:0;font-size:23rpx;margin:0;padding:0 22rpx;line-height:2.5;background:#f3ead9;color:#574d3b;border-radius:8rpx; }
 
 .container {
   display: flex;

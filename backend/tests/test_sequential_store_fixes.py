@@ -20,8 +20,12 @@ OUTPUT.mkdir(parents=True, exist_ok=True)
 fixture = tempfile.TemporaryDirectory(prefix='store_source_', dir=OUTPUT)
 SOURCE = Path(fixture.name) / 'backend'
 SOURCE.mkdir()
-for name in ('settings_store.py', 'templates_store.py', 'gateway_profiles.py', 'credit_packages.py'):
-    shutil.copy2(ROOT / 'backend' / name, SOURCE / name)
+for name in ('settings_store.py', 'templates_store.py', 'gateway_profiles.py', 'credit_packages.py',
+             'template_share_rewards.py', 'account_links.py'):
+    dependency = ROOT / 'backend' / name
+    # Reward policy validation is now a real settings dependency. Historical
+    # baseline/rollback checkouts do not contain it and do not import it either.
+    if dependency.is_file(): shutil.copy2(dependency, SOURCE / name)
 sys.path.insert(0, str(SOURCE))
 import settings_store
 import templates_store

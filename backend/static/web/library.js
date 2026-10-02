@@ -286,7 +286,7 @@ export async function mountLibrary(ctx,root,route,params={}) {
       }catch(e){if(valid()){host.replaceChildren();state(host,e.message||'作品读取失败',load);root.dataset.state='error';}}
     };load();
   } else if(route==='my'){
-    heading('我的创作档案','网站注册账号初始为 0 光子；余额由后台手动增加。');const host=el('div');root.append(host);
+    heading('我的创作档案','网站注册账号初始为 0 光子；可由后台手动补给，或通过合格的模板分享获得作者奖励。');const host=el('div');root.append(host);
     const load=async()=>{host.replaceChildren();state(host,'正在同步账号…');try{
       const user=await ctx.api('/api/me');if(!valid())return;if(Number.isFinite(user.balance))ctx.setBalance(user.balance);
       const card=el('section','lib-card lib-card-body'),sessionUser=ctx.state.auth&&ctx.state.auth.user||ctx.state.user||{};
@@ -297,7 +297,7 @@ export async function mountLibrary(ctx,root,route,params={}) {
       const form=el('form','lib-profile-form'),input=el('input','lib-input'),save=el('button','lib-button','保存昵称');input.maxLength=24;input.value=user.nickname||'';input.placeholder='设置展示昵称';input.setAttribute('aria-label','展示昵称');save.type='submit';form.append(input,save);
       form.addEventListener('submit',e=>{e.preventDefault();write(save,async()=>{const nickname=input.value.trim();if(!nickname)throw new Error('请输入昵称');const r=await ctx.api('/api/me/profile',{method:'POST',data:{nickname}});if(!valid())return;if(ctx.state.user)ctx.state.user.nickname=r.nickname;card.querySelector('h2').textContent=r.nickname;notify('昵称已保存');});});card.append(form);
       const accountActions=actions();if(typeof ctx.changePassword==='function'){const change=button('修改密码',()=>write(change,async()=>ctx.changePassword()),'lib-link');accountActions.append(change);}if(typeof ctx.logout==='function'){const logout=button('退出登录',()=>write(logout,async()=>ctx.logout()),'lib-link lib-danger');accountActions.append(logout);}card.append(accountActions);
-      const balance=el('section','lib-balance');balance.append(el('p','','可用光子'),el('strong','',Number.isFinite(user.balance)?'✦ '+user.balance:'—'),el('p','','需要增加余额，请联系管理员在后台手动补给。'));const nav=el('nav','lib-account-links');[['我的作品','works'],['我的投稿','submissions'],['光子明细','credits'],['已有充值订单','orders'],['历史邀请记录','invites']].forEach(([label,r])=>nav.append(link(label+' ›',r)));
+      const balance=el('section','lib-balance');balance.append(el('p','','可用光子'),el('strong','',Number.isFinite(user.balance)?'✦ '+user.balance:'—'),el('p','','可联系管理员在后台手动补给，也可在“我的模板”查看作者奖励。'));const nav=el('nav','lib-account-links');[['我的作品','works'],['我的模板','template-shares'],['我的投稿','submissions'],['光子明细','credits'],['已有充值订单','orders'],['历史邀请记录','invites']].forEach(([label,r])=>nav.append(link(label+' ›',r)));
       host.replaceChildren(card,balance,nav);root.dataset.state='loaded';
     }catch(e){if(valid()){host.replaceChildren();state(host,e.message||'账号读取失败',load);root.dataset.state='error';}}};load();
   } else if(route==='credits'){

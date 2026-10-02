@@ -235,6 +235,7 @@ Page({
   },
 
   /* 二级页面跳转 */
+  onGoTemplates(){wx.navigateTo({url:'/pages/template-shares/template-shares'});},
   onGoCredits() {
     wx.navigateTo({
       url: '/pages/credits/credits'

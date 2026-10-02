@@ -19,6 +19,7 @@ from gateway_async import AsyncImages, GatewayAsyncError, key_fingerprint, failu
 from gateway_profiles import text_gateway
 from image_processing import normalization_rule
 from cloud_audit import CloudAudit
+from template_share_rewards import reward_snapshot
 
 
 class CloudPipeline:
@@ -125,7 +126,9 @@ class CloudPipeline:
                 # The permit's original one-hour expiry must not delete the
                 # accepted input while it waits for a metadata/generation slot.
                 m.cleanup.retain_until('cos', source['key'], deadline + 300)
-            try:balance=m.users.reserve_job(openid,jid,charged,m.settings.quota(),free)
+            share_snapshot = reward_snapshot(template,m.settings.template_sharing()) if (template or {}).get('source') == 'user' else None
+            share_kwargs = {'template_snapshot':share_snapshot} if share_snapshot is not None else {}
+            try:balance=m.users.reserve_job(openid,jid,charged,m.settings.quota(),free,**share_kwargs)
             except m.AdmissionError as exc:raise HTTPException(exc.status,detail=str(exc)) from exc
             packet={'prompt':prompt,'model':model,'size':(text or {}).get('size',''),
                     'endpoint':(text or {}).get('endpoint') or provider.get('endpoint') or '/v1/images/edits',
@@ -149,7 +152,8 @@ class CloudPipeline:
                     orig_cos=('origins/'+prefix+source['ext']) if source else None,
                     result_cos='results/'+prefix+'.jpg',norm_cos=('norms/'+prefix+'.jpg') if source else None,
                     deadline=deadline,cloud_next_at=0,
-                    cloud_audit_mode='ci_sync' if openid.startswith('web-') else cfg.get('audit_mode','wechat_auto'))
+                    cloud_audit_mode='ci_sync' if openid.startswith('web-') else cfg.get('audit_mode','wechat_auto'),
+                    **share_kwargs)
                 m.users.confirm_job(jid,'云端异步生成 '+model)
             except Exception:
                 m.users.refund_job(openid,jid,cancel=True)

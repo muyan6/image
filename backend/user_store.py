@@ -19,6 +19,9 @@ import sqlite3
 import threading
 import time
 from account_links import canonical_unlocked, aliases_unlocked, init_links, adjust_balance_unlocked
+from template_share_rewards import (init_schema_unlocked as init_template_reward_schema,
+    record_eligibility_unlocked, confirm_delivery_unlocked, reverse_unlocked,
+    recover_share_rewards)
 from typing import Any, Dict, List, Optional, Tuple
 
 # 光子经济常量
@@ -161,10 +164,11 @@ class UserStore:
             self._conn.execute("UPDATE users SET account_type='web' WHERE account_type='' AND openid LIKE 'web-%'")
             self._conn.execute("UPDATE users SET account_type='wechat' WHERE account_type=''")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_users_source_active ON users(account_type,last_seen)")
+            init_template_reward_schema(self._conn)
             self._conn.commit()
 
     def reserve_job(self, openid: str, job_id: str, amount: int,
-                    quota: Dict[str, int], free_mode: bool = False) -> int:
+                    quota: Dict[str, int], free_mode: bool = False, *, template_snapshot=None) -> int:
         """Balance and quota reservation share one durable, serialized transaction."""
         now = time.time()
         if type(amount) is not int or not 0<=amount<2**63:
@@ -204,6 +208,8 @@ class UserStore:
             balance=adjust_balance_unlocked(self,openid,-amount)
             self._conn.execute("INSERT INTO job_charges(job_id,openid,amount,created_at) VALUES(?,?,?,?)",
                                (job_id, openid, amount, now))
+            if template_snapshot is not None:
+                record_eligibility_unlocked(self,job_id,openid,template_snapshot,free_mode)
             return balance
 
     def confirm_job(self, job_id: str, detail: str) -> None:
@@ -255,6 +261,8 @@ class UserStore:
                 if removed:
                     for counter_owner, count in counters:
                         self._conn.execute("UPDATE users SET total_jobs=MAX(0,total_jobs-?) WHERE openid=?", (count, counter_owner))
+            if row:
+                reverse_unlocked(self,job_id)
             result = self._conn.execute("SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
             return exact_balance(result[0]) if result else 0
 
@@ -272,15 +280,22 @@ class UserStore:
                 self.complete_charge(job_id)
             elif status == "cancelled_charged":
                 self.settle_cancelled_charge(job_id)
+        recover_share_rewards(self,statuses)
 
     def settle_cancelled_charge(self, job_id: str) -> None:
         """User cancelled after vendor submission began; retain the original debit."""
         with self._lock, self._conn:
             self._conn.execute("UPDATE job_charges SET state='cancelled_charged' WHERE job_id=? AND refunded=0", (job_id,))
+            self._conn.execute("UPDATE template_reward_jobs SET status='skipped',reason='cancelled_charged',settled_at=? WHERE job_id=? AND status='pending'",(time.time(),job_id))
 
     def complete_charge(self, job_id: str) -> None:
         with self._lock, self._conn:
-            self._conn.execute("UPDATE job_charges SET state='succeeded' WHERE job_id=? AND refunded=0", (job_id,))
+            self._conn.execute('BEGIN IMMEDIATE')
+            self._conn.execute("UPDATE job_charges SET state='succeeded' WHERE job_id=? AND refunded=0 "
+                               "AND state IN ('reserved','submitted','succeeded')", (job_id,))
+            row = self._conn.execute("SELECT refunded,state FROM job_charges WHERE job_id=?",(job_id,)).fetchone()
+            if row and not row[0] and row[1] == 'succeeded':
+                confirm_delivery_unlocked(self,job_id)
 
     def record_violation(self, openid: str, violation_id: str, kind: str,
                          reason: str, price: int) -> Dict[str, Any]:
@@ -813,7 +828,10 @@ class UserStore:
             # registers again after an explicitly requested account purge.
             for table in ('template_preferences', 'client_submissions', 'web_credentials', 'site_sessions',
                           'site_oauth_states', 'pending_wechat_links', 'site_auth_attempts',
-                          'account_aliases', 'verified_wechat_identities'):
+                          'account_aliases', 'verified_wechat_identities',
+                          'template_shares','template_share_uploads',
+                          'template_reward_jobs','template_reward_uses','template_reward_awards',
+                          'template_reward_recovery','template_reward_offsets','template_reward_ledger'):
                 if self._conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                     self._conn.execute('DELETE FROM ' + table)
             for table in ("violations", "ad_rewards", "invite_bindings", "job_charges", "audit", "users"):

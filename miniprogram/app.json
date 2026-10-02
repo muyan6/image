@@ -16,7 +16,9 @@
     "pages/compare/compare",
     "pages/web-login/web-login",
     "pages/community-submit/community-submit",
-    "pages/community-detail/community-detail"
+    "pages/community-detail/community-detail",
+    "pages/template-shares/template-shares",
+    "pages/template-share/template-share"
   ],
   "window": {
     "backgroundTextStyle": "dark",

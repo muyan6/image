@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -128,13 +129,14 @@ class CleanupStore:
                                (due,due,kind,target))
 
     def protect_copy_until(self,target,expires):
-        if not target.startswith('community/submissions/'):raise ValueError('Invalid community copy target')
+        if not (target.startswith('community/submissions/') or re.fullmatch(r'template-shares/ts_[0-9a-f]{32}/covers/[0-9a-f]{32}\.(jpg|png|webp)',target)):
+            raise ValueError('Invalid retained copy target')
         with self._lock,self._conn:
             self._conn.execute('INSERT INTO upload_cleanup_guard VALUES(?,?) ON CONFLICT(target) DO UPDATE SET expires=MAX(expires,excluded.expires)',(target,expires+300))
 
     def cancel(self, kind, target):
         """Publication owns an independent object until explicit withdrawal."""
-        if kind!='cos' or not target.startswith('community/submissions/'):
+        if kind!='cos' or not (target.startswith('community/submissions/') or re.fullmatch(r'template-shares/ts_[0-9a-f]{32}/covers/[0-9a-f]{32}\.(jpg|png|webp)',target)):
             raise ValueError('Only retained community copies may cancel automatic expiry')
         with self._lock,self._conn:
             self._conn.execute('DELETE FROM cleanup WHERE kind=? AND target=?',(kind,target))

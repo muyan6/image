@@ -16,6 +16,7 @@ Page({
   },
 
   onLoad(options) {
+    if(typeof wx.showShareMenu==='function')wx.showShareMenu({menus:['shareAppMessage']});
     const tid = options.id || 't_anime_dots';
     update(this,{ templateId: tid });
     this.loadTemplateDetail(tid);
@@ -47,7 +48,7 @@ Page({
           const guide = tpl.guide || {};
           let suitable = (guide.suitable && guide.suitable.length > 0)
             ? guide.suitable
-            : [
+            : tpl.source==='user'?[]:[
                 '单人正脸、侧脸或半身人像',
                 '人物五官清楚、脸部没有严重遮挡',
                 '发型轮廓明显，头发细节丰富',
@@ -94,6 +95,10 @@ Page({
   onUnload() {this._unloaded=true;this._loadVersion=(this._loadVersion||0)+1;},
   onRetryTemplate() {return this.loadTemplateDetail(this.data.templateId);},
   onTemplateLibrary() {wx.switchTab({url:'/pages/templates/templates'});},
+  onShareAppMessage(){
+    const tpl=this.data.template;
+    return {title:tpl?('试试「'+tpl.name+'」这个照片模板'):'发现喜欢的照片模板',path:'/pages/style-detail/style-detail?id='+encodeURIComponent(this.data.templateId||''),imageUrl:tpl&&tpl.coverUrl||undefined};
+  },
 
   onChoosePhoto() {
     if(this.data.loading||!this.data.template||this.data.loadError){wx.showToast({title:'请先确认所选风格',icon:'none'});return;}

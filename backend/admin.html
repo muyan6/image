@@ -312,6 +312,7 @@
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
           <path d="M8 2l6 3-6 3-6-3 6-3z"/><path d="M2 8l6 3 6-3"/><path d="M2 11l6 3 6-3"/>
         </svg>模板管理</div>
+      <div class="nav-item" data-page="tshare" onclick="showPage('tshare')"><span aria-hidden="true">◇</span>用户模板审核</div>
       <div class="nav-item" data-page="community" onclick="showPage('community')">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2.5h12v8H7L3 14v-3.5H2z"/><path d="M5 5.5h6M5 8h4"/></svg>社区管理</div>
       <div class="nav-item" data-page="ann" onclick="showPage('ann')">
@@ -405,6 +406,21 @@
       </section>
 
       <!-- 社区帖子管理 -->
+      <section id="page-tshare" hidden>
+        <div class="card"><div class="card-head"><h2>模板分享与作者奖励</h2></div><p class="muted">消费者照常扣款，奖励只给作者；审核通过不会立即发奖，成功使用后由服务端结算。</p>
+          <div class="form-grid">
+            <div class="field"><label><input id="ts-enabled" type="checkbox"> 开放模板投稿</label></div>
+            <div class="field"><label><input id="ts-reward-enabled" type="checkbox"> 启用作者奖励</label></div>
+            <div class="field"><label>每次奖励光子</label><input id="ts-reward-amount" type="number" min="0" max="9999"></div>
+            <div class="field"><label>奖励频率</label><select id="ts-reward-mode"><option value="first_user">同一消费者首次成功使用该模板</option><option value="all_success">每次成功使用</option></select></div>
+            <div class="field"><label>单作者每日奖励上限</label><input id="ts-author-cap" type="number" min="0"></div>
+            <div class="field"><label>全站每日奖励上限</label><input id="ts-global-cap" type="number" min="0"></div>
+          </div><button class="btn-primary" id="ts-save-settings" onclick="saveTemplateSharingSettings()">保存分享配置</button>
+        </div>
+        <div class="card"><div class="card-head"><h2>用户模板投稿</h2><select id="ts-status" style="width:auto" onchange="loadTemplateShares(true)"><option value="pending">待审核</option><option value="all">全部</option><option value="approved">已通过</option><option value="rejected">未通过</option><option value="draft">草稿</option><option value="withdrawn">已撤回</option></select><button class="btn-ghost" onclick="loadTemplateShares(true)">刷新</button></div>
+          <div class="table-wrap"><table id="ts-table"></table></div><div class="pager"><button class="btn-ghost" id="ts-prev" onclick="templateSharesPage(-1)">上一页</button><span id="ts-page"></span><button class="btn-ghost" id="ts-next" onclick="templateSharesPage(1)">下一页</button></div>
+        </div>
+      </section>
       <section id="page-community" hidden>
         <div class="card">
           <div class="card-head"><h2>用户投稿审核<small>默认只公开成品；原图必须由作者主动授权。精选奖励每件作品只发一次。</small></h2></div>
@@ -813,6 +829,7 @@ api("/session").then(enterApp).catch(() => {});
 const PAGES = {
   dash:  { title: "仪表盘",        load: loadOverview },
   tpl:   { title: "模板管理",      load: loadTemplates },
+  tshare: { title: "用户模板审核", load: () => { renderTemplateSharingSettings();loadTemplateShares(true); } },
   community: { title: "社区管理", load: () => Promise.all([loadCommunityPosts(true),loadSubmissions(true),loadCommunityInteractions(true)]) },
   ann:   { title: "公告管理",      load: loadAnnouncements },
   prov:  { title: "供应商与提示词", load: () => { renderProviderForm(); renderChain(); } },
@@ -1346,28 +1363,29 @@ function renderTplTable() {
           : `<div class="thumb-fallback">${esc((tpl.name || "?")[0])}</div>`}
           ${tpl.covers_urls && tpl.covers_urls.length > 1 ? `<span style="display:block;font-size:10px;color:var(--primary);text-align:center;margin-top:2px;font-weight:600">${tpl.covers_urls.length}图</span>` : ""}</td>
        <td><div class="cell-title">${textCell(tpl.name)}</div>
-           <div class="sub">${textCell(tpl.subtitle || "")}</div>
+            <span class="badge">${tpl.source==='user'?'用户分享 · 只读投影':'官方'}</span><div class="sub">${textCell(tpl.subtitle || "")}</div>
            ${extra ? `<div class="sub">${textCell(extra)}</div>` : ""}</td>
        <td>${textCell(gname(tpl.group_id))}</td>
        <td><span class="badge indigo">轻量 / 精细</span></td>
        <td>${esc((SETTINGS?.prices?.light ?? 40) + ' / ' + (SETTINGS?.prices?.fine ?? 40))} 光子</td>
        <td>随所选档位模型</td>
        <td>${tpl.usage_count ?? 0}</td>
-       <td><label class="switch"><input type="checkbox" ${tpl.enabled ? "checked" : ""}
+        <td><label class="switch"><input type="checkbox" ${tpl.enabled ? "checked" : ""} ${tpl.source==='user'?'disabled title="请在用户模板审核中操作"':''}
          onchange="toggleTpl('${tpl.id}', this)"><span class="knob"></span></label></td>
        <td><div class="row-actions">
-         <button class="btn-ghost btn-small" onclick="openTplModal('${tpl.id}')">编辑</button>
-         <button class="btn-danger btn-small" onclick="delTpl('${tpl.id}')">删除</button></div></td>`;
+          ${tpl.source==='user'?'<button class="btn-ghost btn-small" onclick="openShareReviewFromCatalog()">前往投稿审核</button>':`<button class="btn-ghost btn-small" onclick="openTplModal('${tpl.id}')">编辑</button><button class="btn-danger btn-small" onclick="delTpl('${tpl.id}')">删除</button>`}</div></td>`;
     tbody.appendChild(tr);
   });
 }
 window.toggleTpl = async (id, box) => {
+  const row=TPLS.find(t=>t.id===id);if(row?.source==='user'){box.checked=!!row.enabled;toast('用户分享模板请在投稿审核中操作','bad');return;}
   try {
     await api("/templates/" + id, { method: "PUT", body: { enabled: box.checked } });
     toast(box.checked ? "模板已启用" : "模板已停用");
   } catch (e) { box.checked = !box.checked; toast(e.message, "bad"); }
 };
 window.delTpl = async (id) => {
+  if(TPLS.find(t=>t.id===id)?.source==='user'){toast('用户分享模板请在投稿审核中修改或下架','bad');return;}
   if (!confirm("确定删除这个模板？")) return;
   try { await api("/templates/" + id, { method: "DELETE" }); toast("模板已删除"); loadTemplates(); }
   catch (e) { toast(e.message, "bad"); }
@@ -1380,6 +1398,7 @@ const LAYOUT_NAMES = { "": "无文字排版", postcard_bottom: "明信片 · 底
 
 function openTplModal(id) {
   const t = id ? TPLS.find((x) => x.id === id) : null;
+  if(t?.source==='user'){openShareReviewFromCatalog();return;}
   const groupOpts = TPL_GROUPS.map((g) =>
     `<option value="${esc(g.id)}" ${t && t.group_id === g.id ? "selected" : ""}>${esc(g.name)}</option>`).join("");
   const layoutOpts = Object.entries(LAYOUT_NAMES).map(([v, n]) =>
@@ -1655,6 +1674,66 @@ async function loadJobs() {
 window.jobsPage = (dir) => { JOBS_OFFSET = Math.max(0, JOBS_OFFSET + dir * 50); loadJobs(); };
 
 /* ---------- 社区管理 ---------- */
+/* ---------- 用户模板审核：只审核内容，运行参数由服务端受控配置 ---------- */
+const TEMPLATE_SHARE_ADMIN_ROUTES={list:'/template-shares',item:id=>'/template-shares/'+encodeURIComponent(id),review:id=>'/template-shares/'+encodeURIComponent(id)+'/review'};
+window.openShareReviewFromCatalog=()=>{$('ts-status').value='all';showPage('tshare');};
+let TS_ROWS=[],TS_OFFSET=0,TS_LOAD=0,TS_EDITOR=0;
+function renderTemplateSharingSettings(){
+  const c=SETTINGS?.template_sharing||{};
+  $('ts-enabled').checked=c.enabled!==false;$('ts-reward-enabled').checked=c.reward_enabled!==false;
+  $('ts-reward-amount').value=c.reward_amount??40;$('ts-reward-mode').value=c.reward_mode||'first_user';
+  $('ts-author-cap').value=c.author_daily_cap??400;$('ts-global-cap').value=c.global_daily_cap??4000;
+}
+window.saveTemplateSharingSettings=async()=>{
+  const button=$('ts-save-settings');if(button.disabled)return;
+  const c={enabled:$('ts-enabled').checked,reward_enabled:$('ts-reward-enabled').checked,reward_mode:$('ts-reward-mode').value,
+    reward_amount:Number($('ts-reward-amount').value),author_daily_cap:Number($('ts-author-cap').value),global_daily_cap:Number($('ts-global-cap').value)};
+  if(!['first_user','all_success'].includes(c.reward_mode)||!['reward_amount','author_daily_cap','global_daily_cap'].every(key=>Number.isInteger(c[key])&&c[key]>=0)){toast('奖励和上限请填写非负整数','bad');return;}
+  button.disabled=true;try{SETTINGS=await api('/settings',{method:'PUT',body:{template_sharing:c}});renderTemplateSharingSettings();toast('模板分享配置已保存，实际发奖由服务端按成功任务核算');}catch(e){toast(e.message,'bad');}finally{button.disabled=false;}
+};
+function templateShareMedia(value){try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password?u.href:'';}catch(e){return '';}}
+async function loadTemplateShares(reset){
+  if(reset)TS_OFFSET=0;const sequence=++TS_LOAD,offset=TS_OFFSET;
+  try{const d=await api(TEMPLATE_SHARE_ADMIN_ROUTES.list+'?limit=24&offset='+offset+'&status='+encodeURIComponent($('ts-status').value));if(sequence!==TS_LOAD)return;
+    TS_ROWS=d.items||[];$('ts-table').innerHTML=tableColumns([320,200,220,180])+'<thead><tr><th>模板 / 作者</th><th>封面</th><th>审核状态</th><th>操作</th></tr></thead><tbody>'+TS_ROWS.map(row=>{
+      const cover=templateShareMedia((row.covers||[])[0]?.thumbnail_url||(row.covers||[])[0]?.preview_url);
+      return `<tr><td>${textCell(row.name||'未命名模板')}<div class="muted">${textCell(row.author_name||'作者')} · 用户分享</div><small>${fmtTime(row.updated_at)}</small></td><td>${cover?`<img src="${esc(cover)}" alt="模板封面" loading="lazy" style="width:100px;height:110px;object-fit:contain">`:'暂无封面'}</td><td>${esc({draft:'草稿',pending:'待审核',approved:'已通过',rejected:'未通过',withdrawn:'已撤回'}[row.status]||row.status)} · 版本 ${esc(row.revision)}${row.has_published?'<div class="muted">已有审核版公开</div>':''}${textCell(row.reason||'')}</td><td><button class="btn-primary btn-small" data-id="${esc(row.id)}" onclick="editTemplateShare(this.dataset.id)">查看 / 审核</button></td></tr>`;
+    }).join('')+(TS_ROWS.length?'':'<tr><td colspan="4" class="empty">暂无投稿</td></tr>')+'</tbody>';
+    $('ts-page').textContent=`共 ${d.total||0} 条 · 第 ${Math.floor(offset/24)+1} 页`;$('ts-prev').disabled=offset===0;$('ts-next').disabled=!d.has_more&&offset+24>=Number(d.total||0);
+  }catch(e){if(sequence===TS_LOAD){$('ts-table').innerHTML='<tbody><tr><td class="empty">读取失败，请刷新重试</td></tr></tbody>';toast(e.message,'bad');}}
+}
+window.templateSharesPage=dir=>{TS_OFFSET=Math.max(0,TS_OFFSET+dir*24);loadTemplateShares(false);};
+window.editTemplateShare=async id=>{
+  const sequence=++TS_EDITOR;
+  try{const [data,groups]=await Promise.all([api(TEMPLATE_SHARE_ADMIN_ROUTES.item(id)),api('/template-groups')]);if(sequence!==TS_EDITOR)return;
+    const row=data.submission||data;const guide=row.guide||{},options=[{id:'',name:'仅全部页面'},...(groups.items||[]).filter(g=>g.enabled!==false)];
+    openModal(`<div class="modal-head"><b>审核用户模板 · ${esc(row.author_name||'作者')}</b><button class="icon-btn" onclick="closeModal()">✕</button></div><div class="modal-body">
+      <p class="muted">版本 ${esc(row.revision)}。${row.has_published?'编辑稿通过前，上一版继续公开。':''}运行参数和消费者扣款由平台控制，审核通过不会立即发奖励。</p>
+      ${row.reward_summary?`<p class="muted">作者奖励：已产生 ${esc(row.reward_summary.reward_earned??row.reward_summary.earned??'—')} · 已到账 ${esc(row.reward_summary.reward_credited??row.reward_summary.credited??'—')}${Number(row.reward_summary.recovery_due)>0?' · 待抵扣 '+esc(row.reward_summary.recovery_due)+'（仅抵扣后续作者奖励，不扣已有余额）':''}</p>`:''}
+      <div style="display:flex;flex-wrap:wrap;gap:12px">${(row.covers||[]).map((cover,i)=>{const url=templateShareMedia(cover.preview_url);return url?`<img src="${esc(url)}" alt="封面 ${i+1}" style="max-width:100%;width:180px;max-height:230px;object-fit:contain">`:'';}).join('')}</div>
+      <div class="field"><label>模板名称</label><input id="ts-edit-name" maxlength="20" value="${esc(row.name)}"></div>
+      <div class="field"><label>一句话介绍</label><input id="ts-edit-subtitle" maxlength="60" value="${esc(row.subtitle)}"></div>
+      <div class="field"><label>提示词（仅后台查看）</label><textarea id="ts-edit-prompt" maxlength="4000">${esc(row.prompt)}</textarea></div>
+      <div class="field"><label>分类</label><select id="ts-edit-group">${options.map(g=>`<option value="${esc(g.id)}" ${g.id===(row.group_id||'')?'selected':''}>${esc(g.name)}</option>`).join('')}</select></div>
+      ${[['advice','选图建议'],['suitable','适合这些照片'],['unsuitable','不太适合'],['tips','上传前检查']].map(([key,title])=>`<div class="field"><label>${title}${key==='advice'?'':'（每行一条）'}</label><textarea id="ts-edit-${key}" maxlength="500">${esc(Array.isArray(guide[key])?guide[key].join('\n'):guide[key]||'')}</textarea></div>`).join('')}
+      <div class="field"><label>未通过 / 下架原因</label><textarea id="ts-edit-reason" maxlength="500">${esc(row.reason||'')}</textarea></div><p id="ts-edit-message" role="status"></p>
+      </div><div class="modal-foot">${row.status==='pending'?'<button class="btn-primary" id="ts-approve">审核通过并发布</button><button class="btn-ghost" id="ts-reject">未通过</button>':''}${row.has_published?'<button class="btn-danger" id="ts-unpublish">下架已公开版本</button>':''}</div>`,true);
+    const controls={approve:$('ts-approve'),reject:$('ts-reject'),unpublish:$('ts-unpublish')};
+    for(const [action,button]of Object.entries(controls))if(button)button.addEventListener('click',()=>reviewTemplateShare(row,action,sequence));
+  }catch(e){toast(e.message,'bad');}
+};
+async function reviewTemplateShare(row,action,sequence){
+  if(SAVING)return;const message=$('ts-edit-message'),reason=$('ts-edit-reason').value.trim();if(action==='reject'&&!reason){message.textContent='请填写未通过原因';return;}
+  if(action==='unpublish'&&!confirm('确定下架这个用户模板的已公开版本？'))return;
+  const patch={name:$('ts-edit-name').value.trim(),subtitle:$('ts-edit-subtitle').value.trim(),prompt:$('ts-edit-prompt').value.trim(),group_id:$('ts-edit-group').value,
+    guide:Object.fromEntries(['advice','suitable','unsuitable','tips'].map(key=>[key,key==='advice'?$('ts-edit-'+key).value.trim():$('ts-edit-'+key).value.split('\n').map(x=>x.trim()).filter(Boolean)]))};
+  if(action==='approve'&&(!patch.name||!patch.prompt)){message.textContent='请确认名称和提示词';return;}
+  if(action==='approve'&&['suitable','unsuitable','tips'].some(key=>patch.guide[key].length>8||patch.guide[key].some(value=>value.length>60))){message.textContent='选图指南每组最多8条，每条不超过60字';return;}
+  SAVING=true;const controls=Array.from($('modal-root').querySelectorAll('input,textarea,select,button'));controls.forEach(node=>node.disabled=true);
+  try{await api(TEMPLATE_SHARE_ADMIN_ROUTES.review(row.id),{method:'POST',body:{revision:row.revision,action,reason,patch:action==='approve'?patch:{}}});if(sequence!==TS_EDITOR)return;closeModal();toast(action==='approve'?'模板已通过；作者奖励在成功使用后由服务端结算':action==='reject'?'本次修改未通过；已审核旧版保持原状态':'模板已下架');loadTemplateShares(false);}
+  catch(e){if(sequence===TS_EDITOR&&message.isConnected)message.textContent=e.message+(e.status===409?'；请关闭并重新读取最新版本':'');}
+  finally{SAVING=false;controls.forEach(node=>node.disabled=false);}
+}
 
 let SUBMISSIONS=[],SUBMISSION_OFFSET=0,SUBMISSION_REWARD=0;
 const SUBMISSION_LABELS={uploading:'保存中',pending:'待审核',published:'已发布',rejected:'未通过 / 下架',withdrawn:'已撤回'};

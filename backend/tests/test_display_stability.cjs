@@ -84,7 +84,8 @@ async function test(name,fn){try{let observed=await fn();rows.push({case:name,pa
   assert(rendered.includes('&lt;script&gt;'));assert(!rendered.includes('<script>'));assert(rendered.includes('<details'));assert(rendered.includes('展开完整内容'));assert(rendered.includes('LONG_WITHOUT_SPACES_'.repeat(100)));
   for(const token of ['table-layout:fixed','overflow-wrap:anywhere','-webkit-line-clamp:3','max-height:240px'])assert(html.includes(token));
   for(const name of ['jobs','grp','tpl','users','violations','submission','community','comment','report'])assert(html.includes('#'+name+'-table { min-width:'));
-  assert((html.match(/tableColumns\(\[/g)||[]).length===9);return {tables:9,longTextCharacters:value.length,completeTextRetained:true};
+  // Nine existing fixed-column tables plus template-sharing review.
+  assert((html.match(/tableColumns\(\[/g)||[]).length===10);assert(html.includes('id="ts-table"'));return {tables:10,longTextCharacters:value.length,completeTextRetained:true};
  });
  await test('all_modified_image_load_handlers_are_present',()=>{
   for(const name of ['templates','my','works','index','style-detail','community']){

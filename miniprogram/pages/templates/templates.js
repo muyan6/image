@@ -13,6 +13,8 @@ Page({
       { id: 'all', name: '全部风格', count: 0 }
     ],
     activeCategory: 'all',
+    sortMode: 'hot',
+    sortModes: [{id:'hot',name:'按热度'},{id:'latest',name:'按最新'},{id:'random',name:'随机逛逛'}],
     searchQuery: '',
     preferenceMode:'all', favoriteIds:[], recentIds:[], preferencesLoading:false, preferencesError:'',
     freeMode: false,
@@ -134,7 +136,7 @@ Page({
     this._latestGroups = groups;
     this._latestRawItems = rawItems;
     const prior=new Map(this.data.allTemplates.map(x=>[x.id,x]));this._coverSources={};
-    const items = rawItems.map((item) => {
+    const items = rawItems.map((item, index) => {
       const low=Math.min(this.data.priceLight,this.data.priceFine);
       const high=Math.max(this.data.priceLight,this.data.priceFine);
       const cost = this.data.freeMode ? '免扣费' : ('✦ ' + (low===high?low:low+'–'+high) + ' 光子');
@@ -147,6 +149,7 @@ Page({
       const coverUrls = rawCovers.map((c,i) => typeof api.stableImageUrl==='function'
         ? api.stableImageUrl(c,old&&old.covers&&old.covers[i],version,old&&old.cover_version) : api.absolute(c)).filter(Boolean);
       return Object.assign({}, item, {
+        catalogOrder:index, sourceLabel:item.source==='user'?'用户分享':'官方',
         cover: coverUrls[0] || '',
         covers: coverUrls,
         thumbnail: typeof api.stableImageUrl==='function'?api.stableImageUrl(small,old&&old.thumbnail,version,old&&old.cover_version):api.absolute(small),
@@ -208,8 +211,25 @@ Page({
       return words.every(word => text.includes(word));
     });
     if(this.data.preferenceMode==='recent')list.sort((a,b)=>this.data.recentIds.indexOf(a.id)-this.data.recentIds.indexOf(b.id));
+    else if(cid!=='all')list.sort((a,b)=>(Number(a.sort)||0)-(Number(b.sort)||0)||(a.catalogOrder||0)-(b.catalogOrder||0));
+    else if(this.data.sortMode==='latest')list.sort((a,b)=>Number(b.published_at||b.created_at||0)-Number(a.published_at||a.created_at||0)||(a.catalogOrder||0)-(b.catalogOrder||0));
+    else if(this.data.sortMode==='random'){
+      this._randomRanks=this._randomRanks||{};
+      for(const item of list)if(this._randomRanks[item.id]===undefined)this._randomRanks[item.id]=Math.random();
+      list.sort((a,b)=>this._randomRanks[a.id]-this._randomRanks[b.id]||(a.catalogOrder||0)-(b.catalogOrder||0));
+    }else list.sort((a,b)=>Number(b.usage_count||0)-Number(a.usage_count||0)||(a.catalogOrder||0)-(b.catalogOrder||0));
     update(this,{ filteredTemplates: list });
   },
+
+  onSortMode(e){
+    const mode=e.currentTarget.dataset.id;
+    if(!['hot','latest','random'].includes(mode))return;
+    if(mode===this.data.sortMode)return;
+    update(this,{sortMode:mode});this.filterByCategory(this.data.activeCategory);
+  },
+  onShuffleTemplates(){this._randomRanks={};this.filterByCategory(this.data.activeCategory);},
+  onMyTemplates(){wx.navigateTo({url:'/pages/template-shares/template-shares'});},
+  onSubmitTemplate(){wx.navigateTo({url:'/pages/template-share/template-share'});},
 
   onRetryTemplates() {
     this.fetchTemplates(null, true);

@@ -119,6 +119,12 @@ if not args.legacy:
         ('test_load_media_frontend.cjs', 'load_media_frontend_results.json'),
         ('test_load_web.cjs', 'load_web_results.json'),
         ('test_load_static.py', 'load_static_results.json'),
+        ('test_template_shares.py', 'template_shares_results.json'),
+        ('test_template_share_rewards.py', 'template_share_reward_results.json'),
+        ('test_template_share_frontend.cjs', 'template_share_frontend_results.json'),
+        ('test_template_share_web.cjs', 'template_share_web_results.json'),
+        ('test_template_share_admin.cjs', 'template_share_admin_results.json'),
+        ('test_template_share_integration.py', 'template_share_integration_results.json'),
     ):
         path = Path(__file__).with_name(script)
         if path.is_file():

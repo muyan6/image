@@ -613,6 +613,8 @@ def make_admin_router(*, settings: SettingsStore,
     @router.put("/templates/{tpl_id}")
     async def update_template(tpl_id: str, request: Request) -> Dict[str, Any]:
         _guard(request)
+        if (templates.get_template(tpl_id) or {}).get('source') == 'user':
+            raise HTTPException(409, detail='用户分享模板请在模板投稿审核中修改或下架')
         try:
             return templates.update_template(tpl_id, await _json_body(request))
         except (KeyError, ValueError) as exc:
@@ -621,6 +623,8 @@ def make_admin_router(*, settings: SettingsStore,
     @router.delete("/templates/{tpl_id}")
     def delete_template(tpl_id: str, request: Request) -> Dict[str, Any]:
         _guard(request)
+        if (templates.get_template(tpl_id) or {}).get('source') == 'user':
+            raise HTTPException(409, detail='用户分享模板请在模板投稿审核中修改或下架')
         try:
             templates.delete_template(tpl_id)
         except KeyError as exc:
@@ -641,6 +645,10 @@ def make_admin_router(*, settings: SettingsStore,
         """
         _guard(request)
         slot = max(0, min(int(slot), 2))
+        if (templates.get_template(tpl_id) or {}).get('source') == 'user':
+            try:file.file.close()
+            except Exception:pass
+            raise HTTPException(409, detail='用户分享模板请在模板投稿审核中修改或下架')
         limit = 10 * 1024 * 1024
         chunks = []
         received = 0
@@ -692,6 +700,8 @@ def make_admin_router(*, settings: SettingsStore,
     def delete_template_cover(tpl_id: str, slot: int, request: Request) -> Dict[str, Any]:
         """删除指定槽位的示例图。"""
         _guard(request)
+        if (templates.get_template(tpl_id) or {}).get('source') == 'user':
+            raise HTTPException(409, detail='用户分享模板请在模板投稿审核中修改或下架')
         updated = templates.delete_cover_slot(tpl_id, slot)
         updated["cover_url"] = resolve_cover(updated, settings)
         updated["covers_urls"] = resolve_covers(updated, settings)

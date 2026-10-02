@@ -1,0 +1,28 @@
+<view class="page-container">
+ <view class="share-header"><text class="eyebrow">创作者 · 模板分享</text><text class="headline">分享你调教的风格</text><text class="subtitle">提供1–3张实际效果封面和提示词，审核通过后展示「用户分享」。提示词只用于后台审核与生成，不公开下发。</text></view>
+ <view wx:if="{{loading}}" class="notice">正在读取模板…</view>
+ <view class="notice" wx:if="{{hasPublished}}">已有审核版继续展示；这次修改提交并审核通过后，才替换公开版本。</view>
+ <view class="notice" wx:if="{{locked}}">当前版本审核中，暂时不可编辑。可在“我的模板”核对或撤回。</view>
+ <view wx:if="{{reason}}" class="reason">后台反馈：{{reason}}</view>
+ <view class="form-card">
+  <text class="field-label">模板名称</text><input value="{{name}}" data-field="name" bindinput="onField" maxlength="20" placeholder="例如：暖色旅行明信片" disabled="{{busy || locked}}" />
+  <text class="field-label">效果介绍</text><input value="{{subtitle}}" data-field="subtitle" bindinput="onField" maxlength="60" placeholder="一句话说明风格效果" disabled="{{busy || locked}}" />
+  <text class="field-label">封面效果图 · 1–3张</text><text class="hint">JPEG / PNG / WebP，每张最多8MB；优先选择你实际生成的效果。</text>
+  <view class="cover-grid"><view class="cover-card" wx:for="{{covers}}" wx:key="token"><image src="{{item.url}}" mode="aspectFit" lazy-load bindtap="onPreviewCover" data-url="{{item.url}}" /><button wx:if="{{!locked}}" data-index="{{index}}" bindtap="onRemoveCover" disabled="{{busy}}">移除</button></view><button class="cover-add" wx:if="{{covers.length < 3 && !locked}}" bindtap="onChooseCover" disabled="{{busy}}">＋ 选择封面</button></view>
+  <text class="field-label">生成提示词</text><textarea class="prompt-input" value="{{prompt}}" data-field="prompt" bindinput="onField" maxlength="4000" placeholder="描述风格、构图、需要保留的细节和避免出现的内容" disabled="{{busy || locked}}" />
+ </view>
+ <view class="form-card">
+  <view class="guide-heading"><text class="field-label">帮助别人选对照片</text><button bindtap="onCopyGuide" disabled="{{busy}}">复制AI整理指令</button></view>
+  <text class="hint">可以自己填写，也可以交给你常用的AI整理后核对。不确定的限制留空，不要把封面效果当作测试结论。</text>
+  <text class="field-label">选图建议</text><textarea value="{{advice}}" data-field="advice" bindinput="onField" maxlength="500" placeholder="一段说明，建议不超过100字" disabled="{{busy || locked}}" />
+  <text class="field-label">适合哪些照片</text><textarea value="{{suitable}}" data-field="suitable" bindinput="onField" maxlength="500" placeholder="一行一条，例如单人人像、旅行风景" disabled="{{busy || locked}}" />
+  <text class="field-label">不太适合 · 可选</text><textarea value="{{unsuitable}}" data-field="unsuitable" bindinput="onField" maxlength="500" placeholder="只写实际确认的限制，一行一条" disabled="{{busy || locked}}" />
+  <text class="field-label">使用技巧 · 可选</text><textarea value="{{tips}}" data-field="tips" bindinput="onField" maxlength="500" placeholder="一行一条，可留空" disabled="{{busy || locked}}" />
+  <text class="field-label">粘贴AI返回的说明JSON · 可选</text><textarea value="{{guideJson}}" data-field="guideJson" bindinput="onField" maxlength="2500" placeholder="只导入说明，不会修改你的生成提示词" disabled="{{busy || locked}}" /><button class="small-action" bindtap="onImportGuide" disabled="{{busy || locked || !guideJson}}">导入说明并核对</button>
+ </view>
+ <view class="notice">{{rewardText}}</view>
+ <checkbox-group bindchange="onConsent"><label class="consent"><checkbox value="template" checked="{{consent}}" disabled="{{busy || locked}}" /><text>我有权分享这些封面与提示词，并同意审核后供其他用户创作使用。</text></label></checkbox-group>
+ <text class="error" wx:if="{{error}}">{{error}}</text>
+ <view class="form-actions"><button bindtap="onSaveDraft" disabled="{{busy || locked}}">保存草稿</button><button class="primary" bindtap="onSubmit" disabled="{{busy || locked || !consent}}" loading="{{busy}}">提交后台审核</button></view>
+ <view class="footer-links"><button bindtap="onMine">我的模板 · {{statusLabel}}</button><button bindtap="onLibrary">返回模板库</button></view>
+</view>

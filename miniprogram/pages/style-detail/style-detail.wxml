@@ -48,6 +48,8 @@
       </view>
     </view>
 
+    <view class="template-author-line" wx:if="{{template}}"><text>{{template.source === 'user' ? '用户分享 · ' + (template.author_name || '分享者') : '官方模板'}}</text><button open-type="share">分享模板</button></view>
+
     <!-- 选图建议导语区 -->
     <view class="advice-block" wx:if="{{ template.guide && template.guide.advice }}">
       <view class="advice-tag-row">

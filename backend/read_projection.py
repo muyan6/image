@@ -151,6 +151,14 @@ class CreditProjection:
                 CASE WHEN action='credit' THEN '充值到账' ELSE '充值退款扣回' END,
                 credit_amount(delta,1),created_at,NULL,order_id FROM payment_ledger WHERE openid''' + clause + ' AND delta!=0'
             params += owners
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='template_reward_ledger'").fetchone():
+            # A pending reversal/offset has a real zero balance delta, not an
+            # invented debit. Retain that row with its recovery metadata.
+            query += ''' UNION ALL SELECT 'template_reward:' || id,'template_reward_' || action,
+                CASE WHEN action='reversal_pending' THEN '模板奖励退款待追回（仅抵扣未来作者奖励）'
+                     WHEN offset_amount>0 THEN '模板作者奖励（抵扣待追回光子）' ELSE '模板作者奖励' END,
+                CAST(amount AS TEXT),created_at,job_id,NULL FROM template_reward_ledger WHERE openid''' + clause
+            params += owners
         return query, params, owners
 
     @staticmethod
@@ -182,6 +190,14 @@ class CreditProjection:
             columns = [field[0] for field in cursor.description]
             items = [dict(zip(columns, row)) for row in cursor.fetchall()]
             for row in items: row['amount'] = int(row['amount'])
+            reward_ids = [int(row['id'].split(':')[1]) for row in items if row['id'].startswith('template_reward:')]
+            if reward_ids:
+                rows = db.execute('SELECT id,reward_amount,offset_amount,recovery_amount FROM template_reward_ledger '
+                    'WHERE openid IN ('+marks(owners)+') AND id IN ('+marks(reward_ids)+')',(*owners,*reward_ids)).fetchall()
+                metadata = {str(identity):{'reward_amount':gross,'offset_amount':offset,'recovery_amount':recovery}
+                            for identity,gross,offset,recovery in rows}
+                for row in items:
+                    if row['id'].startswith('template_reward:'): row.update(metadata[row['id'].split(':')[1]])
             unchanged = self._revision() == revision if detached else False
             total = cached if cached is not None and unchanged else self._count(db, query, params)
             if unchanged: self._remember_count(key, total)

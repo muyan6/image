@@ -1,8 +1,10 @@
 import {mountCreation} from './creation.js';
 import {mountLibrary} from './library.js';
 import {createDisplayCache} from './shared-load.js';
+import {mountTemplateSharing} from './template-sharing.js';
 const CREATION=new Set(['create','text','templates','result']);
-const ROUTES=new Set([...CREATION,'works','community','post','submissions','submit','my','credits','orders','invites','privacy','retention']);
+const SHARING=new Set(['template-shares','template-share']);
+const ROUTES=new Set([...CREATION,...SHARING,'works','community','post','submissions','submit','my','credits','orders','invites','privacy','retention']);
 const issue=(message,status=0,data={})=>Object.assign(new Error(message),{status,detail:data.detail||message,data});
 const message=data=>typeof data.detail==='string'?data.detail:Array.isArray(data.detail)?data.detail.map(x=>x.msg||'请检查输入').join('；'):data.message||'操作暂未完成，请重试';
 
@@ -18,7 +20,7 @@ export function createApplication(options={}){
  header.append(button('废片新生所',()=>navigate('create'),'site-brand'),nav,identity);identity.append(balance,account);nav.setAttribute('aria-label','主导航');host.id='site-content';notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');
  const tabs=[];[['create','创作','◌'],['templates','模板','▦'],['community','社区','◇'],['my','我的','○']].forEach(([r,label,icon])=>{const b=button('',()=>navigate(r),'site-tab');b.append(element('span','site-tab-icon',icon),element('span','',label));b.dataset.route=r;b.setAttribute('aria-label',label);tabs.push(b);nav.append(b);});
  footer.append(element('span','','照片修复 · 风格创作'),button('隐私与本地草稿',()=>navigate('privacy'),'shell-link'),button('照片保存期限',()=>navigate('retention'),'shell-link'));shell.append(header,banners,host,footer,notice);container.replaceChildren(shell);
- const ctx={state,document:doc,element,api,displayGet,invalidateDisplay,requireLogin,navigate,toast,setBalance,startWechatLink,changePassword,logout,invalidateAccount,confirm:confirmAction,creationOptions:options.creationOptions};
+ const ctx={state,document:doc,element,api,displayGet,invalidateDisplay,requireLogin,navigate,toast,setBalance,startWechatLink,changePassword,logout,invalidateAccount,confirm:confirmAction,creationOptions:options.creationOptions,templateSharingOptions:options.templateSharingOptions};
  Object.defineProperty(ctx,'accountVersion',{get:()=>accountVersion});Object.defineProperty(ctx,'mountGeneration',{get:()=>mountGeneration});
  function renderHeader(){if(destroyed)return;account.textContent=state.user?(state.user.nickname||state.user.username||'我的账号'):'注册 / 登录';balance.textContent=state.user?(Number.isFinite(state.user.balance)?'✦ '+state.user.balance:'✦ —'):'';balance.hidden=!state.user;
   const selected=CREATION.has(current.route)?current.route==='templates'?'templates':'create':['community','post'].includes(current.route)?'community':'my';tabs.forEach(b=>{b.classList.toggle('site-tab-active',b.dataset.route===selected);b.setAttribute('aria-current',b.dataset.route===selected?'page':'false');});}
@@ -42,8 +44,8 @@ export function createApplication(options={}){
   if(state.auth&&state.auth.token)headers.Authorization='Bearer '+state.auth.token;
   if(state.auth&&state.auth.csrf_token){headers['X-CSRF-Token']=state.auth.csrf_token;headers['X-Site-CSRF']=state.auth.csrf_token;}
   const init={method,headers,credentials:'same-origin'};if(settings.signal)init.signal=settings.signal;if(settings.data!==undefined){headers['Content-Type']='application/json';init.body=JSON.stringify(settings.data);}
-  const mutation=!['GET','HEAD'].includes(method);if(mutation)invalidateDisplay('private:');
-  let response;try{response=await fetcher(path,init);}catch(e){throw issue('网络连接暂未完成，请检查后重试',0,{detail:e.message||'网络连接失败'});}finally{if(mutation)invalidateDisplay('private:');}
+  const mutation=!['GET','HEAD'].includes(method),templateWithdraw=mutation&&/^\/api\/template-shares\/[^/]+\/withdraw$/.test(path);if(mutation)invalidateDisplay('private:');if(templateWithdraw)invalidateDisplay('/api/templates');
+  let response;try{response=await fetcher(path,init);}catch(e){throw issue('网络连接暂未完成，请检查后重试',0,{detail:e.message||'网络连接失败'});}finally{if(mutation)invalidateDisplay('private:');if(templateWithdraw)invalidateDisplay('/api/templates');}
   let data={};if(response.status!==204)try{data=await response.json();}catch(e){throw issue('响应暂未确认，请稍后核对',response.status||0,{detail:'响应数据异常'});}
   if(!response.ok){if(response.status===404&&method==='GET'&&/^\/api\/(jobs\/|community\/posts\/)/.test(path))invalidateDisplay(path.startsWith('/api/jobs/')?'/api/my/jobs':'/api/community');if(response.status===401&&state.user&&valid(v,g)&&!/^\/api\/auth\/site\/(login|register)$/.test(path))clearAccount('登录状态已过期，请重新登录');throw issue(message(data),response.status,data);}
   if(valid(v,g)&&Number.isFinite(data.balance)&&seq>=lastBalanceApplied){lastBalanceApplied=seq;setBalance(data.balance);}return data;
@@ -77,11 +79,11 @@ export function createApplication(options={}){
  function readRoute(){if(options.initialRoute)return {route:options.initialRoute,params:options.initialParams||{}};const [name,query='']=(win.location.hash||'').replace(/^#/,'').split('?'),params={};new URLSearchParams(query).forEach((value,key)=>{if(['id','jobId','templateId','status'].includes(key))params[key]=value;});return {route:ROUTES.has(name)?name:'create',params};}
  async function navigate(route,params={},navigation={}){if(destroyed)return;route=ROUTES.has(route)?route:'create';const generation=++mountGeneration;if(cleanup){cleanup();cleanup=null;}current={route,params};renderHeader();if(!options.disableHistory){const query=new URLSearchParams();['id','jobId','templateId','status'].forEach(k=>{if(typeof params[k]==='string'&&params[k])query.set(k,params[k]);});const hash='#'+route+(query.size?'?'+query:'');if(win.location.hash!==hash)win.history[navigation.replace?'replaceState':'pushState'](null,'',hash);}
   const view=element('section','site-route');view.dataset.route=route;host.replaceChildren(view);if(['privacy','retention'].includes(route)){info(view,route);return;}
-  try{const stop=await (CREATION.has(route)?options.mountCreation||mountCreation:options.mountLibrary||mountLibrary)(ctx,view,route,params);if(destroyed||generation!==mountGeneration){if(typeof stop==='function')stop();return;}cleanup=typeof stop==='function'?stop:null;}
+  try{const stop=await (SHARING.has(route)?options.mountTemplateSharing||mountTemplateSharing:CREATION.has(route)?options.mountCreation||mountCreation:options.mountLibrary||mountLibrary)(ctx,view,route,params);if(destroyed||generation!==mountGeneration){if(typeof stop==='function')stop();return;}cleanup=typeof stop==='function'?stop:null;}
   catch(e){if(!destroyed&&generation===mountGeneration)view.replaceChildren(element('h1','','页面暂未展开'),element('p','shell-copy',e.message||'请稍后重试'),button('重试',()=>navigate(route,params,{replace:true})));}
  }
  function info(root,route){root.classList.add('shell-info');root.append(element('p','shell-eyebrow','废片新生所 · 使用说明'),element('h1','',route==='privacy'?'隐私与本地草稿':'照片保存期限'));const rows=route==='privacy'?[
-  ['个人作品默认私密','个人照片、成品、余额与记录由登录账号查询。网页与小程序绑定后，通过同一服务端账号查看共享数据。'],['你决定社区公开范围','投稿默认只公开成品，公开原图需要另外开启并确认授权。审核通过后展示；你可在“我的投稿”撤回。'],['草稿保存在当前浏览器','创作参数、草稿照片与提交编号保留在浏览器本地，帮助断网后核对任务。清理浏览器数据会移除本地草稿和回执，不会删除云端作品。'],['登录信息与余额','登录由当前浏览器会话 Cookie 维护，页面不把登录令牌写入本地存储。新账号初始 0 光子，仅由管理员在后台手动增加。']
+  ['个人作品默认私密','个人照片、成品、余额与记录由登录账号查询。网页与小程序绑定后，通过同一服务端账号查看共享数据。'],['你决定社区公开范围','投稿默认只公开成品，公开原图需要另外开启并确认授权。审核通过后展示；你可在“我的投稿”撤回。'],['草稿保存在当前浏览器','创作参数、草稿照片与提交编号保留在浏览器本地，帮助断网后核对任务。清理浏览器数据会移除本地草稿和回执，不会删除云端作品。'],['登录信息与余额','登录由当前浏览器会话 Cookie 维护，页面不把登录令牌写入本地存储。新账号初始 0 光子，可由管理员在后台手动增加；合格的模板贡献另有作者奖励。']
  ]:[['个人原图、对比图与成品保留 30 天','从生成完成起计算，到期后云端图片自动清理。请在到期前下载满意作品；临期作品会在作品页提示。'],['主动删除个人作品','单件删除或清空会移除个人作品。社区副本独立保存，不会随个人作品删除而自动撤回。'],['社区副本独立授权保存','已发布投稿不随个人作品 30 天到期而消失；未通过或超过 7 天未审核的投稿图片会清理，已发布投稿可主动撤回。'],['本地草稿与提交回执','本地草稿不是云端备份。提交结果待确认时，请先核对作品记录，避免重复提交。']];rows.forEach(([title,text])=>{const card=element('section','shell-info-card');card.append(element('h2','',title),element('p','shell-copy',text));root.append(card);});root.append(button('管理我的作品',()=>navigate('works')));}
  const history=()=>{const r=readRoute();navigate(r.route,r.params,{replace:true});};if(!options.disableHistory)win.addEventListener('popstate',history);
  async function loadSession(defer=false){const v=accountVersion,seq=++accountSequence;try{const auth=await api('/api/auth/site/session');if(valid(v)&&seq===accountSequence){if(defer)return {auth,version:v,sequence:seq};applyAuth(auth);}}catch(e){if(valid(v)&&seq===accountSequence&&e.status!==401)banner('session','账号状态尚未同步；公开模板与社区仍可浏览',()=>loadSession(false));}}

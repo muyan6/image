@@ -45,6 +45,7 @@ from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from web_delivery import create_web_assets, web_home_path, favicon_path
+from template_share_rewards import reward_snapshot, reward_summary
 
 from admin_api import ensure_admin_password, make_admin_router
 from cleanup_store import CleanupStore
@@ -605,7 +606,8 @@ def _register_job(openid: str, quality: str, style: str,
     recipe = recipe or photo_recipe(quality, template, text_values, aspect_ratio, custom_prompt,
                                     (template or {}).get('output_mode', ''))
     try:
-        balance = users.reserve_job(openid, job_id, charged, settings.quota(), free)
+        reward_args = {'template_snapshot': reward_snapshot(template, settings.template_sharing())} if (template or {}).get('source') == 'user' else {}
+        balance = users.reserve_job(openid, job_id, charged, settings.quota(), free, **reward_args)
     except AdmissionError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
     orig_path = None
@@ -665,6 +667,7 @@ def _register_job(openid: str, quality: str, style: str,
             result_url="/api/images/%s" % result_file,
             orig_cos=orig_cos,
             result_cos=result_cos,
+            **reward_args,
         )
         users.confirm_job(job_id, "job=%s quality=%s tpl=%s ar=%s price=%d charged=%d"
                           % (job_id, quality, (template or {}).get("id", "-"),
@@ -1772,6 +1775,7 @@ def public_config() -> Dict[str, Any]:
         community_enabled = bool(CommunityStore(settings)._normalize()['enabled'])
     return {
         "prices": settings.prices(),
+        "template_sharing": settings.template_sharing(),
         "rewards": settings.rewards(),
         "free_mode": settings.free_mode(),
         "cos_ready": settings.cos_ready(),
@@ -2162,6 +2166,7 @@ def get_me(request: Request):
         "balance": user["balance"],
         "total_jobs": user["total_jobs"],
         "credit_record_count": experience_for(users).credit_record_count(openid),
+        "template_share_rewards": reward_summary(users, openid),
         "invite_code": user["invite_code"],
         "nickname": user.get("nickname", ""),
         "banned": user.get("banned", False),
@@ -2730,6 +2735,9 @@ app.include_router(web_login_router)
 app.include_router(make_payment_router(lambda:sys.modules[__name__]))
 from community_api import make_community_router
 app.include_router(make_community_router(lambda:sys.modules[__name__]))
+from template_share_api import make_template_share_router, reconcile as reconcile_template_shares
+reconcile_template_shares(sys.modules[__name__])
+app.include_router(make_template_share_router(lambda:sys.modules[__name__]))
 app.include_router(make_experience_router(lambda:sys.modules[__name__]))
 app.include_router(make_site_router(lambda:sys.modules[__name__]))
 from web_wechat import make_web_wechat_router

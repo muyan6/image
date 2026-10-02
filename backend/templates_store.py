@@ -328,7 +328,7 @@ def _validate(doc: Dict[str, Any]) -> None:
         if tid in tpl_ids:
             raise ValueError("模板 id 重复: %r" % tid)
         tpl_ids.add(tid)
-        if t.get("group_id") not in group_ids:
+        if t.get("group_id") not in group_ids and not (t.get("source") == "user" and not t.get("group_id")):
             raise ValueError("模板 %s 指向不存在的分组 %r" % (tid, t.get("group_id")))
         if not str(t.get("name", "")).strip() or len(str(t["name"])) > 20:
             raise ValueError("模板 %s 名称必填且不超过 20 字" % tid)
@@ -599,6 +599,8 @@ class TemplateStore:
                      if (t.get("enabled") or not enabled_only)]
         if group_id:
             items = [t for t in items if t.get("group_id") == group_id]
+        if enabled_only:
+            items = self._visible_shared(items)
         items.sort(key=lambda t: (t.get("sort", 0), t.get("id", "")))
         return items
 
@@ -622,8 +624,81 @@ class TemplateStore:
                 if t["id"] == tpl_id:
                     if enabled_only and not t.get("enabled"):
                         return None
-                    return copy.deepcopy(t)
-        return None
+                    item = copy.deepcopy(t)
+                    break
+            else:
+                return None
+        if enabled_only and not self._visible_shared([item]):
+            return None
+        return item
+
+    def bind_shared_visibility(self, callback, owner=None, settings=None) -> None:
+        """Bind users.db authorization without persisting callbacks to catalog JSON."""
+        with self._lock:
+            if (getattr(self, '_shared_visibility_owner', None) is owner and
+                    getattr(self, '_shared_visibility_settings', None) is settings and
+                    getattr(self, '_shared_visibility', None) is not None):return
+            self._shared_visibility = callback
+            self._shared_visibility_owner = owner
+            self._shared_visibility_settings = settings
+            self._public_cache = None
+
+    def _visible_shared(self, items):
+        shared = [t['id'] for t in items if t.get('source') == 'user']
+        if not shared:return items
+        callback = getattr(self, '_shared_visibility', None)
+        allowed = set(callback(shared)) if callback is not None else set()
+        return [t for t in items if t.get('source') != 'user' or t['id'] in allowed]
+
+    def upsert_shared(self, *, tpl_id, share_id, source_revision, author_openid,
+                      author_name, payload, published_at) -> Dict[str, Any]:
+        """Publish one reviewed version atomically; stable identity, no name dedup."""
+        if type(source_revision) is not int or source_revision < 1:
+            raise ValueError('审核版本无效')
+        covers = list(payload.get('covers') or [])
+        prefix = 'cos:template-shares/' + share_id + '/covers/'
+        if not 1 <= len(covers) <= 3 or any(not isinstance(c, str) or not c.startswith(prefix) for c in covers):
+            raise ValueError('审核封面引用无效')
+        with self._lock:
+            existing = next((t for t in self._templates if t['id'] == tpl_id), None)
+            if existing and (existing.get('source') != 'user' or existing.get('share_id') != share_id or
+                             existing.get('author_openid') != author_openid):
+                raise ValueError('分享模板身份不一致')
+            if existing and int(existing.get('source_revision', 0)) > source_revision:
+                return copy.deepcopy(existing)
+            now = time.time()
+            item = dict(existing or {}, id=tpl_id, group_id=payload.get('group_id') or '',
+                name=payload['name'], subtitle=payload.get('subtitle', ''), prompt=payload['prompt'],
+                covers=covers, cover=covers[0], guide=_norm_guide(payload.get('guide')),
+                engine='light', price=40, output_size=0, gateway_size='', model_override='',
+                layout='', text_fields=[], sort=int((existing or {}).get('sort', 99)), enabled=True,
+                usage_count=int((existing or {}).get('usage_count', 0)), source='user',
+                share_id=share_id, source_revision=source_revision, author_openid=author_openid,
+                author_name=author_name, published_at=float(published_at),
+                cover_v=int((existing or {}).get('cover_v', 0)),
+                created_at=(existing or {}).get('created_at', now),
+                updated_at=(existing or {}).get('updated_at', now))
+            if existing and all(existing.get(k) == v for k, v in item.items()):
+                return copy.deepcopy(existing)
+            if not existing or existing.get('covers') != covers:
+                item['cover_v'] += 1
+            item['updated_at'] = now
+            candidate = [item if t['id'] == tpl_id else copy.deepcopy(t) for t in self._templates]
+            if existing is None:candidate.append(item)
+            _validate({'groups':self._groups,'templates':candidate})
+            self._commit_locked(templates=candidate)
+            return copy.deepcopy(item)
+
+    def disable_shared(self, tpl_id, share_id) -> None:
+        """Idempotent removal of the public projection; original official rows untouched."""
+        with self._lock:
+            existing = next((t for t in self._templates if t['id'] == tpl_id), None)
+            if existing is None:return
+            if existing.get('source') != 'user' or existing.get('share_id') != share_id:
+                raise ValueError('分享模板身份不一致')
+            if not existing.get('enabled'):return
+            item=copy.deepcopy(existing);item['enabled']=False;item['updated_at']=time.time()
+            self._commit_locked(templates=[item if t['id']==tpl_id else copy.deepcopy(t) for t in self._templates])
 
     def create_template(self, data: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
@@ -786,6 +861,7 @@ class TemplateStore:
                 if revision is not None:
                     self._public_cache = (settings, revision, now, copy.deepcopy(out))
         prices = settings.prices()
+        out = self._visible_shared(out)
         for item in out:
             item["tier_prices"] = copy.deepcopy(prices)
         return out
@@ -793,7 +869,8 @@ class TemplateStore:
     def _public_projection(self, settings) -> List[Dict[str, Any]]:
         group_names = {g["id"]: g["name"] for g in self.list_groups(enabled_only=True)}
         out = []
-        for t in self.list_templates(enabled_only=True):
+        for t in self.list_templates(enabled_only=False):
+            if not t.get('enabled'):continue
             resolved_list = resolve_covers(t, settings)
             main_cover = resolved_list[0] if resolved_list else resolve_cover(t, settings)
             out.append({
@@ -802,6 +879,10 @@ class TemplateStore:
                 "group_name": group_names.get(t["group_id"], ""),
                 "name": t["name"],
                 "subtitle": t.get("subtitle", ""),
+                "source": 'user' if t.get('source') == 'user' else 'official',
+                "author_name": t.get('author_name', '') if t.get('source') == 'user' else '',
+                "published_at": float(t.get('published_at') or t.get('created_at') or 0),
+                "sort": int(t.get('sort', 99)),
                 "cover": main_cover,
                 "thumbnail": resolve_thumbnail(t, settings, main_cover),
                 "covers": resolved_list,
