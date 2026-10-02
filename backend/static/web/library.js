@@ -38,7 +38,7 @@ export async function mountLibrary(ctx,root,route,params={}) {
   const notify=text=>{if(valid())ctx.toast(String(text));};
   const cleanup=()=>{active=false;visibility.close();if(pollController)pollController.abort();timers.forEach(clearTimeout);timers.clear();dialogs.forEach(d=>d.remove());dialogs.clear();objectUrls.forEach(URL.revokeObjectURL);objectUrls.clear();};
   root.replaceChildren();root.classList.add('web-library');root.dataset.route=route;
-  const heading=(title,sub)=>{const h=el('header','lib-heading');h.append(el('p','lib-eyebrow','废片新生所 · 个人创作馆'),el('h1','',title),el('p','lib-subtitle',sub));root.append(h);return h;};
+  const heading=(title,sub)=>{const h=el('header','lib-heading');h.append(el('h1','',title));if(sub)h.append(el('p','lib-subtitle',sub));root.append(h);return h;};
   const actions=()=>{const bar=el('div','lib-actions');return bar;};
   const link=(label,name,values={})=>button(label,()=>navigate(name,values),'lib-link');
   const state=(host,text,retry)=>{const box=el('div','lib-state');box.append(el('p','',text));if(retry)box.append(button('重新加载',retry,'lib-button lib-small'));host.append(box);return box;};
@@ -133,6 +133,7 @@ export async function mountLibrary(ctx,root,route,params={}) {
     const head=heading('我的作品','原图与成品保留 30 天，请及时下载满意的作品。');
     const feedbackPending=new Set();
     let status=['all',...Object.keys(STATUS)].includes(params.status)?params.status:'all',pollTimer=null,pollRunning=false,pollFailures=0,resumePoll=false;const pollStarted=Date.now(),pollDeadline=pollStarted+30*60*1000,filters=actions(),summary=el('p','lib-meta');root.append(filters,summary);
+    filters.classList.add('lib-filter-bar');
     const toolbar=actions();const refresh=button('刷新记录',()=>p.load(false),'lib-link'),clear=button('清空个人作品',()=>write(clear,async()=>{
       if(!await ctx.confirm('删除全部个人作品？社区已发布副本需在“我的投稿”单独撤回。')||!valid())return;
       await ctx.api('/api/my/jobs',{method:'DELETE'});if(valid())await p.load(false);
@@ -154,7 +155,7 @@ export async function mountLibrary(ctx,root,route,params={}) {
           content.append(box);
         }
       }
-      const left=expiry(job);if(left)content.append(el('p','lib-expiry',left));const bar=actions();
+      const left=expiry(job);if(left)content.append(el('p','lib-expiry',left));const bar=actions();bar.classList.add('lib-card-actions');
       if(job.status==='succeeded'){
         const save=button('下载照片',()=>download(job,save),'lib-button lib-small');save.disabled=!job.result_url;save.dataset.action='download';
         const compare=button(job.orig_url?'查看对比':'放大查看',()=>write(compare,async()=>openWork(job)),'lib-button lib-small lib-secondary');
@@ -208,12 +209,12 @@ export async function mountLibrary(ctx,root,route,params={}) {
     });
   } else if(route==='community'){
     const head=heading('灵感沙龙','发现喜欢的效果，保存灵感，再试试同款风格。');const toolbar=actions();toolbar.append(link('投稿我的作品','works'),link('我的投稿','submissions'));head.append(toolbar);
-    let category='all',liked=false,categories=CATEGORIES;const filters=actions();root.append(filters);
+    let category='all',liked=false,categories=CATEGORIES;const filters=actions();filters.classList.add('lib-filter-bar');root.append(filters);
     const renderPost=post=>{
       const card=el('article','lib-card community-card');card.dataset.id=post.id;
       const photo=button('',()=>navigate('post',{id:post.id}),'lib-photo-button');photo.append(thumbnailImage(post,'post',post.title||'社区作品'));card.append(photo);
       const content=el('div','lib-card-body');content.append(el('p','lib-meta',`${post.authorName||'新生创作者'} · ${post.categoryName||''}`),el('h2','',post.title),el('p','lib-story',post.story||''));if(post.featured)content.append(el('span','lib-badge','精选展品'));
-      const bar=actions(),like=button((post.liked?'♥ 已喜欢':'♡ 喜欢')+' '+(post.likes||0),()=>write(like,async()=>{const r=await ctx.api('/api/community/posts/'+encode(post.id)+'/like',{method:'PUT',data:{liked:!post.liked}});if(valid()){Object.assign(post,r);p.draw();if(liked)await p.load(false);}}),'lib-link');like.dataset.action='like-post';
+      const bar=actions(),like=button((post.liked?'♥ 已喜欢':'♡ 喜欢')+' '+(post.likes||0),()=>write(like,async()=>{const r=await ctx.api('/api/community/posts/'+encode(post.id)+'/like',{method:'PUT',data:{liked:!post.liked}});if(valid()){Object.assign(post,r);p.draw();if(liked)await p.load(false);}}),'lib-link');bar.classList.add('lib-card-actions');like.dataset.action='like-post';
       bar.append(like,link('留言 '+(post.comments||0),'post',{id:post.id}));if(post.templateId)bar.append(link('做同款风格 →','create',{templateId:post.templateId}));content.append(bar);card.append(content);return card;
     };
     const p=pager(root,(offset,limit)=>`/api/community?limit=${limit}&offset=${offset}&category=${category}`+(liked?'&liked_only=true':''),renderPost,{empty:'当前展区暂无作品',onData:d=>{if(Array.isArray(d.categories)){categories=[['all','全部展品'],...d.categories.filter(x=>x&&x.id!=='all').map(x=>[x.id,x.name])];drawFilters();}}});p.list.classList.add('lib-work-grid');
@@ -288,18 +289,17 @@ export async function mountLibrary(ctx,root,route,params={}) {
       }catch(e){if(valid()){host.replaceChildren();state(host,e.message||'作品读取失败',load);root.dataset.state='error';}}
     };load();
   } else if(route==='my'){
-    heading('我的创作档案','网站注册账号初始为 0 光子；可由后台手动补给，或通过合格的模板分享获得作者奖励。');const host=el('div');root.append(host);
+    heading('我的','作品、模板与账号设置。');const host=el('div','lib-profile-layout');root.append(host);
     const load=async()=>{host.replaceChildren();state(host,'正在同步账号…');try{
       const user=await ctx.api('/api/me');if(!valid())return;if(Number.isFinite(user.balance))ctx.setBalance(user.balance);
-      const card=el('section','lib-card lib-card-body'),sessionUser=ctx.state.auth&&ctx.state.auth.user||ctx.state.user||{};
+      const card=el('section','lib-card lib-card-body lib-profile-card'),sessionUser=ctx.state.auth&&ctx.state.auth.user||ctx.state.user||{};
       const bound=!!(user.wechat_bound||sessionUser.wechat_bound),bindingReady=!!(ctx.state.auth&&ctx.state.auth.wechat_login&&ctx.state.auth.wechat_login.ready);
-      card.append(el('h2','',user.nickname||'新生创作者'),el('p','lib-meta','账号编号 '+(user.user_id||'—')),el('p','lib-meta','网页注册身份：'+(user.username||sessionUser.username||user.mobile_masked||user.phone_masked||'已注册')),el('p','lib-meta',bound?'微信账号已绑定 · 作品和账务使用同一账号':'微信账号尚未绑定'));
-      if(!bound&&!bindingReady)card.append(el('p','lib-meta','微信绑定接入尚未配置，配置完成后才能绑定；当前不会自动合并其它账号。'));
-      const bind=button(bound?'微信账号已绑定':bindingReady?'绑定微信账号':'微信绑定尚未开通（查看说明）',()=>write(bind,async()=>{if(typeof ctx.startWechatLink!=='function')throw new Error('微信账号接入尚未配置，配置完成后可在这里绑定');await ctx.startWechatLink();}),'lib-button lib-secondary');bind.dataset.action='wechat-link';bind.dataset.ready=String(bindingReady);bind.disabled=bound;card.append(bind);
+      const identity=el('header','lib-profile-identity'),avatar=el('span','lib-profile-mark','✦'),identityText=el('div','lib-profile-name');avatar.setAttribute('aria-hidden','true');identityText.append(el('h2','',user.nickname||'新生创作者'),el('p','lib-meta',bound?'微信账号已绑定':'网页创作者'));identity.append(avatar,identityText);card.append(identity);
       const form=el('form','lib-profile-form'),input=el('input','lib-input'),save=el('button','lib-button','保存昵称');input.maxLength=24;input.value=user.nickname||'';input.placeholder='设置展示昵称';input.setAttribute('aria-label','展示昵称');save.type='submit';form.append(input,save);
       form.addEventListener('submit',e=>{e.preventDefault();write(save,async()=>{const nickname=input.value.trim();if(!nickname)throw new Error('请输入昵称');const r=await ctx.api('/api/me/profile',{method:'POST',data:{nickname}});if(!valid())return;if(ctx.state.user)ctx.state.user.nickname=r.nickname;card.querySelector('h2').textContent=r.nickname;notify('昵称已保存');});});card.append(form);
-      const accountActions=actions();if(typeof ctx.changePassword==='function'){const change=button('修改密码',()=>write(change,async()=>ctx.changePassword()),'lib-link');accountActions.append(change);}if(typeof ctx.logout==='function'){const logout=button('退出登录',()=>write(logout,async()=>ctx.logout()),'lib-link lib-danger');accountActions.append(logout);}card.append(accountActions);
-      const balance=el('section','lib-balance');balance.append(el('p','','可用光子'),el('strong','',Number.isFinite(user.balance)?'✦ '+user.balance:'—'),el('p','','可联系管理员在后台手动补给，也可在“我的模板”查看作者奖励。'));const nav=el('nav','lib-account-links');[['我的作品','works'],['我的模板','template-shares'],['我的投稿','submissions'],['光子明细','credits'],['已有充值订单','orders'],['历史邀请记录','invites']].forEach(([label,r])=>nav.append(link(label+' ›',r)));
+      const accountActions=actions();accountActions.classList.add('lib-profile-actions');const bind=button(bound?'微信账号已绑定':bindingReady?'绑定微信账号':'微信绑定说明',()=>write(bind,async()=>{if(typeof ctx.startWechatLink!=='function')throw new Error('微信账号接入尚未配置，配置完成后可在这里绑定');await ctx.startWechatLink();}),'lib-link');bind.dataset.action='wechat-link';bind.dataset.ready=String(bindingReady);bind.disabled=bound;accountActions.append(bind);if(typeof ctx.changePassword==='function'){const change=button('修改密码',()=>write(change,async()=>ctx.changePassword()),'lib-link');accountActions.append(change);}if(typeof ctx.logout==='function'){const logout=button('退出登录',()=>write(logout,async()=>ctx.logout()),'lib-link lib-danger');accountActions.append(logout);}card.append(accountActions);
+      const facts=el('details','lib-account-details'),factsBody=el('div','lib-account-facts');facts.append(el('summary','','账号信息'));factsBody.append(el('p','lib-meta','账号编号 '+(user.user_id||'—')),el('p','lib-meta','网页注册身份：'+(user.username||sessionUser.username||user.mobile_masked||user.phone_masked||'已注册')),el('p','lib-meta',bound?'微信账号已绑定 · 作品和账务使用同一账号':'微信账号尚未绑定'));if(!bound&&!bindingReady)factsBody.append(el('p','lib-meta','微信绑定接入尚未配置，配置完成后才能绑定；当前不会自动合并其它账号。'));facts.append(factsBody);card.append(facts);
+      const balance=el('section','lib-balance'),balanceTop=el('div','lib-balance-top');balanceTop.append(el('p','','可用光子'),link('光子明细 ›','credits'));balance.append(balanceTop,el('strong','',Number.isFinite(user.balance)?'✦ '+user.balance:'—'),el('span','lib-balance-unit',' 光子'),el('p','','新账号初始为 0 光子。可联系管理员在后台手动补给，或通过合格的模板分享获得作者奖励。'));const nav=el('nav','lib-account-links');nav.setAttribute('aria-label','我的功能');[['我的作品','works'],['我的模板','template-shares'],['我的投稿','submissions'],['光子明细','credits'],['已有充值订单','orders'],['历史邀请记录','invites']].forEach(([label,r])=>{const item=link(label+' ›',r);item.replaceChildren(el('span','lib-menu-label',label),el('span','lib-menu-arrow',' ›'));nav.append(item);});
       host.replaceChildren(card,balance,nav);root.dataset.state='loaded';
     }catch(e){if(valid()){host.replaceChildren();state(host,e.message||'账号读取失败',load);root.dataset.state='error';}}};load();
   } else if(route==='credits'){

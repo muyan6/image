@@ -135,6 +135,9 @@ if not args.legacy:
         ('test_dynamic_community_frontend.cjs', 'dynamic_community_frontend_results.json'),
         ('test_mini_discovery.cjs', 'mini_discovery_results.json'),
         ('test_community_catalog_groups.py', 'community_catalog_group_results.json'),
+        ('test_web_library_layout.cjs', 'web_library_layout_results.json'),
+        ('test_web_sharing_layout.cjs', 'web_sharing_layout_results.json'),
+        ('test_web_catalog_layout.cjs', 'web_catalog_layout_results.json'),
     ):
         path = Path(__file__).with_name(script)
         if path.is_file():
