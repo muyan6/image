@@ -1,4 +1,6 @@
 <view class="container">
+  <view wx:if="{{loading}}" class="ui-inline-state"><text>正在读取所选风格…</text></view>
+  <view wx:if="{{loadError}}" class="ui-inline-state"><text>{{loadError}}</text><button class="ui-state-action" bindtap="onRetryTemplate">重试</button><button class="ui-state-action" bindtap="onTemplateLibrary">返回风格库</button></view>
   <scroll-view class="scroll-content" scroll-y enable-flex>
     <!-- 顶部风格封面卡片（支持多张示例图轮播与大图预览） -->
     <view class="banner-card" style="height: {{ bannerHeight }}rpx;">
@@ -116,7 +118,7 @@
       <text class="bar-title">{{ template.name || '风格制作' }}</text>
       <text class="bar-hint">生成前可选模型，光子以所选档位为准</text>
     </view>
-    <button class="btn-create" bindtap="onChoosePhoto">
+    <button class="btn-create" bindtap="onChoosePhoto" disabled="{{loading || !template || loadError}}">
       选择照片制作
     </button>
   </view>

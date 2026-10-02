@@ -31,6 +31,7 @@
       <view class="term-content">
         <text class="term-title">算力与创作记录</text>
         <text class="term-desc">用于积分结算、故障排查、防止并发重复扣费以及保障您的作品找回权益。</text>
+        <text class="term-desc">最近一次创作参数与照片草稿保存在本机，供您继续编辑；新草稿会替换旧草稿。模板收藏和最近使用记录随微信账户保存。沿用作品参数会创建新任务，提交前显示本次费用。</text>
       </view>
     </view>
     <view class="term-divider"></view>
@@ -47,7 +48,7 @@
     <view class="term-divider"></view>
     <view class="control-item">
       <text class="control-title">清空数据与退出</text>
-      <text class="control-desc">在档案中心使用“清理缓存数据”，即可清空本地临时图片与授权数据。</text>
+      <text class="control-desc">在档案中心使用“清理缓存数据”，会删除本机创作草稿和本地缓存，不删除云端作品、模板收藏或账户余额。有提交待确认时，请先核对任务再清理。</text>
     </view>
   </view>
 

@@ -95,7 +95,8 @@ class CloudPipeline:
             self.wake_event.wait(.25)
 
     def admit(self, openid, quality='light', style='', source=None, template=None,
-              text_values=None, aspect_ratio='', custom_prompt='', text=None, expected_price=None):
+              text_values=None, aspect_ratio='', custom_prompt='', text=None, expected_price=None,
+              job_id=None, recipe=None):
         m=self.runtime()
         if not self.ready(quality,text=bool(text)):raise HTTPException(503,detail='云端生成通道未就绪：请核对所选生成网关配置和 COS 限定回源规则')
         template=m.select_template_quality(template,quality) if template else None
@@ -111,7 +112,7 @@ class CloudPipeline:
         prompt=(text or {}).get('prompt') or str((template or {}).get('prompt') or m.settings.prompt_for(quality))
         if custom_prompt and not template:prompt+='\n用户修复需求：'+custom_prompt
         price=text['price'] if text else m._effective_price(quality,template)
-        jid=uuid.uuid4().hex[:12];free=m.settings.free_mode();charged=0 if free else price
+        jid=job_id or uuid.uuid4().hex[:12];free=m.settings.free_mode();charged=0 if free else price
         if expected_price is not None and expected_price!=charged:
             raise HTTPException(409,detail='生成价格已更新，请刷新价格后重新确认')
         # Admission and queue capacity are checked together before reserving balance.
@@ -140,7 +141,11 @@ class CloudPipeline:
                     cloud_phase='queued',cloud_request=packet,quality=quality,style=style,aspect_ratio=aspect_ratio,
                     template_id=(template or {}).get('id',''),template_name=(template or {}).get('name','文字生图' if text else ''),
                     template_output_mode=(template or {}).get('output_mode',''),price=price,charged_amount=charged,
-                    input_mode='text' if text else 'photo',orig_file='',result_file='',
+                    input_mode='text' if text else 'photo',recipe=recipe or (
+                        {'input_mode':'text','quality':quality,'template_id':'','text_fields':{},'custom_prompt':'',
+                         'aspect_ratio':aspect_ratio,'template_output_mode':'','prompt':text['prompt']} if text else
+                        m.photo_recipe(quality,template,text_values,aspect_ratio,custom_prompt,(template or {}).get('output_mode',''))),
+                    orig_file='',result_file='',
                     orig_cos=('origins/'+prefix+source['ext']) if source else None,
                     result_cos='results/'+prefix+'.jpg',norm_cos=('norms/'+prefix+'.jpg') if source else None,
                     deadline=deadline,cloud_next_at=0,

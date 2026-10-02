@@ -1,13 +1,15 @@
 <view class="page-container">
   <view class="text-header"><text class="intro">文字生图</text><text class="heading">描述你想要的画面</text><text class="hint">不需要上传照片，写清主体、场景和风格即可。</text></view>
+  <view wx:if="{{draftAvailable}}" class="ui-inline-state"><text>你有一份未完成的文字草稿</text><button class="ui-state-action" bindtap="onResumeDraft">继续创作</button></view>
+  <view wx:if="{{submissionMessage}}" class="ui-inline-state"><text>{{submissionMessage}}</text><button wx:if="{{submissionPending}}" class="ui-state-action" bindtap="onConfirmSubmission" disabled="{{busy}}">再次核对</button></view>
   <view class="gallery-card prompt-card">
     <view class="prompt-head"><text class="field-title">画面描述</text><text class="character-count">{{prompt.length}} / 500</text></view>
-    <textarea value="{{ prompt }}" bindinput="onInput" maxlength="500" disabled="{{busy}}" placeholder="例如：雨后的森林小屋，暖色灯光，水彩插画风格。" placeholder-class="prompt-placeholder" />
-    <view class="prompt-foot"><text>请勿输入违规内容</text><button class="clear-prompt" bindtap="onClearPrompt" disabled="{{busy || !prompt}}">清空</button></view>
+    <textarea value="{{ prompt }}" bindinput="onInput" maxlength="500" disabled="{{busy || submissionPending}}" placeholder="例如：雨后的森林小屋，暖色灯光，水彩插画风格。" placeholder-class="prompt-placeholder" />
+    <view class="prompt-foot"><text>退出时会保留最近一份草稿</text><button class="clear-prompt" bindtap="onClearPrompt" disabled="{{busy || submissionPending || !prompt}}">清空</button></view>
   </view>
   <view class="examples-head"><text class="field-title">试试这些描述</text><text class="hint">点击填入，可继续修改</text></view>
   <view class="example-list">
-    <button class="example-chip" wx:for="{{examples}}" wx:key="label" data-index="{{index}}" bindtap="onUseExample" disabled="{{busy}}">{{item.label}}</button>
+    <button class="example-chip" wx:for="{{examples}}" wx:key="label" data-index="{{index}}" bindtap="onUseExample" disabled="{{busy || submissionPending}}">{{item.label}}</button>
   </view>
   <text class="field-title ratio-title">画面比例</text>
   <view class="ratios">
@@ -18,6 +20,8 @@
   <view wx:if="{{configError}}" class="ui-inline-state"><text>{{configError}}</text><button class="ui-state-action" bindtap="loadConfig">重试</button></view>
   <text class="hint" wx:elif="{{configLoading}}">正在读取生成配置…</text>
   <text class="hint" wx:elif="{{ !ready }}">文字生图暂未开放，当前不会提交或扣费。</text>
-  <button class="generate-button" bindtap="onGenerate" disabled="{{ !ready || busy }}" loading="{{ busy }}">{{busy ? '正在提交…' : (freeMode ? '开始生成 · 体验免扣' : '开始生成 · ' + price + ' 光子')}}</button>
+  <view class="balance-info"><text>余额 {{freeMode ? '不限' : lightPoints + ' 光子'}}</text><button class="clear-prompt" bindtap="onCredits">补充光子 ›</button></view>
+  <text class="hint">{{freeMode ? '本次体验免扣' : '提交预扣 ' + price + ' 光子；生成失败按规则退回'}}</text>
+  <button class="generate-button" bindtap="onGenerate" disabled="{{ !ready || busy || (submissionPending && !retryableSubmission) }}" loading="{{ busy }}">{{busy ? '正在提交…' : (retryableSubmission ? '沿用原编号重新提交' : (freeMode ? '开始生成 · 体验免扣' : '开始生成 · ' + price + ' 光子'))}}</button>
   <view class="works-link" bindtap="onWorks">查看我的作品与生成进度 ›</view>
 </view>

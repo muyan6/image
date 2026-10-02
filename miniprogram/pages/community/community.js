@@ -13,6 +13,7 @@ Page({
   data: {
     filters: [
       { id: 'all', name: '全部展品' },
+      { id: 'liked', name: '我喜欢的' },
       { id: 'portrait', name: '冷白人像' },
       { id: 'film', name: '复古胶片' },
       { id: 'old_photo', name: '老照片复苏' },
@@ -24,21 +25,28 @@ Page({
     enabled: false,
     featuredReward: 50,
     loadError: '',
-    loading: true
+    loading: true,loadingMore:false,loaded:false,hasMore:false,total:0
   },
 
   onLoad() {
+    this._visible=true;
     this.loadCommunity();
   },
 
   onShow() {
+    this._visible=true;
     if (app.globalData.communityUpdated) {
       const delta=app.globalData.communityUpdated;
       update(this,{items:this.data.items.map(x=>x.id===delta.id?{...x,...delta}:x)});
       this.filterItems(this.data.activeFilter);app.globalData.communityUpdated=null;
     }
-    if (this._communityLoaded) this.loadCommunity(!!app.globalData.communityDirty);
+    if (this._communityLoaded||this._needsRefreshOnShow) this.loadCommunity(!!app.globalData.communityDirty||!!this._needsRefreshOnShow);
+    this._needsRefreshOnShow=false;
     app.globalData.communityDirty=false;
+  },
+  onHide(){
+    this._visible=false;this._needsRefreshOnShow=true;this._loadVersion=(this._loadVersion||0)+1;
+    this._loadingCommunity=null;this._loadingFilter=null;update(this,{loading:false,loadingMore:false});
   },
 
   onPullDownRefresh() {
@@ -47,19 +55,21 @@ Page({
   },
 
   /** 拉取沙龙展品：后端未开启或无内容时返回空列表，不做任何本地兜底 */
-  loadCommunity(force = false) {
+  loadCommunity(force = false, more = false) {
+    more=more===true;
+    if(more&&(!this.data.hasMore||this._loadingCommunity))return Promise.resolve();
     if (!force && this._lastLoadedAt && Date.now() - this._lastLoadedAt < 30000) return Promise.resolve();
-    if (this._loadingCommunity) return this._loadingCommunity;
+    if (this._loadingCommunity && this._loadingFilter===this.data.activeFilter) return this._loadingCommunity;
     const version=(this._loadVersion||0)+1;this._loadVersion=version;
-    update(this,{loading:!this.data.items.length,loadError:''});
-    this._loadingCommunity=(async()=>{
-      let offset=0,items=[],d;
-      do{
-        d=await api.request('/api/community'+(offset?'?offset='+offset:''),{timeout:8000});
-        if(this._unloaded||version!==this._loadVersion)return;
-        items.push(...((d&&d.items)||[]));
-        if(d&&d.has_more){const next=Number(d.next_offset);if(!Number.isInteger(next)||next<=offset)throw new Error('社区分页异常');offset=next;}
-      }while(d&&d.has_more);
+    update(this,{loading:!more&&!this.data.items.length,loadingMore:more,loadError:''});
+    const task=(async()=>{
+      const offset=more?(this._nextOffset||0):0,fid=this.data.activeFilter;
+      const query='?limit=24&offset='+offset+(fid==='liked'?'&liked_only=true':fid!=='all'?'&category='+encodeURIComponent(fid):'');
+      const d=await api.request('/api/community'+query,{timeout:8000});
+      if(this._unloaded||this._visible===false||version!==this._loadVersion)return;
+      if(!d||!Array.isArray(d.items))throw new Error('社区列表数据异常');
+      if(d.has_more&&(!Number.isInteger(Number(d.next_offset))||Number(d.next_offset)<=offset))throw new Error('社区分页异常');
+      let items=d.items;
       items=items.map(item=>{
         const prior=this.data.items.find(x=>x.id===item.id);
         const display=(url,old)=>{
@@ -75,12 +85,19 @@ Page({
           authorAvatar:item.authorAvatar?api.absolute(item.authorAvatar):''};
       });
       this._communityLoaded=true;
+      this._nextOffset=Number(d.next_offset)||0;
       update(this,{enabled:!!(d&&d.enabled),featuredReward:d&&typeof d.featured_reward==='number'?d.featured_reward:this.data.featuredReward,
-        items:[...new Map(items.map(x=>[x.id,x])).values()],loading:false});
+        items:[...new Map((more?this.data.items.concat(items):items).map(x=>[x.id,x])).values()],loading:false,
+        loaded:true,total:Number(d.total)||items.length,hasMore:!!d.has_more});
       this.filterItems(this.data.activeFilter);this._lastLoadedAt=Date.now();
-    })().catch(()=>{if(!this._unloaded&&version===this._loadVersion)update(this,{loading:false,loadError:'社区加载失败，请重试'});}).finally(()=>{this._loadingCommunity=null;});
-    return this._loadingCommunity;
+    })().catch(()=>{if(!this._unloaded&&this._visible!==false&&version===this._loadVersion)update(this,{loading:false,loadError:'社区加载失败，请重试'});}).finally(()=>{
+      if(this._loadingCommunity===task)this._loadingCommunity=null;
+      if(!this._unloaded&&this._visible!==false&&version===this._loadVersion)update(this,{loading:false,loadingMore:false});
+    });
+    this._loadingFilter=this.data.activeFilter;this._loadingCommunity=task;return task;
   },
+  onReachBottom(){return this.loadCommunity(true,true);},
+  onMorePosts(){return this.loadCommunity(true,true);},
   onRetry(){return this.loadCommunity(true);},
   onUnload(){this._unloaded=true;this._loadVersion=(this._loadVersion||0)+1;},
   onContribute(){wx.navigateTo({url:'/pages/works/works'});},
@@ -89,8 +106,10 @@ Page({
   onSelectFilter(e) {
     const fid = e.currentTarget.dataset.id;
     if (fid === this.data.activeFilter) return;
-    update(this,{ activeFilter: fid });
-    this.filterItems(fid);
+    if(!this.data.filters.some(f=>f.id===fid))return;
+    this._lastLoadedAt=0;
+    update(this,{ activeFilter: fid,items:[],filteredItems:[],loaded:false,hasMore:false });
+    return this.loadCommunity(true);
   },
 
   filterItems(fid) {
@@ -99,7 +118,7 @@ Page({
       update(this,{ filteredItems: all });
     } else {
       update(this,{
-        filteredItems: all.filter((x) => x.category === fid)
+        filteredItems: all.filter((x) => fid==='liked'?x.liked:x.category === fid)
       });
     }
   },
@@ -109,14 +128,15 @@ Page({
     this._liking=this._liking||new Set();if(this._liking.has(id))return;this._liking.add(id);
     try{
       const r=await api.request('/api/community/posts/'+encodeURIComponent(id)+'/like',{method:'PUT',data:{liked:!item.liked}});
-      if(this._unloaded)return;
+      if(this._unloaded||this._visible===false)return;
       update(this,{items:this.data.items.map(x=>x.id===id?{...x,likes:r.likes,liked:r.liked}:x)});
       this.filterItems(this.data.activeFilter);
-    }catch(err){if(!this._unloaded){wx.showToast({title:err.message||'点赞暂未保存，请重试',icon:'none'});if(err.status===404)this.loadCommunity(true);}}
+    }catch(err){if(!this._unloaded&&this._visible!==false){wx.showToast({title:err.message||'点赞暂未保存，请重试',icon:'none'});if(err.status===404)this.loadCommunity(true);}}
     finally{this._liking.delete(id);}
   },
 
   onCommunityImageError(e) {
+    if(this._visible===false)return;
     const id=e.currentTarget.dataset.id;if(!id)return;
     const item=this.data.items.find(x=>x.id===id);
     if(item&&typeof api.forgetCommunityImage==='function')api.forgetCommunityImage(this._imageSources&&this._imageSources[id]&&this._imageSources[id][e.currentTarget.dataset.kind]);

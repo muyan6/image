@@ -1,7 +1,9 @@
 """Text-to-image jobs share account admission, queue and COS delivery."""
 import os,time,uuid
 from fastapi import APIRouter,HTTPException,Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import Optional
+from experience_api import idempotent_submit
 from gateway_ai import OpenAIImagesEnhance
 from image_processing import QueueFull
 from gateway_profiles import text_gateway
@@ -11,6 +13,8 @@ SIZES={'1:1':'1024x1024','3:2':'1536x1024','2:3':'1024x1536'}
 class TextBody(BaseModel):
     prompt:str=''
     aspect_ratio:str='1:1'
+    expected_price:Optional[int]=None
+    client_request_id:str=Field(default='',max_length=80,pattern=r'^(?:[A-Za-z0-9_-]{8,80})?$')
 
 def ready(m, conf=None):
     conf=m.settings.text_generation() if conf is None else conf;provider=text_gateway(m.settings,conf)
@@ -64,31 +68,50 @@ def make_text_router(runtime):
     router=APIRouter()
     @router.post('/api/text-generation')
     def create_text_job(payload:TextBody,request:Request):
-        m=runtime();user=m._rescue_guard(request)
-        prompt=payload.prompt.strip()
-        if not 1<=len(prompt)<=500:raise HTTPException(status_code=400,detail='请填写 1~500 字的画面描述')
-        if payload.aspect_ratio not in SIZES:raise HTTPException(status_code=400,detail='请选择支持的画幅')
-        if not ready(m):raise HTTPException(status_code=503,detail='文生图尚未启用，请先配置模型与 COS')
-        conf=m.settings.text_generation();provider=text_gateway(m.settings,conf)
-        rejected=m._moderate_text_or_reject(prompt,user['openid'])
-        if rejected:m._reject_uploaded_content(user['openid'],'text',rejected,'light',{'price':conf['price']})
-        if m.cloud.enabled():
-            return m.cloud.admit(user['openid'],aspect_ratio=payload.aspect_ratio,
-                text={**conf,'prompt':prompt,'size':SIZES[payload.aspect_ratio]})
-        jid=uuid.uuid4().hex[:12];free=m.settings.free_mode();charged=0 if free else conf['price']
-        try:balance=m.users.reserve_job(user['openid'],jid,charged,m.settings.quota(),free)
-        except m.AdmissionError as exc:raise HTTPException(status_code=exc.status,detail=str(exc)) from exc
-        try:
-            key='results/%s/%s.jpg'%(user['openid'][:8],jid)
-            m.jobs.create(jid,openid=user['openid'],input_mode='text',quality='light',template_id='',template_name='文字生图',
-                price=conf['price'],charged_amount=charged,orig_file='',result_file='result_'+jid+'.jpg',result_cos=key,
-                stage='queued',aspect_ratio=payload.aspect_ratio)
-            m.users.confirm_job(jid,'文字生图')
-            m.pool.submit(run_text_job,m,jid,dict(conf),dict(provider),prompt,SIZES[payload.aspect_ratio])
-        except Exception as exc:
-            m.users.refund_job(user['openid'],jid,cancel=True)
-            if m.jobs.get(jid):m.jobs.update(jid,status='failed',error='任务提交失败')
-            if isinstance(exc,QueueFull):raise HTTPException(status_code=429,detail=str(exc)) from exc
-            raise
-        return {'code':0,'job_id':jid,'status':m.jobs.get(jid)['status'],'quality':'light','balance':balance,'free_mode':free,'input_mode':'text'}
+        m=runtime();user=m._current_user(request)
+        return idempotent_submit(m,user,payload.client_request_id,
+            payload.model_dump(exclude={'client_request_id'}),'text',
+            lambda fixed_id:admit_text_job(m,payload,request,fixed_id))
     return router
+
+
+def admit_text_job(m,payload,request,job_id=None):
+    user=m._rescue_guard(request)
+    prompt=payload.prompt.strip()
+    if not 1<=len(prompt)<=500:raise HTTPException(status_code=400,detail='请填写 1~500 字的画面描述')
+    if payload.aspect_ratio not in SIZES:raise HTTPException(status_code=400,detail='请选择支持的画幅')
+    if not ready(m):raise HTTPException(status_code=503,detail='文生图尚未启用，请先配置模型与 COS')
+    conf=m.settings.text_generation();provider=text_gateway(m.settings,conf)
+    free=m.settings.free_mode();charged=0 if free else conf['price']
+    if payload.expected_price is not None and payload.expected_price!=charged:
+        raise HTTPException(409,detail='生成价格已更新，请刷新价格后重新确认')
+    recipe={'input_mode':'text','quality':'light','template_id':'','text_fields':{},'custom_prompt':'',
+            'aspect_ratio':payload.aspect_ratio,'template_output_mode':'','prompt':prompt}
+    rejected=m._moderate_text_or_reject(prompt,user['openid'])
+    if rejected:m._reject_uploaded_content(user['openid'],'text',rejected,'light',{'price':conf['price']})
+    # Moderation may wait on a remote service. Re-read the fee/free-mode snapshot
+    # immediately before admission, not only before that wait.
+    conf=m.settings.text_generation();provider=text_gateway(m.settings,conf)
+    free=m.settings.free_mode();charged=0 if free else conf['price']
+    if payload.expected_price is not None and payload.expected_price!=charged:
+        raise HTTPException(409,detail='生成价格已更新，请刷新价格后重新确认')
+    if m.cloud.enabled():
+        return m.cloud.admit(user['openid'],aspect_ratio=payload.aspect_ratio,
+            text={**conf,'prompt':prompt,'size':SIZES[payload.aspect_ratio]},
+            expected_price=payload.expected_price,job_id=job_id,recipe=recipe)
+    jid=job_id or uuid.uuid4().hex[:12]
+    try:balance=m.users.reserve_job(user['openid'],jid,charged,m.settings.quota(),free)
+    except m.AdmissionError as exc:raise HTTPException(status_code=exc.status,detail=str(exc)) from exc
+    try:
+        key='results/%s/%s.jpg'%(user['openid'][:8],jid)
+        m.jobs.create(jid,openid=user['openid'],input_mode='text',quality='light',template_id='',template_name='文字生图',
+            price=conf['price'],charged_amount=charged,orig_file='',result_file='result_'+jid+'.jpg',result_cos=key,
+            stage='queued',aspect_ratio=payload.aspect_ratio,recipe=recipe)
+        m.users.confirm_job(jid,'文字生图')
+        m.pool.submit(run_text_job,m,jid,dict(conf),dict(provider),prompt,SIZES[payload.aspect_ratio])
+    except Exception as exc:
+        m.users.refund_job(user['openid'],jid,cancel=True)
+        if m.jobs.get(jid):m.jobs.update(jid,status='failed',error='任务提交失败')
+        if isinstance(exc,QueueFull):raise HTTPException(status_code=429,detail=str(exc)) from exc
+        raise
+    return {'code':0,'job_id':jid,'status':m.jobs.get(jid)['status'],'quality':'light','balance':balance,'free_mode':free,'input_mode':'text'}

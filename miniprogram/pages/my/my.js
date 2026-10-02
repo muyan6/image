@@ -1,5 +1,6 @@
 const app = getApp();
 const api = require('../../utils/api.js');
+const creationDraft = require('../../utils/creation-draft.js');
 const update=(page,patch)=>typeof api.setDataStable==='function'?api.setDataStable(page,patch):page.setData(patch);
 const reusablePreview = url => !!url &&
   (typeof api.isReusableMediaUrl !== 'function' || api.isReusableMediaUrl(url));
@@ -37,6 +38,7 @@ Page({
     previewWorks: [],
     processingCount: 0,
     creditRecordCount: '—',
+    balanceLoaded: false, balanceError: '', worksLoaded: false, worksLoading: false, worksError: '',
     videoTasksToday: 0,
     maxVideoTasks: DEFAULT_MAX_VIDEO_TASKS,
     videoReward: DEFAULT_VIDEO_REWARD,
@@ -49,12 +51,11 @@ Page({
   },
 
   onShow() {
-    this.refreshUserData();
+    return this.refreshUserData();
   },
 
   onPullDownRefresh() {
-    this.refreshUserData(true);
-    wx.stopPullDownRefresh();
+    return Promise.resolve(this.refreshUserData(true)).finally(()=>wx.stopPullDownRefresh());
   },
 
   refreshUserData(force = false) {
@@ -70,6 +71,7 @@ Page({
     const keys = list.map(w => w.jobId || w.result || '').join('|');
     if (!force && this._lastProfileSync && Date.now() - this._lastProfileSync < 30000 &&
         keys === this._lastHistoryKeys && !list.some(w => w.status === 'processing') &&
+        !this.data.worksError && !this.data.balanceError && this.data.balanceLoaded && this.data.worksLoaded &&
         !this.data.previewWorks.some(w => w.preview && !reusablePreview(w.preview))) {
       update(this,{lightPoints: app.globalData.lightPoints || 0,
         nickName: app.globalData.nickname || this.data.nickName});
@@ -77,6 +79,7 @@ Page({
     }
     const version = (this._profileLoadVersion || 0) + 1;
     this._profileLoadVersion = version;
+    update(this,{worksLoading:true,worksError:'',balanceError:''});
     if (keys !== this._lastHistoryKeys || !this.data.historyList.length) update(this,{
       userId: app.globalData.userId || '登录后显示',
       nickName: app.globalData.nickname || this.data.nickName,
@@ -102,7 +105,7 @@ Page({
     }).catch(() => {});
 
     // 新设备或清缓存后，以云端任务作为作品数量与状态的事实来源。
-    api.myJobs(100).then((result) => {
+    const worksRequest=api.myJobs(24).then((result) => {
       if (version !== this._profileLoadVersion || !result || !Array.isArray(result.jobs)) return;
       const prior = app.globalData.historyList || [];
       const byId = new Map(prior.filter(w => w.jobId).map(w => [w.jobId, w]));
@@ -134,31 +137,39 @@ Page({
       // Counts come from one server summary; do not download every history page
       // merely to render the profile. Only current page items form the preview.
       const previews=localOnly.concat(cloud).sort((a,b) => (b.createdAt || 0) - (a.createdAt || 0));
-      update(this,{ historyList: merged, previewWorks: previews.slice(0,3).map(({jobId,preview,quality})=>({jobId,preview,quality})),
+      update(this,{ worksLoaded:true,historyList: merged, previewWorks: previews.slice(0,3).map(({jobId,preview,quality,status})=>({jobId,preview,quality,status})),
         worksTotal: Number.isInteger(result.total) && result.total >= 0 ? result.total + localOnly.length : merged.length,
         processingCount: Number.isInteger(result.processing_count) && result.processing_count >= 0
           ? result.processing_count + localOnly.filter(w => w.status === 'processing').length
           : merged.filter(w => w.status === 'processing').length });
       this._lastProfileSync = Date.now();
       this._lastHistoryKeys = merged.map(w => w.jobId || w.result || '').join('|');
-    }).catch(() => {});
+    }).catch(() => {if(version===this._profileLoadVersion)update(this,{worksError:'作品更新失败，请重试'});})
+      .finally(()=>{if(version===this._profileLoadVersion)update(this,{worksLoading:false});});
 
     // 光子余额 / 视频补给进度以服务端为准
-    api.me().then((d) => {
+    const balanceRequest=api.me().then((d) => {
+      if(version!==this._profileLoadVersion)return;
       if (!d) return;
       if (typeof d.balance === 'number') app.setBalance(d.balance);
       update(this,{
         userId: d.user_id || app.globalData.userId || '登录后显示',
         nickName: d.nickname || '微信用户',
         lightPoints: app.globalData.lightPoints,
+        balanceLoaded:true, creditRecordCount:Number.isInteger(d.credit_record_count)?d.credit_record_count:'—',
         videoTasksToday: (d.earn && d.earn.video_today) || 0
       });
       if (d.nickname && typeof app.setNickname === 'function') app.setNickname(d.nickname);
-    }).catch(() => {});
+    }).catch(() => {if(version===this._profileLoadVersion)update(this,{balanceError:'余额更新失败，请重试'});});
+    return Promise.all([worksRequest,balanceRequest]);
   },
+
+  onRetryProfile(){return this.refreshUserData(true);},
+  onGoProcessing(){wx.navigateTo({url:'/pages/works/works?status=processing'});},
 
   onHide() {
     this._profileLoadVersion = (this._profileLoadVersion || 0) + 1;
+    update(this,{worksLoading:false});
   },
   onPreviewLoad(e) {
     const w=this.data.previewWorks.find(x=>x.jobId===e.currentTarget.dataset.jobId);
@@ -335,24 +346,34 @@ Page({
 
   /** 清理本地缓存：光子在服务端记账，清缓存不再丢余额 */
   onClearStorage() {
+    const protectPending=()=>{
+      const pending=typeof creationDraft.readPendingSubmission==='function'&&creationDraft.readPendingSubmission();
+      if(!pending)return false;
+      wx.showModal({title:'先确认上次提交',content:'还有一次任务提交结果待确认。提交编号和草稿已保留，请先核对任务，避免重复扣款。',confirmText:'去确认',success:r=>{if(r.confirm)wx.switchTab({url:'/pages/index/index'});}});
+      return true;
+    };
+    if(this._clearingStorage||protectPending())return;
     wx.showModal({
       title: '清理缓存数据',
-      content: '将清除本机的临时数据与历史记录缓存。光子余额保存在服务器，不受影响。确定清理吗？',
+      content: '将清除本机创作草稿及其照片、临时数据与作品记录缓存。云端作品、模板收藏和光子余额不会删除。确定清理吗？',
       confirmText: '确认清理',
       confirmColor: '#9e4b3c',
       cancelText: '取消',
-      success: (res) => {
+      success: async (res) => {
         if (res.confirm) {
-          wx.clearStorage({
-            success: () => {
+          if(this._clearingStorage||protectPending())return;
+          this._clearingStorage=true;
+          try{
+              if(typeof creationDraft.clearDraft==='function')await creationDraft.clearDraft();
+              await new Promise((resolve,reject)=>wx.clearStorage({success:resolve,fail:reject}));
               app.globalData.mediaCache={};
               app.globalData.communityPreview=null;
               app.globalData.communityDirty=true;
               app.onLaunch();
               this.refreshUserData();
               wx.showToast({ title: '缓存清理完毕', icon: 'success' });
-            }
-          });
+          }catch(e){wx.showToast({title:e.message||'缓存清理未完成，请重试',icon:'none'});}
+          finally{this._clearingStorage=false;}
         }
       }
     });

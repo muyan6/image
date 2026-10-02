@@ -21,6 +21,10 @@
   </view>
 
   <!-- 待使用的风格（从模板库/社区「做同款」带过来） -->
+  <view class="home-task-card" wx:if="{{pendingCount}}" bindtap="onOpenPendingTasks"><text class="home-task-title">{{pendingCount}} 件作品正在生成 ›</text><text class="home-task-desc">{{pendingSummary}} · 可以继续创作</text></view>
+  <view class="home-task-card" wx:if="{{finishedText}}" bindtap="onOpenFinishedTask"><text class="home-task-title">{{finishedText}} ›</text></view>
+  <view class="home-task-error" wx:if="{{taskError}}" bindtap="loadPendingTasks">{{taskError}}</view>
+  <view class="home-draft-card" wx:if="{{draftSummary}}" bindtap="onResumeDraft"><text>{{draftSummary}}</text><text>恢复草稿 ›</text></view>
   <view wx:if="{{ activeTemplate }}" class="pending-template" bindtap="onClearTemplate">
     <text class="pending-template-text">已选风格 · {{ activeTemplate.name }}</text>
     <text class="pending-template-clear">✕</text>

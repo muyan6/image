@@ -10,7 +10,7 @@
   <view wx:if="{{loadError}}" class="ui-state"><text>{{loadError}}</text><button class="ui-state-action" bindtap="onRetry">重新加载</button></view>
   <!-- 展区筛选胶囊：没有展品时不显示筛选条 -->
   <scroll-view
-    wx:if="{{ items.length > 0 }}"
+    wx:if="{{ enabled || items.length > 0 }}"
     class="salon-filter-bar"
     scroll-x
     enable-flex
@@ -34,9 +34,9 @@
   </view>
 
   <!-- 已开放但暂无展品 -->
-  <view wx:elif="{{ !loading && !loadError && items.length === 0 }}" class="salon-empty gallery-card">
-    <text class="empty-title">展厅暂无展品</text>
-    <text class="empty-desc">从“我的作品”点击“投稿到社区”，审核通过后在这里展示。</text>
+  <view wx:elif="{{ loaded && !loading && !loadError && filteredItems.length === 0 }}" class="salon-empty gallery-card">
+    <text class="empty-title">{{activeFilter === 'liked' ? '还没有喜欢的作品' : '当前展区暂无展品'}}</text>
+    <text class="empty-desc">{{activeFilter === 'liked' ? '在作品下点击爱心，喜欢的灵感会留在这里。' : '试试其它展区，或投稿你的新生作品。'}}</text>
   </view>
 
   <!-- 社区展品卡片流 -->
@@ -96,7 +96,7 @@
           </view>
         </view>
 
-        <button class="btn-ink make-same-btn" catchtap="onMakeSame" data-template-id="{{ item.templateId }}" data-name="{{ item.templateName }}">
+        <button wx:if="{{item.templateId}}" class="btn-ink make-same-btn" catchtap="onMakeSame" data-template-id="{{ item.templateId }}" data-name="{{ item.templateName }}">
           做同款风格 →
         </button>
       </view>
@@ -104,6 +104,8 @@
   </view>
 
   <!-- 底部装裱签条 -->
+  <button wx:if="{{hasMore}}" class="ui-state-action" loading="{{loadingMore}}" bindtap="onMorePosts">更多作品</button>
+  <view wx:if="{{loading && !items.length && !loadError}}" class="ui-state">正在布展…</view>
   <view class="salon-footer">
     <view class="footer-divider"></view>
     <text class="footer-note">欢迎将您的重生之作投稿至沙龙 · 经管理员选为精选可获 ✦{{ featuredReward }} 光子 · 每件作品仅一次</text>

@@ -94,6 +94,7 @@
 
   <!-- 底部典藏导出底栏 -->
   <view class="gallery-dock">
+    <button wx:if="{{!demo}}" class="btn-recreate" bindtap="onRecreate" disabled="{{recreating}}" loading="{{recreating}}">{{recreating ? '正在恢复参数…' : '沿用参数再创作'}}</button>
     <view class="btn-line dock-btn" bindtap="onChangePhoto">
       <text class="compare-label">换一张</text>
     </view>

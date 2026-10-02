@@ -1,5 +1,6 @@
 const app = getApp();
 const api = require('../../utils/api.js');
+const creation = require('../../utils/creation-draft.js');
 const update=(page,patch)=>typeof api.setDataStable==='function'?api.setDataStable(page,patch):page.setData(patch);
 
 const DEMO_ORIG = 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800';
@@ -13,6 +14,7 @@ Page({
     splitPercent: 50,
     demo: false,
     saving: false,
+    recreating: false,
     label: '精细修复',
     originalUnavailable: false,
     originalCompressed: false,
@@ -206,6 +208,14 @@ Page({
 
   onChangePhoto() {
     wx.navigateBack();
+  },
+
+  async onRecreate() {
+    if(this.data.recreating||this.data.demo||!this._jobId)return;
+    update(this,{recreating:true});
+    try {await creation.recreateFromJob(this._jobId);}
+    catch(e){if(!this._unloaded)wx.showModal({title:'创作参数未恢复',content:e.message||'请稍后重试',showCancel:false});}
+    finally {if(!this._unloaded)update(this,{recreating:false});}
   },
 
   onClose() {

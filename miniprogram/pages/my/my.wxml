@@ -27,7 +27,7 @@
       </view>
     </view>
     <view class="black-card-balance">
-      <text class="balance-num">✦ {{ lightPoints }}</text>
+      <text class="balance-num">{{balanceLoaded ? '✦ ' + lightPoints : '—'}}</text>
       <text class="balance-unit">光子</text>
     </view>
     <view class="black-card-foot">
@@ -36,14 +36,15 @@
   </view>
 
   <!-- 3. 数据指标条 (3 列数据) -> 点击分别跳二级页面 -->
+  <view wx:if="{{balanceError}}" class="ui-inline-state"><text>{{balanceError}}{{balanceLoaded ? '，当前显示上次余额' : ''}}</text><button class="ui-state-action" bindtap="onRetryProfile">重试</button></view>
   <view class="stats-card gallery-card">
     <view class="stat-col" bindtap="onGoWorks">
-      <text class="stat-number">{{ worksTotal }}</text>
+      <text class="stat-number">{{worksLoaded ? worksTotal : '—'}}</text>
       <text class="stat-label">作品</text>
     </view>
     <view class="stat-divider"></view>
-    <view class="stat-col" bindtap="onGoWorks">
-      <text class="stat-number">{{ processingCount }}</text>
+    <view class="stat-col" bindtap="onGoProcessing">
+      <text class="stat-number">{{worksLoaded ? processingCount : '—'}}</text>
       <text class="stat-label">生成中</text>
     </view>
     <view class="stat-divider"></view>
@@ -77,6 +78,7 @@
 
   <!-- 5. 我的作品展区 -> 点击进入二级页面【我的作品】 -->
   <view class="works-section">
+    <view wx:if="{{worksError}}" class="ui-inline-state"><text>{{worksError}}{{historyList.length ? '，当前显示已缓存作品' : ''}}</text><button class="ui-state-action" bindtap="onRetryProfile">重试</button></view>
     <view class="section-header">
       <view class="section-title-wrap">
         <text class="section-title">我的作品</text>
@@ -102,7 +104,8 @@
     </view>
 
     <!-- 作品空状态 -->
-    <view wx:else class="works-empty gallery-card">
+    <view wx:elif="{{worksLoading || !worksLoaded}}" class="works-empty gallery-card"><text class="empty-text">{{worksError ? '作品尚未读取，请重试' : '正在读取作品…'}}</text></view>
+    <view wx:elif="{{!worksError}}" class="works-empty gallery-card">
       <text class="empty-text">还没有作品。完成一次创作后，它会出现在这里。</text>
       <button class="btn-line empty-action-btn" bindtap="onGoCreate">
         去创作第一张照片 →

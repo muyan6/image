@@ -7,11 +7,12 @@ const rows=[],tick=()=>new Promise(r=>setImmediate(r));
 const xml=name=>fs.readFileSync(path.join(root,`miniprogram/pages/${name}/${name}.wxml`),'utf8');
 function page(name,api={},wx={},payment={}){
  let p;const app={globalData:{historyList:[],freeMode:false,mediaCache:{}},persist(){},setBalance(){}};
+ const mocks={getStorageSync:()=>null,setStorageSync(){},showToast(){},showModal(){},showLoading(){},hideLoading(){},vibrateShort(){},...wx};
  vm.runInNewContext(fs.readFileSync(path.join(root,`miniprogram/pages/${name}/${name}.js`),'utf8'),{
-  Page:x=>p=x,getApp:()=>app,require:n=>n.includes('/commerce')?require(path.join(root,'miniprogram/utils/commerce.js')):n.includes('/payment')?payment:api,
-  wx:{getStorageSync:()=>null,setStorageSync(){},showToast(){},showModal(){},showLoading(){},hideLoading(){},vibrateShort(){},...wx},
+  Page:x=>p=x,getApp:()=>app,require:n=>n.includes('creation-draft.js')?require('./creation_page_fixture.cjs')(api,mocks,app,root):n.includes('/commerce')?require(path.join(root,'miniprogram/utils/commerce.js')):n.includes('/payment')?payment:api,
+  wx:mocks,
   console:{log(){},warn(){},error(){}},setTimeout,clearTimeout});
- p.data=JSON.parse(JSON.stringify(p.data));p.setData=d=>Object.assign(p.data,d);return p;
+ p.data=JSON.parse(JSON.stringify(p.data));if(name==='text-generation')p.data.lightPoints=app.globalData.lightPoints||200;p.setData=d=>Object.assign(p.data,d);return p;
 }
 async function test(name,fn){try{await fn();rows.push({case:name,passed:true});console.log('PASS '+name);}catch(e){rows.push({case:name,passed:false,error:String(e.stack)});console.error('FAIL '+name,e);}}
 (async()=>{

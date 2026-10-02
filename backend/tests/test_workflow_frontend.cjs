@@ -6,11 +6,11 @@ fs.mkdirSync(output,{recursive:true});
 const rows=[],tick=()=>new Promise(r=>setImmediate(r));
 const app=()=>({globalData:{apiBase:'https://server.invalid',historyList:[],lightPoints:90},setBalance(){},persist(){}});
 function page(name,api={},wx={}) {
-  let p;
+  let p;const a=app();
   const mocks={showToast(){},showModal(){},showLoading(){},hideLoading(){},navigateTo(){},vibrateShort(){},getWindowInfo:()=>({windowWidth:375}),...wx};
   vm.runInNewContext(fs.readFileSync(path.join(root,`miniprogram/pages/${name}/${name}.js`),'utf8'),
-    {getApp:app,require:()=>api,Page:x=>p=x,wx:mocks,setTimeout,console});
-  p.data=JSON.parse(JSON.stringify(p.data));p.setData=d=>Object.assign(p.data,d);return p;
+    {getApp:()=>a,require:n=>n.includes('creation-draft.js')?require('./creation_page_fixture.cjs')(api,mocks,a,root):api,Page:x=>p=x,wx:mocks,setTimeout,console});
+  p.data=JSON.parse(JSON.stringify(p.data));if(name==='text-generation')p.data.lightPoints=a.globalData.lightPoints||200;p.setData=d=>Object.assign(p.data,d);return p;
 }
 function apiModule(wx) {
   const sandbox={module:{exports:{}},getApp:app,wx,setTimeout,console};
@@ -222,7 +222,7 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
     const api={submitJob:async()=>{submits++;const e=new Error('请求超时');e.jobSubmissionAttempted=true;throw e;}};
     const p=page('adjust',api,{getFileInfo:()=>fileInfoCalls++,showModal:o=>{modal=o;}});
     p._foreground=true;p.data.freeMode=true;p.data.imagePath='fixture.jpg';
-    await p.executeUpload('fixture.jpg');assert.equal(modal.title,'提交状态待确认');
+    await p.executeUpload('fixture.jpg');assert(p.data.submissionPending);assert(p.data.submissionMessage.includes('待确认'));
     await p.onStartGenerate();assert.equal(submits,1);assert.equal(fileInfoCalls,0);
   });
   await test('accepted_job_can_still_be_backgrounded',async()=>{

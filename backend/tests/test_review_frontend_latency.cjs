@@ -20,9 +20,9 @@ function page(name, apiMock={}, a=app(), extraWx={}, clock={}) {
   const wx={showToast(){},showModal(o){o.success?.({confirm:true});},showLoading(){},hideLoading(){},
     navigateTo(){},redirectTo(){},vibrateShort(){},stopPullDownRefresh(){},getFileInfo:o=>o.success({size:4}),...extraWx};
   vm.runInNewContext(fs.readFileSync(path.join(root,`miniprogram/pages/${name}/${name}.js`),'utf8'),
-    {getApp:()=>a,require:()=>apiMock,Page:x=>p=x,wx,console:silent,setTimeout:clock.setTimeout||setTimeout,
+    {getApp:()=>a,require:n=>n.includes('creation-draft.js')?require('./creation_page_fixture.cjs')(apiMock,wx,a,root):apiMock,Page:x=>p=x,wx,console:silent,setTimeout:clock.setTimeout||setTimeout,
       clearTimeout:clock.clearTimeout||clearTimeout,Date});
-  p.data=JSON.parse(JSON.stringify(p.data));p.setData=d=>Object.assign(p.data,d);return p;
+  p.data=JSON.parse(JSON.stringify(p.data));if(name==='text-generation')p.data.lightPoints=a.globalData.lightPoints||200;p.setData=d=>Object.assign(p.data,d);return p;
 }
 function web(fetchMock, clock={}) {
   const elements={}, el=id=>elements[id]||= {style:{},classList:{add(){},remove(){}},files:[],click(){}};
@@ -30,8 +30,13 @@ function web(fetchMock, clock={}) {
   const alerts=[];
   const context={document:{getElementById:el,createElement:()=>el('login-panel'),body:{appendChild(){}}},window:{},
     console:silent,localStorage:{getItem:()=> 'session',setItem(){},removeItem(){}},
-    URL:{createObjectURL:()=> 'blob:fixture',revokeObjectURL(){}},fetch:fetchMock,alert:s=>alerts.push(s),
-    setTimeout:clock.setTimeout||setTimeout,clearInterval(){},setInterval(){},Date:clock.Date||Date};
+    URL:{createObjectURL:()=> 'blob:fixture',revokeObjectURL(){}},fetch:(url,options)=>{
+      if(url==='/api/config')return Promise.resolve(response({prices:{light:40,fine:40},free_mode:false}));
+      if(url==='/api/me')return Promise.resolve(response({user_id:'fixture-user',balance:200}));
+      if(url.startsWith('/api/my/jobs?'))return Promise.resolve(response({jobs:[],total:0,processing_count:0,has_more:false,next_offset:0}));
+      return fetchMock(url,options);
+    },alert:s=>alerts.push(s),
+    setTimeout:clock.setTimeout||((fn,ms)=>{const timer=setTimeout(fn,ms);timer.unref();return timer;}),clearTimeout,clearInterval(){},setInterval(){},Date:clock.Date||Date};
   vm.createContext(context);vm.runInContext(script,context);
   return {elements,alerts,run:s=>vm.runInContext(s,context)};
 }
@@ -109,7 +114,7 @@ async function test(name,fn) {
   await test('adjust_background_submission_failure_keeps_uncertain_guard',async()=>{
     let rejects,submits=0;const error=Object.assign(new Error('timeout'),{jobSubmissionAttempted:true});
     const p=page('adjust',{submitJob:()=>{submits++;return submits===1?new Promise((r,j)=>rejects=j):Promise.reject(error);}});
-    p.data.lightPoints=200;p.data.imagePath='fixture.jpg';const first=p.executeUpload('fixture.jpg');p.onHide();rejects(error);await first;
+    p.data.lightPoints=200;p.data.imagePath='fixture.jpg';const first=p.executeUpload('fixture.jpg');await tick();p.onHide();rejects(error);await first;
     p.onShow();await p.onStartGenerate();await tick();assert.equal(submits,1);assert(p._submissionUncertain);
     return {submissions:submits,uncertain:!!p._submissionUncertain};
   });
@@ -147,7 +152,7 @@ async function test(name,fn) {
     const p=page('adjust',{submitJob:async()=>{submits++;return submits===1?{code:0,job_id:'first'}:new Promise(r=>secondSubmit=r);},
       absolute:x=>x,waitForJob:()=>new Promise(r=>firstWait=r)});
     const first=p.executeUpload('fixture.jpg');await tick();p.onHide();p.onShow();
-    const second=p.executeUpload('fixture.jpg');firstWait({status:'succeeded'});await first;
+    const second=p.executeUpload('fixture.jpg');await tick();firstWait({status:'succeeded'});await first;
     const locked=!!p._submissionPending;p.onHide();secondSubmit({code:0,job_id:'second'});await second;
     assert(locked);return {secondUploadStayedLocked:locked};
   });

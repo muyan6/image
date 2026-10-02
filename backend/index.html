@@ -352,6 +352,20 @@
     width: 100%;
   }
   .result-actions .btn-ink { flex: 1; text-align: center; text-decoration: none; }
+  .web-works {border-top:1px solid var(--paper-border);padding-top:24px;}
+  .web-works-head,.web-work-actions {display:flex;align-items:center;justify-content:space-between;gap:12px;}
+  .web-works-head h2 {font-family:var(--font-serif);font-size:22px;}
+  .web-works-note,.web-work-info {font-size:12px;color:var(--ink-muted);margin:12px 0;}
+  .web-works-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start;}
+  .web-work {background:#fff;border:1px solid var(--paper-border);padding:12px;min-width:0;}
+  .web-work img {width:100%;height:180px;object-fit:contain;background:var(--paper-bg);}
+  .web-work button,.web-work a {font:inherit;font-size:13px;color:var(--ink-title);border:1px solid var(--paper-border);padding:6px 10px;background:transparent;cursor:pointer;text-decoration:none;}
+  .web-work-status {padding:16px 8px;min-height:64px;font-size:13px;}
+  .web-work-expiry {color:#9e4b3c;font-size:12px;margin-top:8px;}
+  #webWorksError {color:#9e4b3c;white-space:pre-wrap;}
+  #webMoreWorks {margin-top:18px;}
+  #webQuote {font-size:13px;color:var(--ink-muted);text-align:center;}
+  @media(max-width:480px){.nav-bar{flex-wrap:wrap;gap:12px;}.web-works-grid{gap:10px;}.web-work img{height:135px;}.web-work-actions{flex-wrap:wrap;}}
 </style>
 </head>
 <body>
@@ -424,14 +438,15 @@
     <div class="controls-box" id="readyControls">
       <div class="quality-picker">
         <div class="quality-card" id="cardLight" data-quality="light">
-          <div class="quality-title">轻量快速 · 1.5K</div>
-          <div class="quality-desc">快速去噪去暗 · 约 3 秒</div>
+          <div class="quality-title">轻量生成</div>
+          <div class="quality-desc">速度优先，适合日常创作</div>
         </div>
         <div class="quality-card selected" id="cardFine" data-quality="fine">
-          <div class="quality-title">精细超分 · 2K</div>
-          <div class="quality-desc">发丝细节重构 · 约 15 秒 (推荐)</div>
+          <div class="quality-title">精细生成</div>
+          <div class="quality-desc">细节优先，适合精细创作</div>
         </div>
       </div>
+      <div id="webQuote" aria-live="polite">正在读取生成费用…</div>
       <button type="button" class="btn-ink" id="btnRescue">拯救这张照片</button>
     </div>
 
@@ -446,6 +461,13 @@
       </div>
     </div>
   </div>
+  <section class="web-works" aria-label="我的作品">
+    <div class="web-works-head"><h2>我的作品</h2><button type="button" class="btn-line" id="webRefreshWorks">刷新作品</button></div>
+    <p class="web-works-note">与小程序共用作品 · 页面关闭后任务继续 · 成品保留 30 天，请及时保存</p>
+    <p class="web-works-note" id="webWorksError" role="status"></p>
+    <div class="web-works-grid" id="webWorksGrid"></div>
+    <button type="button" class="btn-line" id="webMoreWorks" hidden>加载更多作品</button>
+  </section>
 </div>
 
 <script>
@@ -457,6 +479,12 @@
   let currentQuality = 'fine';
   let splitPercent = 50;
   let isDragging = false;
+  let webQuote = null, webBalance = null, webAccount = '', webRequestId = '', webUploadTicket = null, webPendingPayload = null;
+  let webAccountLoadSequence = 0;
+  let webWorks = [], webWorksOffset = 0, webWorksMore = false, webWorksBusy = false, webWorksTimer = null;
+  let webWorksGeneration = 0;
+  const PENDING_WEB_KEY = 'pr_pending_submission_v1';
+  const WEB_STAGES = {queued:'排队中',prepare:'准备照片',normalize:'准备照片',audit_input:'原图审核',input_audit:'原图审核',enhance:'AI 生成中',provider_wait:'AI 生成中',import_wait:'保存成品',finalize:'处理成品',audit_output:'成品审核',output_audit:'成品审核',store_cos:'保存成品',done:'已完成'};
 
   const stateEmpty = document.getElementById('stateEmpty');
   const workspace = document.getElementById('workspace');
@@ -514,6 +542,7 @@
   }
 
   function setBalance(n) {
+    webBalance = n;
     if (balanceBadge) balanceBadge.textContent = '✦ ' + n + ' 光子';
   }
 
@@ -546,8 +575,8 @@
           const v=await s.json();if(generation!==loginGeneration)return;
           if(!s.ok)throw new Error(v.detail||'登录码已失效');
           if(v.state==='approved'){
-            webToken=v.token;try{localStorage.setItem('pr_web_token',webToken);}catch(e){}
-            setBalance(v.balance);clearInterval(timer);loginPanel.style.display='none';
+            webToken=v.token;webWorksGeneration++;clearWebAccountView();try{localStorage.setItem('pr_web_token',webToken);}catch(e){}
+            setBalance(v.balance);clearInterval(timer);loginPanel.style.display='none';loadWebAccount();
           }else if(v.state==='denied'){clearInterval(timer);message.textContent='已取消登录，请刷新登录码。';}
         }catch(e){if(generation!==loginGeneration)return;clearInterval(timer);message.textContent=e.message;}
         finally{checking=false;}
@@ -556,7 +585,7 @@
     }catch(e){message.textContent=e.message;}
     finally{loginBusy=false;}
   }
-  ensureWebToken(true).catch(()=>{});
+  ensureWebToken(true).then(()=>loadWebAccount()).catch(()=>{});
   const btnDownload = document.getElementById('btnDownload');
 
   portalCard.onclick = () => fileInput.click();
@@ -574,8 +603,10 @@
 
   function handleFile(file) {
     if (webSubmitting) return;
+    if(webSubmissionUncertain){document.getElementById('webWorksError').textContent='上次提交仍待确认，请点击刷新作品核对后再选新照片。';return;}
     selectedFile = file;
     pendingWebJob = null;
+    webUploadTicket=null;webRequestId='';webPendingPayload=null;saveWebPending();
     if (selectedFileUrl && URL.revokeObjectURL) URL.revokeObjectURL(selectedFileUrl);
     const url = URL.createObjectURL(file);
     selectedFileUrl = url;
@@ -593,6 +624,7 @@
     workspace.style.display = 'flex';
     const mb = (file.size / (1024 * 1024)).toFixed(2);
     photoMeta.textContent = `${file.name} (${mb} MB)`;
+    renderWebQuote();
   }
 
   btnBack.onclick = resetToEmpty;
@@ -610,25 +642,32 @@
   }
 
   cardLight.onclick = () => {
+    if(webSubmitting||(webRequestId&&webUploadTicket))return;
     cardLight.classList.add('selected');
     cardFine.classList.remove('selected');
     currentQuality = 'light';
+    renderWebQuote();
   };
 
   cardFine.onclick = () => {
+    if(webSubmitting||(webRequestId&&webUploadTicket))return;
     cardFine.classList.add('selected');
     cardLight.classList.remove('selected');
     currentQuality = 'fine';
+    renderWebQuote();
   };
 
   btnRescue.onclick = async () => {
-    if (!selectedFile || webSubmitting) return;
+    if ((!selectedFile && !(webRequestId&&webUploadTicket)) || webSubmitting) return;
+    const receiptRetry=!!(webRequestId&&webUploadTicket);
     if (webSubmissionUncertain) {
-      alert('上次提交状态待确认，请先在小程序作品中核对，避免重复生成与扣费。');
-      return;
+      await recoverWebSubmission();
+      if(webSubmissionUncertain)return;
     }
+    if(webSubmitting)return;
     webSubmitting = true;
     btnRescue.disabled = true;
+    let submitGeneration=null;
 
     processingMask.style.display = 'flex';
     processingText.textContent = '正在提交照片…';
@@ -636,20 +675,31 @@
 
     try {
       await ensureWebToken();
+      if(!webAccount && (!await loadWebAccount() || !webAccount))throw new Error('账户信息尚未就绪，请刷新后再试；本次未提交。');
+      submitGeneration=webWorksGeneration;
       if (!pendingWebJob) {
-        let res = await submitWebPicture(selectedFile,currentQuality);
+        const shownPrice=webQuote ? webQuote.free?0:webQuote.prices[currentQuality] : null;
+        await loadWebQuote();
+        const price=webPendingPayload?webPendingPayload.expected_price:webQuote.free?0:webQuote.prices[currentQuality];
+        if(!webPendingPayload && shownPrice!==null && shownPrice!==price)throw Object.assign(new Error('生成费用已更新，请核对新价格后再次点击生成。'),{status:409});
+        if(Number.isFinite(webBalance)&&webBalance<price)throw Object.assign(new Error('光子余额不足，请在小程序光子中心补充。'),{status:402});
+        if(!webRequestId)webRequestId=newWebRequestId();
+        let res = await submitWebPicture(selectedFile,currentQuality,price,webRequestId);
         if (res.status === 401) {
           await ensureWebToken(true);
-          res = await submitWebPicture(selectedFile,currentQuality);
+          res = await submitWebPicture(selectedFile,currentQuality,price,webRequestId);
         }
         const data = await res.json().catch(() => null);
+        if(submitGeneration!==webWorksGeneration)return;
         if (!res.ok || !data || data.code !== 0 || !data.job_id) {
           const e = new Error((data && data.detail) || '提交响应异常');
+          e.status = res.status;
           e.jobSubmissionAttempted = !!res.jobSubmissionAttempted;
           throw e;
         }
         if (typeof data.balance === 'number') setBalance(data.balance);
         pendingWebJob = data.job_id;
+        webSubmissionUncertain=false;saveWebPending();loadWebWorks(false).catch(()=>{});
       }
       const jobId = pendingWebJob;
       processingText.textContent = 'AI 正在深度重构光影细节…';
@@ -664,38 +714,51 @@
             continue;
           }
           const job = await q.json();
+          if(submitGeneration!==webWorksGeneration)return;
           if (!q.ok) {
             const e = new Error(job.detail || '任务查询失败'); e.status = q.status; throw e;
           }
+          if(typeof job.balance==='number')setBalance(job.balance);
+          processingText.textContent=webStageText(job);
           if (job.status === 'succeeded') {
             if (!job.result_url) throw Object.assign(new Error('作品图片已到保存期限'), {status:410});
             finished = true;
             pendingWebJob = null;
+            webRequestId='';webUploadTicket=null;webPendingPayload=null;saveWebPending();
             showResult(job.orig_url || job.result_url, job.result_url);
             break;
           } else if (job.status === 'failed') {
             pendingWebJob = null;
-            throw Object.assign(new Error(job.error || '增强失败'), {terminal:true});
+            webRequestId='';webUploadTicket=null;webPendingPayload=null;saveWebPending();
+            const settlement=job.settlement||{};
+            throw Object.assign(new Error((job.error || '增强失败')+'；实际扣点 '+(job.charged_amount??settlement.charged_amount??'待核对')+'，退回 '+(job.refunded_amount??settlement.refunded_amount??'待核对')+' 光子'), {terminal:true});
           }
         } catch (e) {
-          if (e.status === 404 || e.status === 410) pendingWebJob = null;
+          if (e.status === 404 || e.status === 410) {pendingWebJob=null;webRequestId='';webUploadTicket=null;webPendingPayload=null;saveWebPending();}
           if (e.terminal || (e.status && e.status < 500 && e.status !== 429)) throw e;
         }
         await new Promise(r => setTimeout(r, Math.min(1500, Math.max(0, 180000 - (Date.now() - start)))));
       }
       if (!finished) throw new Error('等待超时，任务仍在云端处理，请稍后在作品中查看。任务编号：' + jobId);
     } catch (e) {
-      if (e.jobSubmissionAttempted) webSubmissionUncertain = true;
-      alert('拯救失败: ' + e.message);
+      if(submitGeneration!==null&&submitGeneration!==webWorksGeneration)return;
+      if (e.jobSubmissionAttempted) {webSubmissionUncertain=true;saveWebPending();}
+      else if(!pendingWebJob && e.status && e.status<500){
+        if(receiptRetry)await recoverWebSubmission();
+        else {webRequestId='';webUploadTicket=null;webPendingPayload=null;saveWebPending();}
+      }
+      alert((pendingWebJob?'任务仍在处理中: ':webSubmissionUncertain?'正在确认提交: ':'本次未完成: ') + e.message);
+      document.getElementById('webWorksError').textContent=e.message;
       processingMask.style.display = 'none';
       readyControls.style.display = 'flex';
     } finally {
       webSubmitting = false;
-      btnRescue.disabled = false;
+      if(submitGeneration===null||submitGeneration===webWorksGeneration){btnRescue.disabled=false;renderWebQuote();loadWebWorks(false).catch(()=>{});}
     }
   };
 
   function showResult(orig, result) {
+    stateEmpty.style.display='none';workspace.style.display='flex';readyControls.style.display='none';
     processingMask.style.display = 'none';
     origImg.src = orig;
     resImg.src = result;
@@ -725,16 +788,21 @@
     setSplit(pct);
   }
 
-  async function submitWebPicture(file,quality){
+  async function submitWebPicture(file,quality,expectedPrice,clientRequestId){
     const headers=authHeaders({'Content-Type':'application/json'});
-    const r=await fetch('/api/uploads',{method:'POST',headers,body:JSON.stringify({filename:file.name,byte_size:file.size})});
-    if(!r.ok)return r;const u=await r.json();
-    const put=await fetch(u.url,{method:'PUT',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});
-    if(!put.ok)throw new Error('COS 上传失败，请检查存储桶跨域配置');
-    const c=await fetch('/api/uploads/'+encodeURIComponent(u.upload_id)+'/complete',{method:'POST',headers});
-    if(!c.ok)return c;
+    let u=clientRequestId&&webUploadTicket;
+    if(!u){
+      const r=await fetch('/api/uploads',{method:'POST',headers,body:JSON.stringify({filename:file.name,byte_size:file.size})});
+      if(!r.ok)return r;u=await r.json();
+      const put=await fetch(u.url,{method:'PUT',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});
+      if(!put.ok)throw new Error('COS 上传失败，请检查存储桶跨域配置');
+      const c=await fetch('/api/uploads/'+encodeURIComponent(u.upload_id)+'/complete',{method:'POST',headers});
+      if(!c.ok)return c;
+      if(clientRequestId){webUploadTicket={upload_id:u.upload_id};webPendingPayload={quality,expected_price:expectedPrice};}
+    }
+    if(clientRequestId&&!saveWebPending(true))throw new Error('提交记录保存失败，请检查浏览器存储；本次尚未提交。');
     try {
-      const submitted = await fetch('/api/rescue/by-upload',{method:'POST',headers,body:JSON.stringify({upload_id:u.upload_id,quality})});
+      const submitted = await fetch('/api/rescue/by-upload',{method:'POST',headers,body:JSON.stringify({upload_id:u.upload_id,quality,expected_price:expectedPrice,client_request_id:clientRequestId})});
       submitted.jobSubmissionAttempted = submitted.ok || submitted.status >= 500;
       return submitted;
     } catch (e) {
@@ -742,6 +810,130 @@
       throw e;
     }
   }
+
+  function newWebRequestId(){
+    if(typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function')return crypto.randomUUID();
+    return 'web_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2)+'_'+Math.random().toString(36).slice(2);
+  }
+  function saveWebPending(uncertain){
+    try{if(!webRequestId&&!pendingWebJob&&!webSubmissionUncertain)localStorage.removeItem(PENDING_WEB_KEY);
+      else localStorage.setItem(PENDING_WEB_KEY,JSON.stringify({owner:webAccount,client_request_id:webRequestId,job_id:pendingWebJob,uncertain:!!(uncertain||webSubmissionUncertain),upload:webUploadTicket,payload:webPendingPayload,quality:currentQuality}));return true;}catch(e){return false;}
+  }
+  async function webRequest(url,options){
+    const opts=Object.assign({},options||{});opts.headers=authHeaders(Object.assign({'Content-Type':'application/json'},opts.headers||{}));
+    let response=await fetch(url,opts);
+    if(response.status===401){await ensureWebToken(true);opts.headers=authHeaders(opts.headers);response=await fetch(url,opts);}
+    const value=await response.json();
+    if(!response.ok){const error=new Error(typeof value.detail==='object'?value.detail.message:value.detail||'读取失败');error.status=response.status;throw error;}
+    return value;
+  }
+  async function loadWebQuote(){
+    const config=await webRequest('/api/config');
+    if(!config.prices||!Number.isInteger(config.prices.light)||!Number.isInteger(config.prices.fine))throw new Error('生成价格暂未读取成功，请刷新后再试。');
+    if(config.maintenance&&config.maintenance.enabled)throw new Error(config.maintenance.message||'服务维护中，请稍后再试。');
+    webQuote={prices:config.prices,free:!!config.free_mode};renderWebQuote();
+    return webQuote;
+  }
+  function renderWebQuote(){
+    const label=document.getElementById('webQuote');
+    label.textContent=webQuote ? (webQuote.free?'体验免扣费':'本次预扣 '+webQuote.prices[currentQuality]+' 光子')+(Number.isFinite(webBalance)?' · 余额 '+webBalance+' 光子':''):'生成价格暂未就绪，请刷新后再试';
+    btnRescue.textContent=webSubmissionUncertain?'核对上次提交':pendingWebJob?'继续查看任务':webQuote?(webQuote.free?'开始生成 · 体验免扣':'开始生成 · '+webQuote.prices[currentQuality]+' 光子'):'读取费用后生成';
+  }
+  async function loadWebAccount(){
+    const sequence=++webAccountLoadSequence;
+    try{
+      const me=await webRequest('/api/me');const changed=webAccount&&webAccount!==me.user_id;
+      if(sequence!==webAccountLoadSequence)return false;
+      if(!me.user_id)throw new Error('账户信息暂未读取成功，请刷新重试。');
+      if(changed){webWorksGeneration++;clearWebAccountView();}
+      webAccount=me.user_id||'';if(typeof me.balance==='number')setBalance(me.balance);
+      let saved=null;try{saved=JSON.parse(localStorage.getItem(PENDING_WEB_KEY)||'null');}catch(e){}
+      if(saved&&saved.owner===webAccount){webRequestId=saved.client_request_id||'';pendingWebJob=saved.job_id||null;webSubmissionUncertain=!!saved.uncertain;webUploadTicket=saved.upload||null;webPendingPayload=saved.payload||null;
+        if(['light','fine'].includes(saved.quality)){currentQuality=saved.quality;cardLight.classList[currentQuality==='light'?'add':'remove']('selected');cardFine.classList[currentQuality==='fine'?'add':'remove']('selected');}}
+      await Promise.all([loadWebQuote().catch(e=>document.getElementById('webQuote').textContent=e.message),loadWebWorks(false)]);
+      if(sequence!==webAccountLoadSequence)return false;
+      if(webRequestId&&webSubmissionUncertain)await recoverWebSubmission();
+      return true;
+    }catch(e){if(sequence===webAccountLoadSequence)document.getElementById('webWorksError').textContent=e.message;return false;}
+  }
+  function clearWebAccountView(){
+    pendingWebJob=null;webRequestId='';webUploadTicket=null;webPendingPayload=null;webSubmissionUncertain=false;webAccount='';webWorks=[];webWorksOffset=0;webWorksMore=false;
+    selectedFile=null;if(selectedFileUrl)URL.revokeObjectURL(selectedFileUrl);selectedFileUrl=null;
+    origImg.src='';resImg.src='';btnDownload.href='';fileInput.value='';
+    stateEmpty.style.display='flex';workspace.style.display='none';resultControls.style.display='none';readyControls.style.display='flex';processingMask.style.display='none';
+    document.getElementById('webWorksGrid').innerHTML='';document.getElementById('webMoreWorks').hidden=true;
+    if(webWorksTimer)clearTimeout(webWorksTimer);webWorksTimer=null;
+  }
+  async function recoverWebSubmission(){
+    if(!webRequestId)return;
+    const generation=webWorksGeneration,requestId=webRequestId,token=webToken;
+    try{
+      const record=await webRequest('/api/me/submissions/'+encodeURIComponent(webRequestId));
+      if(generation!==webWorksGeneration||requestId!==webRequestId||token!==webToken)return;
+      if(record.job_id){pendingWebJob=record.job_id;webSubmissionUncertain=false;saveWebPending();document.getElementById('webWorksError').textContent='已找回上次任务，可在作品列表查看。';await loadWebWorks(false);}
+      else if((record.state||record.submission_state)==='rejected'){webSubmissionUncertain=false;webRequestId='';webUploadTicket=null;webPendingPayload=null;saveWebPending();document.getElementById('webWorksError').textContent=record.detail||'上次提交未受理，可调整后重新生成。';}
+      else{webSubmissionUncertain=true;document.getElementById('webWorksError').textContent='上次提交仍待确认，刷新作品可继续核对，不会自动重复生成。';}
+    }catch(e){if(generation!==webWorksGeneration||requestId!==webRequestId||token!==webToken)return;
+      if(e.status===404&&webUploadTicket&&webPendingPayload){webSubmissionUncertain=false;saveWebPending();document.getElementById('webWorksError').textContent='上次任务未登记，可以沿用原编号重试；不会创建重复任务。';}
+      else document.getElementById('webWorksError').textContent=e.status===404?'上次任务尚未登记，当前保留提交编号；请稍后刷新核对。':e.message;}
+    renderWebQuote();
+  }
+  function webStageText(job){const elapsed=Math.max(0,Math.floor((Date.now()/1000)-(job.created_at||Date.now()/1000)));return (WEB_STAGES[job.stage]||'云端处理中')+' · 已等待 '+(elapsed<60?elapsed+' 秒':Math.floor(elapsed/60)+' 分钟');}
+  async function loadWebWorks(more){
+    if(webWorksBusy||!webToken)return;
+    webWorksBusy=true;const generation=webWorksGeneration,token=webToken;
+    const offset=more?webWorksOffset:0;
+    try{
+      const result=await webRequest('/api/my/jobs?limit=12&offset='+offset+'&status=all');
+      if(generation!==webWorksGeneration||token!==webToken)return;
+      if(!result||!Array.isArray(result.jobs))throw new Error('作品列表暂未读取成功');
+      const existing=more?webWorks:[],map=new Map(existing.map(j=>[j.id,j]));result.jobs.forEach(j=>map.set(j.id,j));webWorks=[...map.values()];
+      webWorksOffset=Number(result.next_offset)||offset+result.jobs.length;webWorksMore=!!result.has_more;
+      document.getElementById('webWorksError').textContent=webSubmissionUncertain?'上次提交待确认，请点击刷新作品核对。':webWorks.length?'':'还没有作品，完成创作后会出现在这里。';
+      renderWebWorks();scheduleWebWorks();
+    }catch(e){if(generation===webWorksGeneration&&token===webToken)document.getElementById('webWorksError').textContent=e.message;}
+    finally{webWorksBusy=false;}
+  }
+  function scheduleWebWorks(){
+    if(webWorksTimer&&typeof clearTimeout==='function')clearTimeout(webWorksTimer);webWorksTimer=null;
+    if(document.hidden||(!webSubmissionUncertain&&!webWorks.some(j=>j.status==='processing')))return;
+    webWorksTimer=setTimeout(async()=>{webWorksTimer=null;if(document.hidden)return;
+      const generation=webWorksGeneration,token=webToken;
+      if(webSubmissionUncertain)await recoverWebSubmission();
+      if(webWorks.some(j=>j.status==='processing')){
+        try{const result=await webRequest('/api/my/jobs?limit=100&offset=0&status=processing');
+          if(generation!==webWorksGeneration||token!==webToken)return;
+          const active=new Map((result.jobs||[]).map(j=>[j.id,j]));
+          for(let i=0;i<webWorks.length;i++){const old=webWorks[i];if(old.status!=='processing')continue;const fresh=active.get(old.id)||await webRequest('/api/jobs/'+encodeURIComponent(old.id));if(generation!==webWorksGeneration||token!==webToken)return;webWorks[i]=fresh;}
+          renderWebWorks();
+        }catch(e){if(generation===webWorksGeneration&&token===webToken)document.getElementById('webWorksError').textContent='任务状态暂未更新，云端会继续处理；点击刷新重试。';}
+      }scheduleWebWorks();},5000);
+  }
+  function renderWebWorks(){
+    const grid=document.getElementById('webWorksGrid');grid.innerHTML='';
+    webWorks.forEach(job=>{
+      const card=document.createElement('article');card.className='web-work';
+      if(job.status==='succeeded'&&job.result_url){const image=document.createElement('img');image.src=job.result_url;image.alt=job.template_name||'创作成品';image.loading='lazy';card.appendChild(image);}
+      const status=document.createElement('p');status.className='web-work-status';status.textContent=job.status==='processing'?webStageText(job):job.status==='failed'?(job.error||'生成失败'):'已完成';card.appendChild(status);
+      const info=document.createElement('p');info.className='web-work-info';info.textContent=(job.template_name||'原片修复')+' · '+(job.quality==='fine'?'精细':'轻量');card.appendChild(info);
+      if(job.status==='failed'){const s=job.settlement||{},amount=job.charged_amount??s.charged_amount,refund=job.refunded_amount??s.refunded_amount;const p=document.createElement('p');p.className='web-work-info';p.textContent=Number.isFinite(amount)&&Number.isFinite(refund)?'实际扣点 '+amount+' · 已退回 '+refund+' 光子':'历史结算信息未完整记录';card.appendChild(p);}
+      if(job.expires_at&&job.status==='succeeded'){const remaining=Math.ceil((job.expires_at-Date.now()/1000)/86400);if(remaining<=3){const warning=document.createElement('p');warning.className='web-work-expiry';warning.textContent=remaining>0?'还剩 '+remaining+' 天，请及时保存':'作品已到保存期限';card.appendChild(warning);}}
+      const actions=document.createElement('div');actions.className='web-work-actions';
+      const view=document.createElement('button');view.type='button';view.textContent=job.status==='processing'?'查看进度':'查看作品';view.onclick=()=>openWebWork(job.id);actions.appendChild(view);
+      if(job.status==='succeeded'&&job.result_url){const save=document.createElement('a');save.href=job.result_url;save.download='rescued_'+job.id+'.jpg';save.target='_blank';save.rel='noopener';save.textContent='保存图片';actions.appendChild(save);}
+      card.appendChild(actions);grid.appendChild(card);
+    });document.getElementById('webMoreWorks').hidden=!webWorksMore;
+  }
+  async function openWebWork(id){
+    const generation=webWorksGeneration,token=webToken;
+    try{const job=await webRequest('/api/jobs/'+encodeURIComponent(id));if(generation!==webWorksGeneration||token!==webToken)return;if(typeof job.balance==='number')setBalance(job.balance);
+      if(job.status==='succeeded'&&job.result_url){photoMeta.textContent=job.template_name||'我的作品';showResult(job.orig_url||job.result_url,job.result_url);}
+      else document.getElementById('webWorksError').textContent=job.status==='processing'?webStageText(job):job.error||'作品尚未完成';
+    }catch(e){if(generation===webWorksGeneration&&token===webToken)document.getElementById('webWorksError').textContent=e.message;}
+  }
+  document.getElementById('webRefreshWorks').onclick=async()=>{await ensureWebToken().catch(()=>{});if(!webToken)return;await loadWebAccount();};
+  document.getElementById('webMoreWorks').onclick=()=>loadWebWorks(true);
+  if(typeof document.addEventListener==='function')document.addEventListener('visibilitychange',()=>{if(document.hidden){if(webWorksTimer)clearTimeout(webWorksTimer);webWorksTimer=null;}else if(webToken)loadWebWorks(false);});
 </script>
 </body>
 </html>

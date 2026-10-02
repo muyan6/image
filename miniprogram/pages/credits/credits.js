@@ -23,7 +23,8 @@ Page({
     paymentBusy: false,
     catalogLoading:true, catalogError:'', catalogStale:false,
     packages: [],
-    records: []
+    records: [], recordsLoading:false, recordsLoaded:false, recordsError:'', recordsHasMore:false, recordTotal:0,
+    balanceLoaded:false, balanceError:''
   },
 
   onLoad() {
@@ -33,6 +34,7 @@ Page({
   onShow() {
     this._visible=true;this._unloaded=false;
     this.refreshData();
+    this.loadRecords();
   },
 
   onHide() { this._visible=false;this.stopOfferClock(); },
@@ -94,16 +96,48 @@ Page({
     }).catch(() => {});
 
     // 签到状态与余额都以服务端为准
-    api.me().then((d) => {
+    const version=(this._balanceVersion||0)+1;this._balanceVersion=version;
+    this.setData({balanceError:''});
+    return api.me().then((d) => {
+      if(this._unloaded||version!==this._balanceVersion)return;
       if (!d) return;
       if (typeof d.balance === 'number') app.setBalance(d.balance);
       this.setData({
-        lightPoints: app.globalData.lightPoints,
+        lightPoints: app.globalData.lightPoints, balanceLoaded:true,
         estimatedGenerations: this.data.costPerGeneration > 0
           ? Math.floor(app.globalData.lightPoints / this.data.costPerGeneration) : 0
       });
       this.renderCheckin(d.earn || {});
-    }).catch(() => {});
+    }).catch(() => {if(!this._unloaded&&version===this._balanceVersion)this.setData({balanceError:'余额更新失败，请重试'});});
+  },
+
+  async loadRecords(more=false) {
+    more=more===true;
+    if(more&&(this.data.recordsLoading||!this.data.recordsHasMore))return;
+    const version=(this._recordsVersion||0)+1;this._recordsVersion=version;
+    const offset=more?(this._recordsOffset||0):0;
+    this.setData({recordsLoading:true,recordsError:''});
+    try {
+      const d=await api.request('/api/me/credits?limit=30&offset='+offset);
+      if(this._unloaded||version!==this._recordsVersion)return;
+      if(!d||!Array.isArray(d.items))throw new Error('光子明细数据异常');
+      const items=d.items.map(item=>{
+        const date=new Date(item.created_at*1000),pad=n=>String(n).padStart(2,'0');
+        return {...item, amountText:(item.amount>0?'+':'')+item.amount,
+          time:`${date.getFullYear()}.${pad(date.getMonth()+1)}.${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`};
+      });
+      this._recordsOffset=d.next_offset;
+      this.setData({records:[...new Map((more?this.data.records.concat(items):items).map(x=>[x.id,x])).values()],
+        recordTotal:d.total,recordsHasMore:!!d.has_more,recordsLoaded:true});
+    }catch(e){if(!this._unloaded&&version===this._recordsVersion)this.setData({recordsError:e.message||'光子明细读取失败，请重试'});}
+    finally{if(!this._unloaded&&version===this._recordsVersion)this.setData({recordsLoading:false});}
+  },
+  onMoreRecords(){return this.loadRecords(true);},
+  onRetryRecords(){return this.loadRecords();},
+  onOpenRecord(e){
+    const row=this.data.records.find(x=>String(x.id)===String(e.currentTarget.dataset.id));if(!row)return;
+    if(row.order_id)wx.navigateTo({url:'/pages/orders/orders?id='+encodeURIComponent(row.order_id)});
+    else if(row.job_id)wx.navigateTo({url:'/pages/works/works?jobId='+encodeURIComponent(row.job_id)});
   },
 
   renderCheckin(earn) {
@@ -136,7 +170,7 @@ Page({
     api.earn('checkin')
       .then((d) => {
         if (d && typeof d.balance === 'number') app.setBalance(d.balance);
-        this.setData({lightPoints: app.globalData.lightPoints,
+        this.setData({lightPoints: app.globalData.lightPoints,balanceLoaded:typeof d.balance==='number'||this.data.balanceLoaded,balanceError:'',
           estimatedGenerations: this.data.costPerGeneration > 0
             ? Math.floor(app.globalData.lightPoints / this.data.costPerGeneration) : 0});
         this.renderCheckin({checkin_done:true,checkin_streak:d.checkin_streak,

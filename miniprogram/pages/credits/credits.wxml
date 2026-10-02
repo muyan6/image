@@ -7,10 +7,11 @@
       <text class="rate-badge">生成 · ✦{{ costPerGeneration }}/张</text>
     </view>
     <view class="balance-main">
-      <text class="balance-number">✦ {{ lightPoints }}</text>
+      <text class="balance-number">{{balanceLoaded ? '✦ ' + lightPoints : '—'}}</text>
       <text class="balance-unit">光子</text>
     </view>
-    <text class="balance-desc">当前余额约可生成 {{ estimatedGenerations }} 张照片</text>
+    <text wx:if="{{balanceLoaded}}" class="balance-desc">当前余额约可生成 {{ estimatedGenerations }} 张照片</text>
+    <view wx:if="{{balanceError}}" class="ui-inline-state"><text>{{balanceError}}{{balanceLoaded ? '，当前显示上次余额' : ''}}</text><button class="ui-state-action" bindtap="refreshData">重试</button></view>
 
     <view class="checkin-row" bindtap="onOpenCheckin">
       <view class="checkin-status">
@@ -74,20 +75,24 @@
   <!-- 4. 光子明细 -->
   <view class="section-box">
     <view class="section-head">
-      <text class="section-title">光子明细</text>
+      <text class="section-title">光子明细{{recordsLoaded ? ' · ' + recordTotal : ''}}</text>
     </view>
     <view class="history-list gallery-card">
-      <view class="history-item" wx:if="{{ records.length === 0 }}">
+      <view class="history-item" wx:if="{{ recordsLoading && !records.length }}"><text class="hist-title">正在读取光子明细…</text></view>
+      <view class="history-item" wx:if="{{ recordsLoaded && !recordsLoading && !recordsError && records.length === 0 }}">
         <text class="hist-title">暂无光子明细；余额以服务端为准。</text>
       </view>
-      <view class="history-item" wx:for="{{ records }}" wx:key="id">
+      <view class="history-item" wx:for="{{ records }}" wx:key="id" bindtap="onOpenRecord" data-id="{{item.id}}">
         <view class="hist-info">
           <text class="hist-title">{{ item.title }}</text>
           <text class="hist-time">{{ item.time }}</text>
+          <text wx:if="{{item.job_id || item.order_id}}" class="hist-time">{{item.order_id ? '查看订单 ›' : '查看作品 ›'}}</text>
         </view>
-        <text class="hist-gain">✦{{ item.amount }}</text>
+        <text class="hist-gain {{item.amount < 0 ? 'hist-spend' : ''}}">{{item.amountText}} 光子</text>
       </view>
     </view>
+    <view wx:if="{{recordsError}}" class="ui-inline-state"><text>{{recordsError}}</text><button class="ui-state-action" bindtap="onRetryRecords">重试</button></view>
+    <button wx:if="{{recordsHasMore}}" class="ui-state-action" loading="{{recordsLoading}}" bindtap="onMoreRecords">更多明细</button>
   </view>
 
   <!-- 5. 使用说明 -->

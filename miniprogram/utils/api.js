@@ -146,7 +146,8 @@ function authedCall(fn) {
 }
 
 function request(path, options) {
-  const protectedPath = /^\/api\/(me(?:\/|$)|my\/|jobs\/|uploads(?:\/|$)|rescue(?:\/|$)|text-generation(?:\/|$)|payment\/|community\/(?:submissions|posts|comments)(?:\/|$)|auth\/wechat-web\/approve)/.test(path);
+  const protectedPath = /^\/api\/(me(?:\/|$)|my\/|jobs\/|uploads(?:\/|$)|rescue(?:\/|$)|text-generation(?:\/|$)|payment\/|community\/(?:submissions|posts|comments)(?:\/|$)|auth\/wechat-web\/approve)/.test(path) ||
+    (/^\/api\/community\?/.test(path) && /(?:[?&])liked_only=(?:true|1)(?:&|$)/.test(path));
   return protectedPath ? authedCall(() => rawRequest(path, options)) : rawRequest(path, options);
 }
 
@@ -463,8 +464,28 @@ async function waitForJob(jobId, options) {
 }
 
 /** 查询当前用户云端最近提交的任务历史列表 */
-function myJobs(limit = 30, offset = 0) {
-  return request('/api/my/jobs?limit=' + limit + (offset ? '&offset=' + offset : ''), { timeout: 8000 });
+function myJobs(limit = 30, offset = 0, status = 'all') {
+  return request('/api/my/jobs?limit=' + limit + (offset ? '&offset=' + offset : '') + '&status=' + encodeURIComponent(status), { timeout: 8000 });
+}
+
+function lookupSubmission(clientRequestId) {
+  return request('/api/me/submissions/' + encodeURIComponent(clientRequestId));
+}
+
+/** 再创作读取完整素材，不复用对比页的压缩/裁切原图缓存。 */
+async function downloadRecipeOriginal(jobId, url) {
+  const direct = value => {
+    const resolved = absolute(value || '');
+    if (!isJobCosUrl(resolved)) throw new Error('完整原图尚未同步，请重新选择照片');
+    return resolved;
+  };
+  try { return await downloadImage(direct(url)); }
+  catch (error) {
+    if (error.status !== 403 && error.status !== 401) throw error;
+    const recipe = await request('/api/jobs/' + encodeURIComponent(jobId) + '/recipe');
+    if (!recipe || !recipe.orig_url) throw new Error('完整原图已到保存期限');
+    return downloadImage(direct(recipe.orig_url));
+  }
 }
 
 /** 后端连通性探测 */
@@ -587,7 +608,7 @@ async function _submitViaCos(filePath, formData) {
   await completeUpload(up.upload_id);
 
   const body = {};
-  ['quality', 'style', 'template_id', 'text_fields', 'aspect_ratio', 'custom_prompt', 'template_output_mode', 'expected_price'].forEach((k) => {
+  ['quality', 'style', 'template_id', 'text_fields', 'aspect_ratio', 'custom_prompt', 'template_output_mode', 'expected_price', 'client_request_id'].forEach((k) => {
     if (formData && formData[k] !== undefined && formData[k] !== '') {
       body[k] = formData[k];
     }
@@ -656,6 +677,8 @@ module.exports = {
   submitJob,
   waitForJob,
   myJobs,
+  lookupSubmission,
+  downloadRecipeOriginal,
   deleteJob,
   deleteAllJobs,
   health,

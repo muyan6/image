@@ -13,9 +13,9 @@ function apiModule(wx,a=app()){
 function page(name,api,a=app(),extraWx={},clock={}){
  let p;const wx={showToast(){},showModal(){},showLoading(){},hideLoading(){},navigateTo(){},stopPullDownRefresh(){},...extraWx};
  vm.runInNewContext(fs.readFileSync(path.join(root,`miniprogram/pages/${name}/${name}.js`),'utf8'),
-  {Page:x=>p=x,require:()=>api,getApp:()=>a,wx,console:silent,Date:clock.Date||Date,
+  {Page:x=>p=x,require:n=>n.includes('creation-draft.js')?require('./creation_page_fixture.cjs')(api,wx,a,root):api,getApp:()=>a,wx,console:silent,Date:clock.Date||Date,
    setTimeout:clock.setTimeout||setTimeout,clearTimeout:clock.clearTimeout||clearTimeout});
- p.data=JSON.parse(JSON.stringify(p.data));p.setData=d=>Object.assign(p.data,d);return p;
+ p.data=JSON.parse(JSON.stringify(p.data));if(name==='text-generation')p.data.lightPoints=a.globalData.lightPoints||200;p.setData=d=>Object.assign(p.data,d);return p;
 }
 function timerClock(){let id=0;const timers=new Map();return {timers,setTimeout(fn,ms){timers.set(++id,{fn,ms});return id;},clearTimeout(id){timers.delete(id);}};}
 async function test(name,fn){
@@ -37,7 +37,7 @@ async function test(name,fn){
   return {before,afterPosts:posts,logins};
  });
  await test('text_final_post_network_loss_still_blocks_repeat_charge',async()=>{
-  let posts=0;const api=apiModule({getStorageSync:()=> 'session',request:o=>{posts++;o.fail({errMsg:'request:fail timeout'});}});
+  let posts=0;const api=apiModule({getStorageSync:()=> 'session',request:o=>{if(o.url.endsWith('/api/text-generation'))posts++;o.fail({errMsg:'request:fail timeout'});}});
   const p=page('text-generation',api);p.data.ready=true;p.data.prompt='森林小屋';await p.onGenerate();await p.onGenerate();
   assert.equal(posts,1);assert(p._uncertain);return {posts,uncertain:!!p._uncertain};
  });

@@ -473,3 +473,4 @@
 .pkg-sale-price { color: var(--accent-rust); }
 .catalog-message { display: flex; justify-content: space-between; padding: 22rpx 28rpx; background: var(--paper-card-subtle); color: var(--accent-rust); border: 1rpx dashed var(--paper-border-dark); font-size: 23rpx; }
 .catalog-empty { padding: 36rpx 28rpx; color: var(--ink-muted); font-size: 24rpx; }
+.hist-spend { color: #6c6b66; }

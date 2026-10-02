@@ -41,7 +41,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -66,6 +66,8 @@ from templates_store import TemplateStore, covers_dir
 from text_overlay import apply as apply_text_overlay, collect_values
 from tencent_cs import ModerationError, moderate_image_bytes, moderate_text
 from user_store import AdmissionError, UserStore, business_midnight
+from experience_store import store_for as experience_for
+from experience_api import idempotent_submit, photo_recipe, make_experience_router
 from reward_verifier import verify_video
 import wechat_sec
 from wechat_sec import WechatSecError
@@ -557,7 +559,9 @@ def _register_job(openid: str, quality: str, style: str,
                   orig_tmp_path: str, ext: str,
                   template: Optional[Dict[str, Any]] = None,
                   text_values: Optional[Dict[str, str]] = None,
-                  aspect_ratio: str = "", custom_prompt: str = "") -> Dict[str, Any]:
+                  aspect_ratio: str = "", custom_prompt: str = "",
+                  job_id: Optional[str] = None, expected_price: Optional[int] = None,
+                  recipe: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """把已落盘的原图登记为任务（ multipart 与 COS 直传共用这条尾巴）。
 
     模板提供风格与排版；档位、模型和价格跟随用户选择及全局修图设置。
@@ -572,9 +576,13 @@ def _register_job(openid: str, quality: str, style: str,
         if not settings.provider_enabled("worldcodes") or prompt_client is None or not prompt_client.configured:
             raise HTTPException(status_code=503, detail="指定成品形式或补充要求的生成引擎当前不可用，请稍后重试")
     price = _effective_price(quality, template)
-    job_id = uuid.uuid4().hex[:12]
+    job_id = job_id or uuid.uuid4().hex[:12]
     free = settings.free_mode()
     charged = 0 if free else price
+    if expected_price is not None and expected_price != charged:
+        raise HTTPException(409, detail='生成价格已更新，请刷新价格后重新确认')
+    recipe = recipe or photo_recipe(quality, template, text_values, aspect_ratio, custom_prompt,
+                                    (template or {}).get('output_mode', ''))
     try:
         balance = users.reserve_job(openid, job_id, charged, settings.quota(), free)
     except AdmissionError as exc:
@@ -631,6 +639,7 @@ def _register_job(openid: str, quality: str, style: str,
             orig_file=orig_file,
             result_file=result_file,
             stage="queued",
+            recipe=recipe,
             orig_url="/api/images/%s" % orig_file,
             result_url="/api/images/%s" % result_file,
             orig_cos=orig_cos,
@@ -993,12 +1002,14 @@ class JobStore:
     def cleanup_purged(self, snapshot: List[Dict[str, Any]]) -> None:
         self._notify_evicted(snapshot)
 
-    def list_for_openid(self, openid: str, offset: int = 0, limit: int = 50) -> List[Dict[str, Any]]:
+    def list_for_openid(self, openid: str, offset: int = 0, limit: int = 50,
+                        status: str = 'all') -> List[Dict[str, Any]]:
         """按 openid 筛选当前用户的任务列表：按创建时间倒序。"""
         with self._lock:
             matched = [
                 dict(j) for j in self._data.values()
                 if j.get("openid") == openid and not j.get("deleted_at")
+                and (status == 'all' or j.get('status') == status)
             ]
             matched.sort(key=lambda j: j.get("created_at", 0), reverse=True)
             return matched[offset:offset + limit]
@@ -1008,8 +1019,10 @@ class JobStore:
         with self._lock:
             matched = [job for job in self._data.values()
                        if job.get("openid") == openid and not job.get("deleted_at")]
-            return {"total": len(matched), "processing_count": sum(
-                job.get("status") == "processing" for job in matched)}
+            counts = {status: sum(job.get('status') == status for job in matched)
+                      for status in ('processing', 'succeeded', 'failed')}
+            return {"total": len(matched), "processing_count": counts['processing'],
+                    "status_counts": counts}
 
 
 def _cleanup_job_files(evicted_jobs: List[Dict[str, Any]]) -> None:
@@ -1698,10 +1711,11 @@ def public_config() -> Dict[str, Any]:
 
 
 @app.get("/api/community")
-def public_community(request: Request, response: Response, offset: int = 0, limit: int = 200):
+def public_community(request: Request, response: Response, offset: int = 0, limit: int = 200,
+                     liked_only: bool = False, category: str = 'all'):
     from community_api import public_feed
     response.headers['Cache-Control']='private, no-store'
-    return public_feed(sys.modules[__name__],request,offset,limit)
+    return public_feed(sys.modules[__name__],request,offset,limit,liked_only=liked_only,category=category)
 
 
 @app.get("/api/community/media/{filename}")
@@ -1953,6 +1967,7 @@ class _InviteBody(BaseModel):
 
 class _RescueByUploadBody(BaseModel):
     expected_price: Optional[int] = None
+    client_request_id: str = Field(default='', max_length=80, pattern=r'^(?:[A-Za-z0-9_-]{8,80})?$')
     upload_id: str = ""
     quality: str = ""
     style: str = ""
@@ -2035,6 +2050,7 @@ def get_me(request: Request):
         "account_type": user["account_type"],
         "balance": user["balance"],
         "total_jobs": user["total_jobs"],
+        "credit_record_count": experience_for(users).credit_records(openid, limit=1)['total'],
         "invite_code": user["invite_code"],
         "nickname": user.get("nickname", ""),
         "banned": user.get("banned", False),
@@ -2301,6 +2317,13 @@ def create_rescue_job(
 @partial(upload_limited, should_limit=lambda: not cloud.enabled())
 def create_rescue_job_by_upload(payload: _RescueByUploadBody,
                                 request: Request):
+    user = _current_user(request)
+    return idempotent_submit(sys.modules[__name__], user, payload.client_request_id,
+                             payload.model_dump(exclude={'client_request_id', 'upload_id'}), 'photo',
+                             lambda fixed_id: _create_rescue_by_upload(payload, request, fixed_id))
+
+
+def _create_rescue_by_upload(payload: _RescueByUploadBody, request: Request, job_id=None):
     """COS 直传路径。云端模式只登记元数据，由 CI/供应商/COS 完成图片处理；
     明确关闭云端模式时保留原有同步链路，不在失败时自动切换链路。"""
     user = _rescue_guard(request)
@@ -2312,6 +2335,11 @@ def create_rescue_job_by_upload(payload: _RescueByUploadBody,
         _chosen_quality((payload.quality or "").strip().lower(), tpl_quality),
         payload.style)
     custom_prompt, combined_text = _user_text(payload.custom_prompt, text_values, tpl)
+    recipe = photo_recipe(quality, tpl, text_values, payload.aspect_ratio, custom_prompt,
+                          payload.template_output_mode)
+    charged = 0 if settings.free_mode() else _effective_price(quality, tpl)
+    if payload.expected_price is not None and payload.expected_price != charged:
+        raise HTTPException(409, detail='生成价格已更新，请刷新价格后重新确认')
 
     with _uploads_lock:
         rec = _uploads.get(upload_id)
@@ -2324,7 +2352,8 @@ def create_rescue_job_by_upload(payload: _RescueByUploadBody,
             text_reject = _moderate_text_or_reject(combined_text, user['openid'])
             if text_reject:_reject_uploaded_content(user['openid'], 'text', text_reject, quality, tpl)
             return cloud.admit(user['openid'],quality,style,source=rec,template=tpl,
-                               text_values=text_values,aspect_ratio=payload.aspect_ratio,custom_prompt=custom_prompt,expected_price=payload.expected_price)
+                               text_values=text_values,aspect_ratio=payload.aspect_ratio,custom_prompt=custom_prompt,
+                               expected_price=payload.expected_price,job_id=job_id,recipe=recipe)
         except Exception:
             with _uploads_lock:_uploads.setdefault(upload_id,rec)
             raise
@@ -2364,8 +2393,9 @@ def create_rescue_job_by_upload(payload: _RescueByUploadBody,
 
         try:
             return _register_job(user["openid"], quality, style, job_tmp, ext,
-                                 template=tpl, text_values=text_values,
-                                 aspect_ratio=payload.aspect_ratio, custom_prompt=custom_prompt)
+                                  template=tpl, text_values=text_values,
+                                  aspect_ratio=payload.aspect_ratio, custom_prompt=custom_prompt,
+                                  job_id=job_id, expected_price=payload.expected_price, recipe=recipe)
         except Exception:
             _safe_remove(job_tmp)
             raise
@@ -2407,6 +2437,8 @@ def query_job_status(job_id: str, request: Request):
         "orig_url": _job_media_url(job, "orig"),
         "result_url": _job_media_url(job, "result"),
         "created_at": job.get("created_at"),
+        "expires_at": _media_expires_at(job, 'result'),
+        **experience_for(users).settlement(user['openid'], job['id']),
     }
 
 
@@ -2471,11 +2503,13 @@ def refresh_job_media(job_id: str, request: Request, kind: str = "result"):
 
 
 @app.get("/api/my/jobs")
-def get_my_jobs(request: Request, limit: int = 30, offset: int = 0):
+def get_my_jobs(request: Request, limit: int = 30, offset: int = 0, status: str = 'all'):
     """查询当前登录用户最近提交的任务历史列表（支持跨端同步与切屏恢复）。"""
     user = _current_user(request)
+    if status not in ('all', 'processing', 'succeeded', 'failed'):
+        raise HTTPException(400, detail='作品状态筛选无效')
     limit=min(max(1,limit),100);offset=max(0,offset)
-    page=jobs.list_for_openid(user["openid"],offset=offset,limit=limit+1)
+    page=jobs.list_for_openid(user["openid"],offset=offset,limit=limit+1,status=status)
     more=len(page)>limit;raw_list=page[:limit]
     res = []
     for job in raw_list:
@@ -2496,9 +2530,14 @@ def get_my_jobs(request: Request, limit: int = 30, offset: int = 0):
             "orig_url": _job_media_url(job, "orig"),
             "result_url": _job_media_url(job, "result"),
             "created_at": job.get("created_at"),
+            "completed_at": job.get("completed_at"),
+            "expires_at": _media_expires_at(job, 'result'),
+            **experience_for(users).settlement(user['openid'], job['id']),
         })
+    counts = jobs.counts_for_openid(user["openid"])
+    total = counts['total'] if status == 'all' else counts['status_counts'][status]
     return {"jobs": res,"has_more":more,"next_offset":offset+len(res),
-            **jobs.counts_for_openid(user["openid"])}
+            **counts, 'total': total, 'all_total': counts['total']}
 
 
 @app.delete("/api/my/jobs/{job_id}")
@@ -2576,6 +2615,7 @@ app.include_router(web_login_router)
 app.include_router(make_payment_router(lambda:sys.modules[__name__]))
 from community_api import make_community_router
 app.include_router(make_community_router(lambda:sys.modules[__name__]))
+app.include_router(make_experience_router(lambda:sys.modules[__name__]))
 
 if __name__ == "__main__":
     import uvicorn

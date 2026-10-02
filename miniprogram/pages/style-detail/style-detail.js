@@ -11,7 +11,8 @@ Page({
     bannerIndex: 0,
     bannerHeight: 420,
     priceLabel: '按档位计费',
-    loading: true
+    loading: true,
+    loadError: ''
   },
 
   onLoad(options) {
@@ -21,14 +22,13 @@ Page({
   },
 
   loadTemplateDetail(tid) {
-    update(this,{ loading: true });
-    api.templates()
+    const version=(this._loadVersion||0)+1;this._loadVersion=version;
+    update(this,{ loading: true,loadError:'',template:null });
+    return api.templates()
       .then((data) => {
+        if(this._unloaded||version!==this._loadVersion)return;
         const items = (data && data.items) || [];
         let tpl = items.find((t) => t.id === tid);
-        if (!tpl && items.length > 0) {
-          tpl = items[0];
-        }
 
         if (tpl) {
           const rawCovers = (Array.isArray(tpl.covers) && tpl.covers.length > 0)
@@ -81,16 +81,22 @@ Page({
             });
           }
         } else {
-          update(this,{ loading: false });
+          update(this,{ loading: false,loadError:'这款风格已下架或暂不可用，请返回风格库选择其他风格' });
         }
       })
       .catch((err) => {
+        if(this._unloaded||version!==this._loadVersion)return;
         console.warn('加载模板详情失败', err);
-        update(this,{ loading: false });
+        update(this,{ loading: false,loadError:'风格加载失败，请检查网络后重试' });
       });
   },
 
+  onUnload() {this._unloaded=true;this._loadVersion=(this._loadVersion||0)+1;},
+  onRetryTemplate() {return this.loadTemplateDetail(this.data.templateId);},
+  onTemplateLibrary() {wx.switchTab({url:'/pages/templates/templates'});},
+
   onChoosePhoto() {
+    if(this.data.loading||!this.data.template||this.data.loadError){wx.showToast({title:'请先确认所选风格',icon:'none'});return;}
     wx.chooseMedia({
       count: 1,
       mediaType: ['image'],

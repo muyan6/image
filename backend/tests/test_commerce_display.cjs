@@ -10,9 +10,9 @@ function page(name,{api={},payment={},wx={},now=100000}={}){
  const mocks={showToast:o=>messages.push(o),showModal:o=>messages.push(o),navigateTo(){},showLoading(){},hideLoading(){},getFileInfo:o=>o.success({size:1}),...wx};
  const DateMock=class extends Date{static now(){return clock;}};
  vm.runInNewContext(fs.readFileSync(path.join(root,`miniprogram/pages/${name}/${name}.js`),'utf8'),{
-  Page:x=>p=x,getApp:()=>app,require:s=>s.includes('commerce.js')?commerce:s.includes('payment.js')?payment:api,wx:mocks,console,
+  Page:x=>p=x,getApp:()=>app,require:s=>s.includes('creation-draft.js')?require('./creation_page_fixture.cjs')(api,mocks,app,root):s.includes('commerce.js')?commerce:s.includes('payment.js')?payment:api,wx:mocks,console,
   Date:DateMock,setTimeout:(fn,ms)=>{const id=++serial;timers.set(id,{fn,at:clock+ms});return id;},clearTimeout:id=>timers.delete(id)});
- p.data=JSON.parse(JSON.stringify(p.data));p.setData=d=>Object.assign(p.data,d);
+ p.data=JSON.parse(JSON.stringify(p.data));if(name==='text-generation')p.data.lightPoints=app.globalData.lightPoints||200;p.setData=d=>Object.assign(p.data,d);
  return {p,app,messages,timers,async advance(ms){clock+=ms;const due=[...timers].filter(([,v])=>v.at<=clock);for(const [id,v] of due){timers.delete(id);v.fn();}await tick();},setClock:n=>clock=n};
 }
 const sale={id:'offer-sale',points:800,generations:20,price_text:'¥4.8',amount_fen:480,regular_amount_fen:600,regular_price_text:'¥6',promotion_active:true,promotion_ends_at:102,bonus_text:'国庆加赠'};
@@ -80,10 +80,11 @@ async function test(name,fn){try{await fn();rows.push({case:name,passed:true});}
   const t=page('works',{api:{deleteJob:async id=>{deleted=id;return {};},myJobs:async()=>({jobs:[]})},wx:{showModal:o=>confirm=o.success}});
   t.p.data.works=[a,b];t.app.globalData.historyList=[a,b];t.p.deleteSingleWork(0);t.p.data.works=[b,a];await confirm({confirm:true});assert.equal(deleted,'a');
  });
- await test('all_pages_kept_before_authoritative_merge',async()=>{
+ await test('first_page_is_bounded_and_reach_bottom_loads_remaining_works',async()=>{
   const jobs=Array.from({length:101},(_,i)=>({id:String(i),status:'failed'}));let calls=0;
-  const t=page('works',{api:{absolute:x=>x,myJobs:async(limit,offset=0)=>{calls++;return {jobs:jobs.slice(offset,offset+limit),has_more:offset===0,next_offset:offset+limit};}}});
-  await t.p.loadWorks();assert.equal(t.p.data.works.length,101);assert.equal(calls,2);
+  const t=page('works',{api:{absolute:x=>x,myJobs:async(limit,offset=0)=>{calls++;return {jobs:jobs.slice(offset,offset+limit),total:jobs.length,status_counts:{all:101,processing:0,succeeded:0,failed:101},has_more:offset+limit<jobs.length,next_offset:Math.min(offset+limit,jobs.length)};}}});
+  await t.p.loadWorks();assert.equal(t.p.data.works.length,24);assert.equal(calls,1);assert(t.p.data.hasMore);assert.equal(t.p.data.total,101);
+  while(t.p.data.hasMore)await t.p.onReachBottom();assert.equal(t.p.data.works.length,101);assert.equal(calls,5);assert(!t.p.data.hasMore);
  });
  await test('generation_requires_loaded_price',async()=>{
   let submits=0;const t=page('adjust',{api:{config:async()=>{throw new Error('offline');},me:async()=>({balance:100})}});

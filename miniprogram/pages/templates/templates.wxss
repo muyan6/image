@@ -580,3 +580,9 @@
 .card-action-arrow { flex-shrink: 0; }
 .cat-chip { min-height: 76rpx; }
 .template-search { min-height: 84rpx; }
+.preference-bar { display:flex; gap:16rpx; margin:24rpx 0 8rpx; }
+.preference-chip { font-size:24rpx; color:#77736b; padding:12rpx 18rpx; border-radius:30rpx; border:1rpx solid #ded8cc; }
+.preference-active { color:#fff; background:#1a1917; border-color:#1a1917; }
+.favorite-btn { width:56rpx; height:56rpx; line-height:56rpx; min-width:56rpx; margin:0 0 0 8rpx; padding:0; background:transparent; color:#868078; font-size:36rpx; }
+.favorite-btn::after { border:none; }
+.favorite-active { color:#9e4b3c; }

@@ -7,6 +7,12 @@
   box-sizing: border-box;
 }
 
+.home-task-card {margin-top:20rpx;padding:22rpx 24rpx;background:#fff;border:1rpx solid var(--paper-border);border-left:5rpx solid var(--accent-gold);}
+.home-task-title {display:block;font-size:26rpx;font-weight:600;color:var(--ink-title);}
+.home-task-desc {display:block;margin-top:8rpx;font-size:22rpx;line-height:1.6;color:var(--ink-muted);}
+.home-task-error {margin-top:16rpx;font-size:22rpx;color:#9e4b3c;}
+.home-draft-card {display:flex;justify-content:space-between;gap:12rpx;margin-top:18rpx;padding:20rpx 24rpx;border:1rpx dashed var(--paper-border-dark);font-size:24rpx;color:var(--ink-muted);}
+
 /* 顶部极简中文栏 */
 .nav-bar {
   display: flex;

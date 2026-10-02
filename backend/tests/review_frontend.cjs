@@ -41,9 +41,9 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     stopPullDownRefresh(){},getStorageSync(){return '';},setStorageSync(){},
     navigateTo(){},redirectTo(){},switchTab(){}},extraWx);
   vm.runInNewContext(fs.readFileSync(path.join(ROOT,`miniprogram/pages/${name}/${name}.js`),'utf8'),
-    {getApp:()=>app,require:n=>n.includes('commerce.js')?require(path.join(ROOT,'miniprogram/utils/commerce.js')):api,Page:p=>page=p,wx,console:silent,
+    {getApp:()=>app,require:n=>n.includes('creation-draft.js')?require('./creation_page_fixture.cjs')(api,wx,app,ROOT):n.includes('commerce.js')?require(path.join(ROOT,'miniprogram/utils/commerce.js')):api,Page:p=>page=p,wx,console:silent,
       setTimeout:clock.setTimeout||setTimeout,clearTimeout:clock.clearTimeout||clearTimeout,Date:clock.Date||Date});
-  page.data=JSON.parse(JSON.stringify(page.data || {}));
+  page.data=JSON.parse(JSON.stringify(page.data || {}));if(name==='text-generation')page.data.lightPoints=app.globalData.lightPoints||200;
   page.setData=function(data){Object.assign(this.data,data);};
   return {page,wx,app};
 }
@@ -73,11 +73,12 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
       {price:page.data.price,path:sent.path,photoRequired:false,route}];
   });
   await test('text_generation_disabled_or_uncertain_never_reposts',async()=>{
-    let calls=0;
-    const {page}=loadPage('text-generation',{request:async()=>{calls++;const e=new Error('network');e.code='NETWORK';e.jobSubmissionAttempted=true;throw e;}});
+    let calls=0,lookups=0;
+    const {page}=loadPage('text-generation',{request:async(path,options)=>{if(path==='/api/text-generation'&&options.method==='POST')calls++;else if(path.startsWith('/api/me/submissions/'))lookups++;const e=new Error('network');e.code='NETWORK';e.jobSubmissionAttempted=true;throw e;}});
     await page.onGenerate();const disabledCalls=calls;
     page.setData({ready:true,prompt:'forest'});await page.onGenerate();await page.onGenerate();
-    return [disabledCalls===0&&calls===1&&page._uncertain,{disabledCalls,calls,uncertain:!!page._uncertain}];
+    await tick();
+    return [disabledCalls===0&&calls===1&&lookups>=1&&page._uncertain,{disabledCalls,calls,lookups,uncertain:!!page._uncertain}];
   });
   await test('template_popularity_orders_success_counts_without_breaking_search',()=>{
     const {page}=loadPage('templates',{absolute:x=>x});
@@ -656,7 +657,7 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     const sandbox={document:{getElementById:el,createElement:()=>el("login-modal"),body:{appendChild(){}}},window:{},console:silent,
       localStorage:{getItem:()=> 'old-valid-token',setItem(){}},URL:{createObjectURL:()=> 'blob:fixture'},
       FormData:class{append(){}},Date,setTimeout,clearInterval(){},setInterval(){},
-      fetch:async(url,opts)=>{options=opts;return {ok:true,status:200,json:async()=>({token:'renewed',balance:245})};}};
+      fetch:async(url,opts)=>{if(url==='/api/auth/web')options=opts;return {ok:true,status:200,json:async()=>({token:'renewed',balance:245})};}};
     vm.runInNewContext(script,sandbox);await sandbox.ensureWebToken();
     return [options.headers.Authorization==='Bearer old-valid-token'&&options.credentials==='same-origin',
       {legacy_authorization:options.headers.Authorization,credentials:options.credentials}];

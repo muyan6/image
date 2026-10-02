@@ -735,6 +735,11 @@ class UserStore:
         with self._lock, self._conn:
             self._conn.execute("BEGIN IMMEDIATE")
             summary = self.purge_summary_unlocked()
+            # New account-owned experience records must not reappear if a user
+            # registers again after an explicitly requested account purge.
+            for table in ('template_preferences', 'client_submissions'):
+                if self._conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                    self._conn.execute('DELETE FROM ' + table)
             for table in ("violations", "ad_rewards", "invite_bindings", "job_charges", "audit", "users"):
                 self._conn.execute("DELETE FROM " + table)
             return summary

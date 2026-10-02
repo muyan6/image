@@ -300,13 +300,21 @@ def make_community_router(runtime):
     return router
 
 
-def public_feed(m,request,offset=0,limit=200):
+def public_feed(m,request,offset=0,limit=200,liked_only=False,category='all'):
+    if category not in CATEGORIES:raise HTTPException(400,detail='社区分类无效')
     viewer=None
     if request.headers.get('authorization'):
         try:viewer=m._current_user(request)['openid']
         except HTTPException:pass  # Viewing is public; writes still require a valid session.
-    s=store_for(m.users);items=[]
+    if liked_only:
+        viewer=m._current_user(request)['openid']
+    s=store_for(m.users);items=[];liked_ids=None
+    if liked_only:
+        with m.users._lock:
+            liked_ids={r[0] for r in m.users._conn.execute('SELECT post_id FROM community_likes WHERE owner=?',(viewer,))}
     for p in CommunityStore(m.settings).list(status='published',limit=200)['items']:
+        if liked_ids is not None and p['id'] not in liked_ids:continue
+        if category!='all' and p.get('category','all')!=category:continue
         items.append({'id':p['id'],'title':p.get('title',''),'story':p.get('story',''),
             'authorName':p.get('author_name',''),'authorAvatar':p.get('author_avatar',''),'date':p.get('date',''),
             'category':p.get('category','all'),'categoryName':p.get('category_name',''),
@@ -314,22 +322,34 @@ def public_feed(m,request,offset=0,limit=200):
             'quality':p.get('quality','light'),'resultUrl':p.get('result_url',''),'origUrl':p.get('orig_url',''),
             'likes':m._community_likes(p.get('likes')),'liked':False,'pinned':bool(p.get('pinned')),
             'featured':False,'_sort':(not p.get('pinned'),p.get('sort',100),-float(p.get('created_at') or 0),p['id'])})
-    for row in s.list(status='published',limit=200)[0]:
-        author=m.users.get_user(row['owner'])
+    submission_rows=[];submission_offset=0
+    while True:
+        batch,total_submissions=s.list(status='published',offset=submission_offset,limit=200)
+        submission_rows.extend(batch);submission_offset+=len(batch)
+        if not batch or submission_offset>=total_submissions:break
+    author_cache={};cos_ready=m.settings.cos_ready()
+    for row in submission_rows:
+        if liked_ids is not None and row['id'] not in liked_ids:continue
+        if not cos_ready:continue
+        if row['owner'] not in author_cache:author_cache[row['owner']]=m.users.get_user(row['owner'])
+        author=author_cache[row['owner']]
         if not author or author.get('banned'):continue
-        p=row['payload'];result=signed(m,p['result_key'])
-        if not result:continue
+        p=row['payload']
+        if category!='all' and p.get('category','all')!=category:continue
+        if not p.get('result_key'):continue
         items.append({'id':row['id'],'title':p['title'],'story':p['story'],'authorName':p['author_name'],'authorAvatar':'',
             'date':datetime.fromtimestamp(row['submitted'],timezone(timedelta(hours=8))).strftime('%Y.%m.%d'),
             'category':p['category'],'categoryName':CATEGORIES[p['category']],'templateId':p['template_id'],
-            'templateName':p['template_name'],'quality':p['quality'],'resultUrl':result,
-            'origUrl':signed(m,p['orig_key']) if p['share_original'] else '',
+            'templateName':p['template_name'],'quality':p['quality'],'resultUrl':'','origUrl':'',
+            '_media_keys':(p['result_key'],p['orig_key'] if p['share_original'] else ''),
             'likes':0,'liked':False,'pinned':bool(row['featured']),'featured':bool(row['featured']),
             '_sort':(not row['featured'],100,-row['submitted'],row['id'])})
     items.sort(key=lambda p:p['_sort']);total=len(items);offset=max(0,offset);limit=max(1,min(200,limit));items=items[offset:offset+limit]
     likes=s.likes([p['id'] for p in items],viewer)
     counts=interactions_for(m.users).counts([p['id'] for p in items])
     for p in items:
+        media_keys=p.pop('_media_keys',None)
+        if media_keys:p['resultUrl']=signed(m,media_keys[0]);p['origUrl']=signed(m,media_keys[1])
         count,liked=likes.get(p['id'],(0,False));p['likes']+=count;p['liked']=liked;p.pop('_sort',None)
         p['comments']=counts.get(p['id'],0)
     return {'enabled':True,'items':items,'featured_reward':m.settings.rewards()['community_featured'],

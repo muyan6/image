@@ -4,7 +4,7 @@
     <view class="header-left">
       <text class="header-eyebrow">照片与创作记录</text>
       <text class="header-headline">我的作品</text>
-      <text class="header-sub">共 {{ works.length }} 件作品</text>
+      <text class="header-sub">{{loaded ? '当前筛选共 ' + total + ' 件作品' : '正在同步创作记录'}}</text>
     </view>
     <view wx:if="{{ works.length > 0 }}" class="header-actions">
       <text class="clear-all-btn" bindtap="onClearAllWorks">清空</text>
@@ -25,7 +25,7 @@
     <view
       wx:for="{{ filteredWorks }}"
       wx:key="jobId"
-      class="work-card gallery-card"
+      id="work-{{item.jobId}}" class="work-card gallery-card {{focusJobId === item.jobId ? 'work-card-focused' : ''}}"
       bindtap="onTapWork"
       data-index="{{ item.sourceIndex }}"
     >
@@ -37,11 +37,14 @@
         </view>
         <view class="work-processing-badge" wx:if="{{ item.status === 'processing' }}">
           <text class="processing-dot">●</text>
-          <text>生成中</text>
+          <text>{{item.stageLabel || '生成中'}}</text>
         </view>
-        <view class="work-processing-badge" wx:if="{{ item.status === 'failed' }}"><text>生成失败 · 光子已核对</text></view>
+        <view class="work-processing-badge" wx:if="{{ item.status === 'failed' }}"><text>生成失败</text></view>
       </view>
       <view wx:if="{{ item.status === 'succeeded' }}" class="work-submit" catchtap="onSubmitWork" data-index="{{ item.sourceIndex }}">投稿到社区 ↗</view>
+      <text wx:if="{{item.expiryLabel}}" class="work-expiry">{{item.expiryLabel}}</text>
+      <text wx:if="{{item.status === 'failed'}}" class="work-settlement">{{item.settlementLabel || '扣退明细请到光子中心核对'}}</text>
+      <button wx:if="{{item.status === 'succeeded' && item.result}}" class="work-save" catchtap="onSaveWork" data-index="{{item.sourceIndex}}" loading="{{savingJobId === item.jobId}}" disabled="{{!!savingJobId}}">保存到相册</button>
       <view class="work-info">
         <text class="work-date">{{ item.time || '近期拯救' }}</text>
         <view class="work-more-btn" catchtap="onMoreWork" data-index="{{ item.sourceIndex }}" aria-label="更多操作">···</view>
@@ -49,6 +52,7 @@
     </view>
   </view>
 
+  <button wx:if="{{hasMore}}" class="ui-state-action" loading="{{loadingMore}}" bindtap="onMoreWorks">更多作品</button>
   <!-- 空状态 -->
   <view wx:if="{{!filteredWorks.length && works.length && !loading && !loadError}}" class="ui-state">
     <text class="ui-state-title">当前筛选下暂无作品</text><text class="ui-state-desc">切换到其他状态查看。</text>
@@ -56,7 +60,7 @@
   <view wx:if="{{!works.length && loaded && !loading && !loadError}}" class="empty-state gallery-card">
     <view class="washi-tape"></view>
     <text class="empty-symbol">◌</text>
-    <text class="empty-title">还没有作品</text>
+    <text class="empty-title">{{activeStatus === 'all' ? '还没有作品' : '当前筛选下暂无作品'}}</text>
     <text class="empty-desc">完成一次照片修复或风格创作后，就能在这里查看和保存。</text>
     <button class="btn-ink empty-btn" bindtap="onGoCreate">
       去创作第一张照片 →

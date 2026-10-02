@@ -7,8 +7,8 @@ const rows=[],quiet={log(){},warn(){},error(){}},tick=()=>new Promise(r=>setImme
 function app(history=[]){return {globalData:{historyList:history,mediaCache:{},lightPoints:200},setBalance(n){this.globalData.lightPoints=n;},persist(){}};}
 function page(name,api,a=app(),extraWx={}){
  let p;const wx={showToast(){},showModal(){},showLoading(){},hideLoading(){},hideKeyboard(){},navigateTo(){},redirectTo(){},vibrateShort(){},...extraWx};
- vm.runInNewContext(fs.readFileSync(path.join(root,'miniprogram/pages',name,name+'.js'),'utf8'),{getApp:()=>a,require:()=>api,Page:x=>p=x,wx,console:quiet,setTimeout,clearTimeout,Date});
- p.data=JSON.parse(JSON.stringify(p.data));p.setData=x=>Object.assign(p.data,x);return p;
+ vm.runInNewContext(fs.readFileSync(path.join(root,'miniprogram/pages',name,name+'.js'),'utf8'),{getApp:()=>a,require:n=>n.includes('creation-draft.js')?require('./creation_page_fixture.cjs')(api,wx,a,root):api,Page:x=>p=x,wx,console:quiet,setTimeout,clearTimeout,Date});
+ p.data=JSON.parse(JSON.stringify(p.data));if(name==='text-generation')p.data.lightPoints=a.globalData.lightPoints||200;p.setData=x=>Object.assign(p.data,x);return p;
 }
 async function test(name,fn){
  try{const observed=await fn();rows.push({case:name,passed:true,observed});console.log('PASS '+name+': '+JSON.stringify(observed||{}));}
@@ -35,7 +35,7 @@ function qrFixture(){
   const p=page('adjust',{submitJob:()=>{submits++;return new Promise(r=>resolveSubmit=r);},absolute:x=>x,
    waitForJob:async()=>{polls++;return {status:'succeeded',orig_url:'https://cos.invalid/orig',result_url:'https://cos.invalid/result'};}},a,{redirectTo:()=>redirects++});
   p._foreground=true;p.data.priceReady=true;p.data.lightPoints=200;
-  const pending=p.executeUpload('fixture.jpg');p.onHide();p.onShow();await p.onStartGenerate();
+  const pending=p.executeUpload('fixture.jpg');await tick();p.onHide();p.onShow();await p.onStartGenerate();
   assert.strictEqual(submits,1);resolveSubmit({code:0,job_id:'accepted_job',balance:160,orig_url:'https://cos.invalid/orig'});await pending;
   assert.strictEqual(p.data.processing,false);assert.strictEqual(p.data.currentJobId,'accepted_job');assert.strictEqual(p._submissionPending,false);
   assert.strictEqual(polls,1);assert.strictEqual(redirects,1);assert.strictEqual(a.globalData.historyList[0].status,'succeeded');
@@ -43,14 +43,14 @@ function qrFixture(){
  });
  await test('adjust_return_during_rejected_upload_releases_mask_and_reports_failure',async()=>{
   let rejectSubmit,modal;const p=page('adjust',{submitJob:()=>new Promise((r,j)=>rejectSubmit=j)},app(),{showModal:o=>modal=o});
-  p._foreground=true;const pending=p.executeUpload('fixture.jpg');p.onHide();p.onShow();rejectSubmit(Object.assign(new Error('insufficient balance'),{status:402}));await pending;
+  p._foreground=true;const pending=p.executeUpload('fixture.jpg');await tick();p.onHide();p.onShow();rejectSubmit(Object.assign(new Error('insufficient balance'),{status:402}));await pending;
   assert.strictEqual(p.data.processing,false);assert.strictEqual(p._submissionPending,false);assert.strictEqual(modal.title,'光子余额不足');
   return {mask:p.data.processing,pending:p._submissionPending,modal:modal.title};
  });
  await test('adjust_hidden_submission_keeps_job_without_foreground_updates',async()=>{
   let resolveSubmit,polls=0;const a=app();const p=page('adjust',{submitJob:()=>new Promise(r=>resolveSubmit=r),absolute:x=>x,
    waitForJob:async()=>{polls++;}},a);
-  p._foreground=true;const pending=p.executeUpload('fixture.jpg');p.onHide();resolveSubmit({code:0,job_id:'accepted_hidden'});await pending;
+  p._foreground=true;const pending=p.executeUpload('fixture.jpg');await tick();p.onHide();resolveSubmit({code:0,job_id:'accepted_hidden'});await pending;
   assert.strictEqual(p.data.processing,false);assert.strictEqual(polls,0);assert.strictEqual(a.globalData.historyList[0].jobId,'accepted_hidden');
   return {polls,mask:p.data.processing,savedJobs:a.globalData.historyList.length};
  });
@@ -101,7 +101,7 @@ function qrFixture(){
   const p=page('my',{config:async()=>({prices:{light:40,fine:40},ads:{}}),me:async()=>({balance:200,earn:{}}),absolute:x=>x,
    myJobs:async(limit,offset)=>{calls.push({limit,offset:offset||0});return {jobs:history.slice(0,100).map(x=>({id:x.jobId,status:x.status,created_at:x.createdAt})),has_more:true,next_offset:100,total:151,processing_count:4};}},a);
   p.refreshUserData();await tick();assert.strictEqual(p.data.worksTotal,151);assert.strictEqual(p.data.processingCount,4);assert.strictEqual(a.globalData.historyList.length,101);
-  assert.strictEqual(calls.length,1);assert.strictEqual(calls[0].limit,100);
+  assert.strictEqual(calls.length,1);assert.strictEqual(calls[0].limit,24);
   return {worksTotal:p.data.worksTotal,processing:p.data.processingCount,cachedJobs:a.globalData.historyList.length,requests:calls.length};
  });
  await test('profile_complete_cloud_page_removes_deleted_cached_jobs',async()=>{
@@ -123,7 +123,7 @@ function qrFixture(){
  });
  await test('profile_all_works_labels_use_authoritative_count',()=>{
   const xml=fs.readFileSync(path.join(root,'miniprogram/pages/my/my.wxml'),'utf8');assert(xml.includes('全部作品 ({{ worksTotal }})'));
-  assert(/class="stat-number">\{\{ worksTotal \}\}/.test(xml));return {countBinding:'worksTotal'};
+  assert(xml.includes("worksLoaded ? worksTotal : '—'"));return {countBinding:'worksTotal',unloadedBinding:'—'};
  });
  fs.writeFileSync(path.join(out,'full_review_frontend_results.json'),JSON.stringify({source:root,cases:rows},null,2),'utf8');
  const failed=rows.filter(x=>!x.passed).length;console.log(`FULL_REVIEW_FRONTEND_SUMMARY total=${rows.length} passed=${rows.length-failed} failed=${failed}`);process.exitCode=failed?1:0;

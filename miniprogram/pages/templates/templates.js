@@ -1,5 +1,6 @@
 const app = getApp();
 const api = require('../../utils/api.js');
+const preferences = require('../../utils/preferences.js');
 const update=(page,patch)=>typeof api.setDataStable==='function'?api.setDataStable(page,patch):page.setData(patch);
 
 Page({
@@ -13,6 +14,7 @@ Page({
     ],
     activeCategory: 'all',
     searchQuery: '',
+    preferenceMode:'all', favoriteIds:[], recentIds:[], preferencesLoading:false, preferencesError:'',
     freeMode: false,
     priceLight: 40,
     priceFine: 40,
@@ -27,12 +29,45 @@ Page({
 
   onShow() {
     this.fetchTemplates();
+    this.loadPreferences();
   },
 
   onPullDownRefresh() {
+    this.loadPreferences();
     this.fetchTemplates(() => {
       wx.stopPullDownRefresh();
     }, true);
+  },
+
+  async loadPreferences() {
+    if(typeof preferences.load!=='function')return;
+    const version=(this._preferencesVersion||0)+1;this._preferencesVersion=version;
+    update(this,{preferencesLoading:true,preferencesError:''});
+    try{
+      const p=await preferences.load();if(version!==this._preferencesVersion)return;
+      update(this,{favoriteIds:p.template_favorites,recentIds:p.recent_templates});
+      this.applyPreferences();
+    }catch(e){if(version===this._preferencesVersion)update(this,{preferencesError:e.message||'收藏与最近使用读取失败，请重试'});}
+    finally{if(version===this._preferencesVersion)update(this,{preferencesLoading:false});}
+  },
+  applyPreferences(){
+    const favorites=new Set(this.data.favoriteIds);
+    update(this,{allTemplates:this.data.allTemplates.map(x=>({...x,favorite:favorites.has(x.id)}))});
+    this.filterByCategory(this.data.activeCategory);
+  },
+  onPreferenceFilter(e){
+    const mode=e.currentTarget.dataset.id;if(!['all','favorites','recent'].includes(mode))return;
+    update(this,{preferenceMode:mode});this.filterByCategory(this.data.activeCategory);
+  },
+  async onFavorite(e){
+    const id=e.currentTarget.dataset.id,item=this.data.allTemplates.find(x=>x.id===id);if(!item)return;
+    this._favoriting=this._favoriting||new Set();if(this._favoriting.has(id))return;this._favoriting.add(id);
+    try{
+      const p=await preferences.setFavorite(id,!item.favorite);
+      update(this,{favoriteIds:p.template_favorites,recentIds:p.recent_templates,preferencesError:''});this.applyPreferences();
+      wx.showToast({title:item.favorite?'已取消收藏':'已收藏模板',icon:'none'});
+    }catch(e){wx.showToast({title:e.message||'收藏暂未保存，请重试',icon:'none'});}
+    finally{this._favoriting.delete(id);}
   },
 
   fetchTemplates(callback, force = false) {
@@ -114,7 +149,7 @@ Page({
         cover: coverUrls[0] || '',
         covers: coverUrls,
         coverUrl: coverUrls[0] || (item.cover ? api.absolute(item.cover) : '/images/logo.jpg'),
-        costText: cost
+        costText: cost, favorite:this.data.favoriteIds.includes(item.id)
       });
     });
 
@@ -164,10 +199,13 @@ Page({
     const words = this.data.searchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const list = this.data.allTemplates.filter(item => {
       if (cid !== 'all' && item.group_id !== cid) return false;
+      if(this.data.preferenceMode==='favorites'&&!this.data.favoriteIds.includes(item.id))return false;
+      if(this.data.preferenceMode==='recent'&&!this.data.recentIds.includes(item.id))return false;
       const text = [item.name, item.subtitle, item.group_name, item.id,
         Array.isArray(item.tags) ? item.tags.join(' ') : item.tags || ''].join(' ').toLowerCase();
       return words.every(word => text.includes(word));
     });
+    if(this.data.preferenceMode==='recent')list.sort((a,b)=>this.data.recentIds.indexOf(a.id)-this.data.recentIds.indexOf(b.id));
     update(this,{ filteredTemplates: list });
   },
 

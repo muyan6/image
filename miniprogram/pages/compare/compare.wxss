@@ -288,6 +288,8 @@ page {
 .media-notice-result { right: 2%; }
 .media-notice-original { left: 2%; }
 .media-loading { position: absolute; top: 42%; width: 100%; text-align: center; color: #dfcfb0; z-index: 14; }
+.gallery-dock { flex-wrap: wrap; }
+.btn-recreate { width: 100%; flex: 0 0 100%; margin: 0 0 16rpx; min-height: 76rpx; line-height: 76rpx; font-size: 26rpx; background: #f8f3e8; color: #51432e; border: 1rpx solid #cfc0a6; }
 
 .gallery-nav .compare-label, .dock-btn .compare-label { font-size: 26rpx; letter-spacing: 0; color: #f5f2eb; }
 .floating-tag .compare-label, .hold-capsule .compare-label { font-size: 22rpx; letter-spacing: 0; color: #dfcfb0; }

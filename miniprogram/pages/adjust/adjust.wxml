@@ -1,5 +1,9 @@
 <view class="container">
   <view class="ui-state" wx:if="{{ priceError }}" bindtap="loadUserData"><text>{{ priceError }}</text></view>
+  <view class="ui-inline-state" wx:if="{{templateError}}"><text>{{templateError}}</text><button class="ui-state-action" bindtap="onRetryTemplates">重试风格</button></view>
+  <view class="ui-inline-state" wx:if="{{draftNotice}}"><text>{{draftNotice}}</text></view>
+  <view class="ui-inline-state" wx:if="{{imageMissing}}"><text>照片草稿暂不可用，创作参数仍保留</text><button class="ui-state-action" bindtap="onChooseDraftPhoto">重新选图</button></view>
+  <view class="ui-inline-state" wx:if="{{submissionMessage}}"><text>{{submissionMessage}}</text><button wx:if="{{submissionPending}}" class="ui-state-action" bindtap="onConfirmSubmission">再次核对</button></view>
   <scroll-view class="scroll-content" scroll-y enable-flex>
     <!-- 顶部输出预览大图 (截图2) -->
     <view class="preview-stage-wrap">
@@ -217,8 +221,8 @@
       <text class="bar-balance">余额 {{ freeMode ? '不限' : '✦ ' + lightPoints }}</text>
       <text class="bar-deduct">{{ freeMode ? '体验免扣' : ('提交预扣 ✦' + currentQualityCost + ' 光子') }}</text>
     </view>
-    <button class="btn-generate" bindtap="onStartGenerate" loading="{{ processing }}" disabled="{{ processing }}">
-      开始生成
+    <button class="btn-generate" bindtap="onStartGenerate" loading="{{ processing }}" disabled="{{ processing || !templateReady || imageMissing || !priceReady || (submissionPending && !retryableSubmission) }}">
+      {{retryableSubmission ? '沿用原编号重新提交' : '开始生成'}}
     </button>
   </view>
 
