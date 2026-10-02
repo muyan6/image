@@ -3,6 +3,7 @@ const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('ass
 const root=path.resolve(process.env.REVIEW_ROOT||path.resolve(__dirname,'../..'));
 const output=path.resolve(process.env.REVIEW_OUTPUT||path.join(root,'audit/web-creation-parity'));
 const source=fs.readFileSync(path.join(root,'backend/static/web/creation.js'),'utf8');
+const sharedSource=fs.readFileSync(path.join(root,'backend/static/web/shared-load.js'),'utf8').replace(/\bexport (?=(?:async )?function|class)/g,'');
 const tick=()=>new Promise(r=>setImmediate(r));const rows=[];
 class Element {
   constructor(tag,cls='',text=''){this.tagName=tag.toUpperCase();this.className=cls;this.textContent=text;this.children=[];this.listeners={};this.style={};this.dataset={};this.value='';this.disabled=false;this.files=[];this.classList={add:v=>this.className+=' '+v};}
@@ -41,7 +42,7 @@ function fixture(options={}){
   const module={exports:{}};const sandbox={module,console,setTimeout,clearTimeout,Promise,Date:options.Date||Date,Math,Blob,URL:Object.assign(class URL extends globalThis.URL {},{createObjectURL:()=> 'blob:'+ ++serial,revokeObjectURL(){}}),
     crypto:{randomUUID:()=>String(++serial).padStart(32,'a')},location:{origin:'https://site.invalid'},fetch,indexedDB:idb.factory,
     localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>{if(storageFail)throw new Error('quota');storage.set(k,v);},removeItem:k=>storage.delete(k)}};
-  vm.runInNewContext(source.replace(/\bexport (?=(?:async )?function|class)/g,'')+'\nmodule.exports={CreationSession,createReceiptStore,createDraftStore,mountCreation};',sandbox);
+  vm.runInNewContext(sharedSource+'\n'+source.replace(/^import .*;\r?\n/gm,'').replace(/\bexport (?=(?:async )?function|class)/g,'')+'\nmodule.exports={CreationSession,createReceiptStore,createDraftStore,mountCreation};',sandbox);
   const production=module.exports;ctx.creationOptions={receipts:production.createReceiptStore(sandbox.localStorage),drafts:production.createDraftStore(idb.factory),fetch};
   return {ctx,config,catalog,production,session:()=>new production.CreationSession(ctx,ctx.creationOptions),calls,messages,navigation,storage,idb,failStorage:()=>storageFail=true,denyConfirm:()=>modalDecision=false};
 }

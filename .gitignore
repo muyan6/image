@@ -38,3 +38,5 @@ backend/tests/sandbox_*/
 .DS_Store
 Thumbs.db
 
+# Generated public deployment artifacts; build from source, never commit runtime output.
+/backend/static/web-dist/

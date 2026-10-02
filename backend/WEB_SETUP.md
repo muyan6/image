@@ -12,7 +12,7 @@
 ## 部署
 
 1. 备份运行中的用户数据库、任务数据库、清理数据库和设置文件，保持原 `DATA_DIR` / `UPLOAD_DIR` 持久化目录。
-2. 更新后端并重启。两个 Dockerfile 都包含 `static/web`；`/web-assets` 只服务这一专用目录，不暴露后端文件。
+2. 更新后端并重启。更新脚本与两个 Dockerfile 自动生成带内容版本的网页与 gzip 文件；`/web-assets` 仅服务公开网页资源，不暴露后端文件。宝塔静态接入见 [Nginx 静态部署](../deploy/NGINX_STATIC.md)。
 3. 网站实际域名默认 `https://image.myil.top`。其他域名设置 `WEB_PUBLIC_ORIGIN=https://实际域名`。反向代理保留原 Host；生产会话 Cookie 使用 Secure、HttpOnly、SameSite。
 4. 在 COS 设置网站实际 Origin 的 CORS，允许实际使用的 `PUT / GET / HEAD` 和 `Content-Type` 请求头。网页图片字节直连 COS；旧个人图片只通过 JSON 修复后取得 COS 地址，不使用业务服务器图片中转。
 5. 打开网站，在手机宽度检查注册、选图、模板、文字生图、生成费用、作品、社区、明细及密码/退出操作。
@@ -55,5 +55,7 @@ python backend/tests/run_review.py
 DOM 测试依赖 `backend/tests/package.json` 锁定的 jsdom。也可设置 `WEB_DOM_MODULE` 指向已有 jsdom 的绝对目录；生产网站不依赖 Node/npm/CDN。
 
 新增专项：`test_site_accounts.py`、`test_account_sync.py`、`test_site_community_sync.py`、`test_web_creation_parity.cjs`、`test_web_library_parity.cjs`、`test_web_shell.cjs`。
+
+负载专项：`test_load_backend.py`、`test_load_media.py`、`test_load_media_frontend.cjs`、`test_load_web.cjs`、`test_load_static.py`。公开模板与社区只短期缓存非个性化展示数据；私人列表按当前账户隔离，切换/退出清除。余额、价格、支付和生成提交不走展示缓存。列表使用 COS 签名缩略图，详情放大与保存继续使用高清图；COS 处理失败只尝试 COS 高清地址，不经业务服务器中转。
 
 密码使用独立随机盐与 PBKDF2-SHA256 600,000 次计算，随机网站会话只在数据库保留摘要。参数依据：[OWASP Password Storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)。微信接入参考：[网站微信登录](https://developers.weixin.qq.com/doc/oplatform/Website_App/WeChat_Login/Wechat_Login.html)、[公众号网页授权](https://developers.weixin.qq.com/doc/offiaccount/OA_Web_Apps/Wechat_webpage_authorization.html)、[UnionID 机制](https://developers.weixin.qq.com/miniprogram/dev/framework/open-ability/union-id.html)。

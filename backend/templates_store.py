@@ -385,6 +385,7 @@ class TemplateStore:
     def __init__(self, data_dir: str) -> None:
         self._path = os.path.join(data_dir, "templates.json")
         self._lock = threading.RLock()
+        self._public_cache = None
         os.makedirs(data_dir, exist_ok=True)
         self._groups = _seed_groups()
         self._templates = _seed_templates()
@@ -532,6 +533,7 @@ class TemplateStore:
             self._groups = groups
         if templates is not None:
             self._templates = templates
+        self._public_cache = None
 
     # ------------------------------------------------------------------ #
     # 分组
@@ -770,6 +772,25 @@ class TemplateStore:
     # 公开接口的精简投影：提示词不下发（那是调教出来的东西）
     def public_templates(self, settings) -> List[Dict[str, Any]]:
         """给小程序的模板列表：解析封面与多张示例图 URL，附带分组名。"""
+        # A single bounded projection per catalog. CRUD invalidates synchronously;
+        # credentials/domain changes invalidate by source token. Prices are fresh
+        # on every request and never inherit this display/signature cache.
+        revision = settings.section_revision("tencent") if hasattr(settings, "section_revision") else None
+        with self._lock:
+            now = time.time()
+            cached = getattr(self, "_public_cache", None)
+            if cached and cached[0] is settings and cached[1] == revision and 0 <= now - cached[2] < 30:
+                out = copy.deepcopy(cached[3])
+            else:
+                out = self._public_projection(settings)
+                if revision is not None:
+                    self._public_cache = (settings, revision, now, copy.deepcopy(out))
+        prices = settings.prices()
+        for item in out:
+            item["tier_prices"] = copy.deepcopy(prices)
+        return out
+
+    def _public_projection(self, settings) -> List[Dict[str, Any]]:
         group_names = {g["id"]: g["name"] for g in self.list_groups(enabled_only=True)}
         out = []
         for t in self.list_templates(enabled_only=True):
@@ -782,13 +803,13 @@ class TemplateStore:
                 "name": t["name"],
                 "subtitle": t.get("subtitle", ""),
                 "cover": main_cover,
+                "thumbnail": resolve_thumbnail(t, settings, main_cover),
                 "covers": resolved_list,
                 "cover_version": max(0, int(t.get("cover_v", 0) or 0)),
                 "engine": t["engine"],
                 "price": int(t.get("price", 0)),
                 "usage_count": max(0,int(t.get('usage_count',0))),
                 "quality_options": ['light','fine'],
-                "tier_prices": settings.prices(),
                 "layout": t.get("layout", ""),
                 "text_fields": t.get("text_fields", []),
                 "guide": _norm_guide(t.get("guide")),
@@ -931,6 +952,19 @@ def resolve_cover_ref(cover: str, version: int, settings, tid: str = "") -> str:
     if cover.startswith("local:"):
         return "/api/covers/%s?v=%d" % (os.path.basename(cover[6:]), version)
     return cover
+
+
+def resolve_thumbnail(t: Dict[str, Any], settings, fallback: str = "") -> str:
+    """Only the grid's first cover is reduced; detail/example covers stay original."""
+    refs = t.get("covers") or [t.get("cover", "")]
+    first = next((str(ref).strip() for ref in refs if str(ref or "").strip()), "")
+    if first.startswith("cos:"):
+        try:
+            from cos_store import thumbnail_url
+            return thumbnail_url(settings, first[4:].lstrip("/"), ttl_seconds=3600)
+        except Exception:
+            pass
+    return fallback or resolve_cover(t, settings)
 
 
 def resolve_cover(t: Dict[str, Any], settings) -> str:

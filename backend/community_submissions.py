@@ -1,5 +1,7 @@
 """User submissions, likes and one-time curation rewards in the balance database."""
 import json
+import copy
+import sqlite3
 import threading
 import time
 import uuid
@@ -31,11 +33,14 @@ class SubmissionStore:
                     featured INTEGER NOT NULL DEFAULT 0, reward INTEGER NOT NULL DEFAULT 0,
                     UNIQUE(owner,job_id));
                 CREATE INDEX IF NOT EXISTS community_submission_status ON community_submissions(status,submitted);
+                CREATE INDEX IF NOT EXISTS community_submission_public_order ON community_submissions(status,featured DESC,submitted DESC,id);
                 CREATE TABLE IF NOT EXISTS community_submission_events(owner TEXT, at REAL);
                 CREATE INDEX IF NOT EXISTS community_submission_rate ON community_submission_events(owner,at);
                 CREATE TABLE IF NOT EXISTS community_likes(post_id TEXT, owner TEXT, PRIMARY KEY(post_id,owner));
                 CREATE TABLE IF NOT EXISTS community_rewards(post_id TEXT PRIMARY KEY, owner TEXT, amount INTEGER, at REAL);
             ''')
+        self._public_pages = {}
+        self._json_available = None
 
     def _row(self, sql, args=()):
         cursor = self.users._conn.execute(sql, args)
@@ -159,6 +164,81 @@ class SubmissionStore:
             cols=[c[0] for c in cur.description];rows=[dict(zip(cols,row)) for row in cur.fetchall()]
         for row in rows:row['payload']=json.loads(row['payload'])
         return rows,total
+
+    def public_page(self, editorial, *, offset=0, limit=24, category='all', liked_viewer=None, cos_ready=True):
+        """Merge at most 200 editorial candidates with indexed public submissions.
+
+        Only a bounded page of IDs/sort metadata is cached. SQLite source tokens
+        include both local writes and other connections, including bans/aliases.
+        No payloads, signatures, likes or comments are shared by this cache.
+        """
+        offset=max(0,int(offset));limit=max(1,min(200,int(limit)))
+        editorial=tuple((p['id'],int(bool(p.get('pinned'))),int(p.get('sort',100)),float(p.get('created_at') or 0))
+                        for p in editorial[:200])
+        with self.users._lock:
+            db=self.users._conn
+            token=(db.total_changes,db.execute('PRAGMA data_version').fetchone()[0])
+            viewer=canonical_unlocked(self.users,liked_viewer) if liked_viewer else None
+            key=(token,editorial,offset,limit,category,viewer,bool(cos_ready))
+            cached=self._public_pages.get(key)
+            if cached is not None:return copy.deepcopy(cached)
+            if self._json_available is None:
+                try:
+                    db.execute("SELECT json_extract('{\"category\":\"all\"}', '$.category')").fetchone()
+                    self._json_available=True
+                except sqlite3.OperationalError:
+                    self._json_available=False
+            if not self._json_available:
+                # Compatibility for custom SQLite builds without JSON1. This
+                # correctness path is source-checked too; no dataset is truncated.
+                rows=db.execute("SELECT s.id,s.featured,s.submitted,s.payload FROM community_submissions s "
+                    "LEFT JOIN account_aliases a ON a.alias_openid=s.owner "
+                    "JOIN users u ON u.openid=COALESCE(a.canonical_openid,s.owner) "
+                    "WHERE s.status='published' AND u.banned=0").fetchall() if cos_ready else []
+                selected=[(eid,pinned,sort,submitted,'editorial') for eid,pinned,sort,submitted in editorial]
+                for sid,featured,submitted,payload in rows:
+                    p=json.loads(payload)
+                    if not p.get('result_key') or category!='all' and p.get('category','all')!=category:continue
+                    if viewer and not db.execute("SELECT 1 FROM community_likes l LEFT JOIN account_aliases a ON a.alias_openid=l.owner WHERE l.post_id=? AND COALESCE(a.canonical_openid,l.owner)=?",(sid,viewer)).fetchone():continue
+                    selected.append((sid,featured,100,submitted,'submission'))
+                selected.sort(key=lambda p:(not p[1],p[2],-p[3],p[0]))
+                total=len(selected);selected=selected[offset:offset+limit]
+            else:
+                values=','.join('(?,?,?,?)' for _ in editorial)
+                prefix=("WITH editorial(id,pinned,sort,submitted) AS (VALUES "+values+") " if editorial else
+                        "WITH editorial(id,pinned,sort,submitted) AS (SELECT '',0,0,0 WHERE 0) ")
+                args=[value for row in editorial for value in row]
+                condition="s.status='published' AND u.banned=0 AND ? AND COALESCE(json_extract(s.payload,'$.result_key'),'')<>''"
+                args.append(int(bool(cos_ready)))
+                if category!='all':condition+=" AND json_extract(s.payload,'$.category')=?";args.append(category)
+                if viewer:
+                    condition+=" AND EXISTS(SELECT 1 FROM community_likes l LEFT JOIN account_aliases la ON la.alias_openid=l.owner WHERE l.post_id=s.id AND COALESCE(la.canonical_openid,l.owner)=?)"
+                    args.append(viewer)
+                candidates=("SELECT id,pinned,sort,submitted,'editorial' AS source FROM editorial UNION ALL "
+                    "SELECT s.id,s.featured,100,s.submitted,'submission' FROM community_submissions s "
+                    "LEFT JOIN account_aliases a ON a.alias_openid=s.owner "
+                    "JOIN users u ON u.openid=COALESCE(a.canonical_openid,s.owner) WHERE "+condition)
+                total=db.execute(prefix+'SELECT COUNT(*) FROM ('+candidates+')',args).fetchone()[0]
+                selected=db.execute(prefix+candidates+' ORDER BY pinned DESC,sort ASC,submitted DESC,id ASC LIMIT ? OFFSET ?',(*args,limit,offset)).fetchall()
+            result=([{'id':r[0],'source':r[4]} for r in selected],total)
+            # Keep four pages and 200 narrow candidates at most; stale versions
+            # are evicted rather than retaining withdrawn identifiers forever.
+            self._public_pages={k:v for k,v in self._public_pages.items() if k[0]==token}
+            while self._public_pages and (len(self._public_pages)>=4 or
+                    sum(len(v[0]) for v in self._public_pages.values())+len(result[0])>200):
+                self._public_pages.pop(next(iter(self._public_pages)))
+            self._public_pages[key]=result
+            return copy.deepcopy(result)
+
+    def public_rows(self, ids):
+        """Decode only selected page payloads; recheck publication and author state."""
+        ids=list(dict.fromkeys(ids))[:200]
+        if not ids:return {}
+        with self.users._lock:
+            cur=self.users._conn.execute("SELECT s.* FROM community_submissions s LEFT JOIN account_aliases a ON a.alias_openid=s.owner JOIN users u ON u.openid=COALESCE(a.canonical_openid,s.owner) WHERE s.status='published' AND u.banned=0 AND s.id IN ("+marks(ids)+")",ids)
+            cols=[c[0] for c in cur.description];rows=[dict(zip(cols,row)) for row in cur.fetchall()]
+        for row in rows:row['payload']=json.loads(row['payload'])
+        return {row['id']:row for row in rows}
 
     def rewarded(self, sid):
         with self.users._lock:

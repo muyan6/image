@@ -134,6 +134,24 @@ def presign(settings: SettingsStore, method: str, key: str,
     return "https://%s%s?%s" % (_host(conf, internal=internal), uri, query)
 
 
+def thumbnail_url(settings: SettingsStore, key: str, ttl_seconds: int = 3600,
+                  width: int = 480) -> str:
+    """COS downloads a small variant; neither source bytes nor new objects cross the API.
+
+    Sign the processing rule as an empty-valued query key (COS CI convention).
+    Appending processing to an already signed original would not bind the variant.
+    ``>`` only shrinks, JPEG works on both web and WeChat, and strip removes EXIF.
+    """
+    if type(width) is not int or not 1 <= width <= 2048:
+        raise ValueError("Thumbnail width must be an integer from 1 to 2048")
+    if type(ttl_seconds) is not int or not 1 <= ttl_seconds <= 7200:
+        raise ValueError("Thumbnail TTL must be an integer from 1 to 7200")
+    if not isinstance(key, str) or not key.strip():
+        raise ValueError("Thumbnail object key is required")
+    rule = "imageMogr2/thumbnail/%dx%d>/format/jpg/quality/70/strip" % (width, width)
+    return presign(settings, "get", key, ttl_seconds=ttl_seconds, params={rule: ""})
+
+
 def process_image(settings: SettingsStore, source: str, target: str, rule: str) -> Dict[str, Any]:
     """CI basic processing persists a separate object; source is never overwritten."""
     if source == target:

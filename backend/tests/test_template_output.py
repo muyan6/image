@@ -3,6 +3,7 @@ import copy
 import json
 import time
 import unittest
+import threading
 from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,11 +15,15 @@ class OutputTests(WorkflowTests):
     def test_output_public_cover_version_changes_without_exposing_prompt(self):
         template={'id':'fixture','group_id':'g','name':'封面','engine':'fine','cover':'https://fixture.invalid/cover.jpg',
                   'cover_v':7,'prompt':'private prompt','price':40}
-        store=SimpleNamespace(list_groups=lambda **kw:[{'id':'g','name':'分组'}],list_templates=lambda **kw:[template])
         from templates_store import TemplateStore
+        # A detached real store exercises the lock and normal CRUD cache invalidation.
+        store=TemplateStore.__new__(TemplateStore)
+        store._lock=threading.RLock();store._path=str(self.d/'catalog_fixture.json')
+        store._groups=[{'id':'g','name':'分组','enabled':True}]
+        store._templates=[dict(template,enabled=True)];store._public_cache=None
         row=TemplateStore.public_templates(store,m.settings)[0]
         self.assertEqual(row['cover_version'],7);self.assertNotIn('prompt',row)
-        template['cover_v']=8
+        store.set_cover_slot('fixture',0,template['cover'])
         self.assertEqual(TemplateStore.public_templates(store,m.settings)[0]['cover_version'],8)
 
     def template(self):

@@ -1,4 +1,5 @@
 /* Shared-account library. All user data comes from authenticated server APIs. */
+import {createVisibilityGate,mediaReusable,reuseDisplayMedia,reconcileById,armReadTimeout} from './shared-load.js';
 const CATEGORIES=[['all','全部展品'],['portrait','冷白人像'],['film','复古胶片'],['old_photo','老照片复苏'],['anime','动漫重绘']];
 const STATUS={processing:'生成中',succeeded:'已完成',failed:'失败'};
 const SUBMISSIONS={uploading:'保存中，可继续提交',pending:'等待审核',published:'已发布',rejected:'未通过 / 已下架',withdrawn:'已撤回'};
@@ -21,8 +22,9 @@ function expiry(job){
 }
 
 export async function mountLibrary(ctx,root,route,params={}) {
-  let active=true;const accountVersion=ctx.accountVersion,timers=new Set(),dialogs=new Set(),objectUrls=new Set();
+  let active=true;const accountVersion=ctx.accountVersion,timers=new Set(),dialogs=new Set(),objectUrls=new Set(),unavailable=new Set();
   const valid=()=>active&&ctx.accountVersion===accountVersion&&root.isConnected!==false;
+  const visibility=createVisibilityGate(root.ownerDocument||ctx.document,valid);let pollController=null;
   const media=value=>mediaUrl(value,root.ownerDocument.baseURI);
   const privateMedia=value=>{const url=media(value);if(!url)return '';const parsed=new URL(url);return parsed.protocol==='https:'&&parsed.origin!==new URL(root.ownerDocument.baseURI).origin?url:'';};
   const privateUrl=async(job,kind,force=false)=>{
@@ -34,7 +36,7 @@ export async function mountLibrary(ctx,root,route,params={}) {
   const button=(label,handler,cls='lib-button')=>{const b=el('button',cls,label);b.type='button';b.addEventListener('click',handler);return b;};
   const navigate=(name,values={})=>{if(valid())ctx.navigate(name,values);};
   const notify=text=>{if(valid())ctx.toast(String(text));};
-  const cleanup=()=>{active=false;timers.forEach(clearTimeout);timers.clear();dialogs.forEach(d=>d.remove());dialogs.clear();objectUrls.forEach(URL.revokeObjectURL);objectUrls.clear();};
+  const cleanup=()=>{active=false;visibility.close();if(pollController)pollController.abort();timers.forEach(clearTimeout);timers.clear();dialogs.forEach(d=>d.remove());dialogs.clear();objectUrls.forEach(URL.revokeObjectURL);objectUrls.clear();};
   root.replaceChildren();root.classList.add('web-library');root.dataset.route=route;
   const heading=(title,sub)=>{const h=el('header','lib-heading');h.append(el('p','lib-eyebrow','废片新生所 · 个人创作馆'),el('h1','',title),el('p','lib-subtitle',sub));root.append(h);return h;};
   const actions=()=>{const bar=el('div','lib-actions');return bar;};
@@ -49,6 +51,22 @@ export async function mountLibrary(ctx,root,route,params={}) {
   const image=(url,label,cls='lib-image')=>{
     const safe=media(url);if(!safe)return el('div',cls+' lib-image-empty','图片暂不可用');
     const img=el('img',cls);img.src=safe;img.alt=label;img.loading='lazy';img.addEventListener('error',()=>{if(valid()){img.classList.add('lib-image-error');img.alt='图片读取失败，请刷新';}});return img;
+  };
+  const thumbnailImage=(row,kind,label)=>{
+    const thumb=kind==='work'?privateMedia(row.thumb_url):media(row.thumbnailUrl||row.thumbnail),full=kind==='work'?privateMedia(row.result_url)||privateMedia(row.orig_url):media(row.resultUrl),img=image(thumb||full,label);
+    if(img.tagName!=='IMG'||!thumb)return img;let attempt=0;
+    img.addEventListener('error',async()=>{
+      if(!valid()||attempt>=2)return;
+      if(attempt++===0){try{
+        const d=await ctx.api(kind==='work'?'/api/jobs/'+encode(row.id):'/api/community/posts/'+encode(row.id));if(!valid())return;const fresh=kind==='work'?d:d.post;
+        if(!fresh||kind==='work'&&(fresh.status!=='succeeded'||fresh.expires_at&&fresh.expires_at*1000<=Date.now()))throw Object.assign(new Error('图片已到期或暂不可用'),{status:404});
+        Object.assign(row,fresh);const next=kind==='work'?privateMedia(fresh.thumb_url):media(fresh.thumbnailUrl||fresh.thumbnail);
+        img.classList.remove('lib-image-error');img.alt=label;
+        if(next&&next!==img.src&&mediaReusable(next)){img.src=next;return;}
+      }catch(e){if(!valid())return;if(e.status===404){unavailable.add(String(row.id));if(ctx.invalidateDisplay)ctx.invalidateDisplay();const card=img.closest&&img.closest('article');if(card)card.remove();}notify(e.message||'图片信息读取失败，请刷新');return;}}
+      const fallback=kind==='work'?privateMedia(row.result_url):privateMedia(row.resultUrl);
+      if(fallback&&mediaReusable(fallback)){img.classList.remove('lib-image-error');img.alt=label;img.src=fallback;}else notify('图片暂不可用，请刷新记录');
+    });return img;
   };
   const modal=(title,body)=>{
     if(!valid())return null;const dialog=el('dialog','lib-dialog'),content=el('section','lib-dialog-content'),head=el('header','lib-dialog-heading');
@@ -88,15 +106,15 @@ export async function mountLibrary(ctx,root,route,params={}) {
     const message=el('div','lib-page-message'),list=el('div','lib-record-list'),footer=el('div','lib-page-footer');host.append(message,list,footer);
     const p={rows:[],offset:0,hasMore:false,loading:false,sequence:0};
     p.reset=()=>{p.sequence++;p.loading=false;p.rows=[];p.offset=0;p.hasMore=false;p.draw();};
-    p.draw=()=>{if(!valid())return;list.replaceChildren(...p.rows.map(itemView));footer.replaceChildren();if(p.hasMore){const more=button(p.loading?'正在加载…':'加载更多',()=>p.load(true));more.disabled=p.loading;more.dataset.action='load-more';footer.append(more);}};
-    p.load=async(more=false)=>{
+    p.draw=()=>{if(!valid())return;p.rows=p.rows.filter(row=>!unavailable.has(String(row.id)));reconcileById(list,p.rows,itemView);footer.replaceChildren();if(p.hasMore){const more=button(p.loading?'正在加载…':'加载更多',()=>p.load(true));more.disabled=p.loading;more.dataset.action='load-more';footer.append(more);}};
+    p.load=async(more=false,force=true)=>{
       if(!valid()||p.loading||(more&&!p.hasMore))return;p.loading=true;const sequence=++p.sequence;
       message.replaceChildren();if(!p.rows.length)state(message,'正在读取…');p.draw();
       try{
-        const d=await ctx.api(url(more?p.offset:0,limit));if(!valid()||sequence!==p.sequence)return;
+        const path=url(more?p.offset:0,limit),d=await (ctx.displayGet?ctx.displayGet(path,{force}):ctx.api(path));if(!valid()||sequence!==p.sequence)return;
         const rows=d[itemsKey];if(!Array.isArray(rows))throw new Error('列表数据异常');
         const next=Number(d.next_offset);if(d.has_more&&(!Number.isInteger(next)||next<=(more?p.offset:0)))throw new Error('分页数据异常，请刷新');
-        p.rows=[...new Map((more?p.rows.concat(rows):rows).map(x=>[String(x.id),x])).values()];p.offset=Number.isInteger(next)?next:rows.length;p.hasMore=!!d.has_more;
+        const previous=new Map(p.rows.map(x=>[String(x.id),x])),fresh=rows.map(row=>reuseDisplayMedia(row,previous.get(String(row.id))));p.rows=[...new Map((more?p.rows.concat(fresh):fresh).filter(row=>!unavailable.has(String(row.id))).map(x=>[String(x.id),x])).values()];p.offset=Number.isInteger(next)?next:rows.length;p.hasMore=!!d.has_more;
         message.replaceChildren();if(onData)onData(d);if(!p.rows.length)state(message,empty);p.loading=false;p.draw();root.dataset.state='loaded';
       }catch(e){if(valid()&&sequence===p.sequence){message.replaceChildren();state(message,e.message||'读取失败，请重试',()=>p.load(false));root.dataset.state='error';}}
       finally{if(valid()&&sequence===p.sequence){p.loading=false;p.draw();}}
@@ -114,14 +132,14 @@ export async function mountLibrary(ctx,root,route,params={}) {
   if(route==='works'){
     const head=heading('我的作品','原图与成品保留 30 天，请及时下载满意的作品。');
     const feedbackPending=new Set();
-    let status=['all',...Object.keys(STATUS)].includes(params.status)?params.status:'all',pollTimer=null;const pollStarted=Date.now(),filters=actions(),summary=el('p','lib-meta');root.append(filters,summary);
+    let status=['all',...Object.keys(STATUS)].includes(params.status)?params.status:'all',pollTimer=null,pollRunning=false,pollFailures=0,resumePoll=false;const pollStarted=Date.now(),pollDeadline=pollStarted+30*60*1000,filters=actions(),summary=el('p','lib-meta');root.append(filters,summary);
     const toolbar=actions();const refresh=button('刷新记录',()=>p.load(false),'lib-link'),clear=button('清空个人作品',()=>write(clear,async()=>{
       if(!await ctx.confirm('删除全部个人作品？社区已发布副本需在“我的投稿”单独撤回。')||!valid())return;
       await ctx.api('/api/my/jobs',{method:'DELETE'});if(valid())await p.load(false);
     }),'lib-link lib-danger');toolbar.append(refresh,link('我的社区投稿','submissions'),clear);head.append(toolbar);
     const renderWork=job=>{
       const card=el('article','lib-card work-card');card.dataset.id=job.id;if(params.jobId===job.id)card.classList.add('lib-focused');
-      const photo=button('',()=>write(photo,async()=>openWork(job)),'lib-photo-button');photo.append(image(privateMedia(job.result_url)||privateMedia(job.orig_url),'个人作品'));card.append(photo);
+      const photo=button('',()=>write(photo,async()=>openWork(job)),'lib-photo-button');photo.append(thumbnailImage(job,'work','个人作品'));card.append(photo);
       const content=el('div','lib-card-body'),line=el('div','lib-card-title');line.append(el('h2','',job.template_name||'我的新生作品'),el('span','lib-badge',STATUS[job.status]||job.status));content.append(line,el('p','lib-meta',dateLabel(job.created_at)));
       if(job.status==='processing')content.append(el('p','lib-progress',({queued:'任务排队中',normalize:'正在准备照片',enhance:'正在生成图片',upscale:'正在精细处理',store_cos:'正在保存图片',finalize:'正在整理结果'})[job.stage]||'任务在后台处理中'));
       if(job.status==='failed'){
@@ -161,26 +179,29 @@ export async function mountLibrary(ctx,root,route,params={}) {
         finally{feedbackPending.delete(id);if(valid())input.disabled=false;}
       });});
     }
-    async function openWork(job){const fresh=await ctx.api('/api/jobs/'+encode(job.id));if(!valid())return;if(fresh.status!=='succeeded')throw new Error(fresh.status==='failed'?fresh.error||'生成失败':'作品仍在生成，请稍候');fresh.result_url=await privateUrl(fresh,'result');if(!valid())return;if(fresh.orig_url)fresh.orig_url=await privateUrl(fresh,'orig');if(valid())preview(fresh);}
+    async function openWork(job){let fresh;try{fresh=await ctx.api('/api/jobs/'+encode(job.id));}catch(e){if(valid()&&e.status===404){unavailable.add(String(job.id));if(ctx.invalidateDisplay)ctx.invalidateDisplay('/api/my/jobs');p.draw();}throw e;}if(!valid())return;if(fresh.status!=='succeeded')throw new Error(fresh.status==='failed'?fresh.error||'生成失败':'作品仍在生成，请稍候');fresh.result_url=await privateUrl(fresh,'result');if(!valid())return;if(fresh.orig_url)fresh.orig_url=await privateUrl(fresh,'orig');if(valid())preview(fresh);}
     const p=pager(root,(offset,limit)=>`/api/my/jobs?limit=${limit}&offset=${offset}&status=${status}`,renderWork,{itemsKey:'jobs',empty:'当前筛选下暂无作品',onData:d=>{
       summary.textContent=`当前筛选共 ${d.total??p.rows.length} 件作品`;renderFilters(d.status_counts||{});if(p.rows.some(j=>j.status==='processing'))schedule();
     }});p.list.classList.add('lib-work-grid');
     function renderFilters(counts={}){filters.replaceChildren(...[['all','全部'],...Object.entries(STATUS)].map(([id,label])=>{const b=button(label+(Number.isInteger(counts[id])?' '+counts[id]:''),()=>{if(id===status)return;status=id;params.jobId='';p.reset();renderFilters(counts);p.load(false);},'lib-filter'+(status===id?' lib-filter-active':''));b.dataset.action='status-'+id;return b;}));}
     renderFilters();let detailCursor=0;
     const poll=async()=>{
-      if(!valid())return;
-      const sequence=p.sequence,selectedStatus=status;
+      if(!valid()||!visibility.visible()||pollRunning||Date.now()>=pollDeadline)return;pollRunning=true;
+      const sequence=p.sequence,selectedStatus=status;let cancelRead=()=>{};
       try{
-        const d=await ctx.api('/api/my/jobs?limit=24&offset=0&status=processing');if(!valid())return;if(sequence!==p.sequence||status!==selectedStatus){if(p.rows.some(j=>j.status==='processing'))schedule();return;}
+        const Controller=(root.ownerDocument&&root.ownerDocument.defaultView&&root.ownerDocument.defaultView.AbortController)||globalThis.AbortController;pollController=Controller?new Controller():null;cancelRead=armReadTimeout(pollController,pollDeadline);const settings=pollController?{signal:pollController.signal}:{};
+        const d=await ctx.api('/api/my/jobs?limit=24&offset=0&status=processing',settings);if(!valid()||!visibility.visible())return;if(sequence!==p.sequence||status!==selectedStatus)return;
         const updates=new Map((d.jobs||[]).map(j=>[j.id,j])),missing=p.rows.filter(j=>j.status==='processing'&&!updates.has(j.id));
         const start=missing.length?detailCursor%missing.length:0,batch=missing.slice(start).concat(missing.slice(0,start)).slice(0,6);detailCursor=start+batch.length;
-        const final=await Promise.all(batch.map(async j=>{try{return await ctx.api('/api/jobs/'+encode(j.id));}catch(e){return null;}}));if(!valid())return;if(sequence!==p.sequence||status!==selectedStatus){if(p.rows.some(j=>j.status==='processing'))schedule();return;}
-        final.filter(Boolean).forEach(j=>updates.set(j.id,j));p.rows=p.rows.map(j=>updates.get(j.id)||j).filter(j=>status==='all'||j.status===status);p.draw();renderFilters(d.status_counts||{});
-      }catch(e){/* Keep known cards; the refresh action exposes network errors. */}
-      if(valid()&&p.rows.some(j=>j.status==='processing'))schedule();
+        const final=await Promise.all(batch.map(async j=>{try{return await ctx.api('/api/jobs/'+encode(j.id),settings);}catch(e){return e.status===404?{id:j.id,unavailable:true}:null;}}));if(!valid()||!visibility.visible()||sequence!==p.sequence||status!==selectedStatus)return;if(pollController&&pollController.signal.aborted)throw new Error('作品状态读取超时，请稍后刷新');
+        final.filter(Boolean).forEach(j=>{if(j.unavailable)unavailable.add(String(j.id));else updates.set(j.id,j);});p.rows=p.rows.map(j=>updates.has(j.id)?reuseDisplayMedia(updates.get(j.id),j):j).filter(j=>!unavailable.has(String(j.id))&&(status==='all'||j.status===status));p.draw();renderFilters(d.status_counts||{});pollFailures=0;
+        if(ctx.invalidateDisplay)ctx.invalidateDisplay('/api/my/jobs');
+      }catch(e){pollFailures++;/* Keep known cards; the refresh action exposes network errors. */}
+      finally{cancelRead();pollController=null;pollRunning=false;if(valid()&&p.rows.some(j=>j.status==='processing')){if(resumePoll&&visibility.visible()){resumePoll=false;queueMicrotask(poll);}else schedule();}}
     };
-    const schedule=()=>{if(pollTimer!==null||!valid())return;const timer=setTimeout(()=>{timers.delete(timer);pollTimer=null;poll();},Date.now()-pollStarted<60000?1500:5000);pollTimer=timer;timers.add(timer);};
-    p.load(false).then(async()=>{
+    const schedule=()=>{if(pollTimer!==null||!valid()||!visibility.visible()||Date.now()>=pollDeadline)return;const delay=pollFailures?Math.min(15000,1500*2**Math.min(pollFailures,4)):Date.now()-pollStarted<60000?1500:5000,timer=setTimeout(()=>{timers.delete(timer);pollTimer=null;poll();},Math.min(delay,pollDeadline-Date.now()));pollTimer=timer;timers.add(timer);};
+    visibility.subscribe(visible=>{if(pollTimer!==null){clearTimeout(pollTimer);timers.delete(pollTimer);pollTimer=null;}if(!visible){resumePoll=false;if(pollController)pollController.abort();}else if(p.rows.some(j=>j.status==='processing')){if(pollRunning)resumePoll=true;else poll();}});
+    p.load(false,false).then(async()=>{
       if(!valid())return;
       if(params.jobId&&!p.rows.some(j=>j.id===params.jobId))try{const job=await ctx.api('/api/jobs/'+encode(params.jobId));if(valid()){p.rows.unshift(job);p.draw();}}catch(e){notify(e.message||'作品已到期或不存在');}
       if(valid()&&p.rows.some(j=>j.status==='processing'))schedule();
@@ -190,15 +211,15 @@ export async function mountLibrary(ctx,root,route,params={}) {
     let category='all',liked=false;const filters=actions();root.append(filters);
     const renderPost=post=>{
       const card=el('article','lib-card community-card');card.dataset.id=post.id;
-      const photo=button('',()=>navigate('post',{id:post.id}),'lib-photo-button');photo.append(image(post.resultUrl,post.title||'社区作品'));card.append(photo);
+      const photo=button('',()=>navigate('post',{id:post.id}),'lib-photo-button');photo.append(thumbnailImage(post,'post',post.title||'社区作品'));card.append(photo);
       const content=el('div','lib-card-body');content.append(el('p','lib-meta',`${post.authorName||'新生创作者'} · ${post.categoryName||''}`),el('h2','',post.title),el('p','lib-story',post.story||''));if(post.featured)content.append(el('span','lib-badge','精选展品'));
       const bar=actions(),like=button((post.liked?'♥ 已喜欢':'♡ 喜欢')+' '+(post.likes||0),()=>write(like,async()=>{const r=await ctx.api('/api/community/posts/'+encode(post.id)+'/like',{method:'PUT',data:{liked:!post.liked}});if(valid()){Object.assign(post,r);p.draw();if(liked)await p.load(false);}}),'lib-link');like.dataset.action='like-post';
       bar.append(like,link('留言 '+(post.comments||0),'post',{id:post.id}));if(post.templateId)bar.append(link('做同款风格 →','create',{templateId:post.templateId}));content.append(bar);card.append(content);return card;
     };
     const p=pager(root,(offset,limit)=>`/api/community?limit=${limit}&offset=${offset}&category=${category}`+(liked?'&liked_only=true':''),renderPost,{empty:'当前展区暂无作品'});p.list.classList.add('lib-work-grid');
-    function drawFilters(){filters.replaceChildren(...CATEGORIES.map(([id,label])=>button(label,()=>{category=id;liked=false;p.reset();drawFilters();p.load(false);},'lib-filter'+(!liked&&category===id?' lib-filter-active':''))));
-      const favorites=button('我喜欢的',()=>write(favorites,async()=>{liked=true;category='all';p.reset();drawFilters();await p.load(false);}),'lib-filter'+(liked?' lib-filter-active':''));favorites.dataset.action='liked-filter';filters.append(favorites);}
-    drawFilters();p.load(false);
+    function drawFilters(){filters.replaceChildren(...CATEGORIES.map(([id,label])=>button(label,()=>{if(category===id&&!liked)return;category=id;liked=false;p.reset();drawFilters();p.load(false);},'lib-filter'+(!liked&&category===id?' lib-filter-active':''))));
+      const favorites=button('我喜欢的',()=>write(favorites,async()=>{if(liked)return;liked=true;category='all';p.reset();drawFilters();await p.load(false);}),'lib-filter'+(liked?' lib-filter-active':''));favorites.dataset.action='liked-filter';filters.append(favorites);}
+    drawFilters();p.load(false,false);
   } else if(route==='post'){
     heading('作品与留言','公开作品经作者授权展示；留言经审核后发布。');const details=el('div'),commentsHost=el('section','lib-comments');root.append(details,commentsHost);
     let post=null,ticket=params.commentTicket||null;const draft=el('textarea','lib-input');draft.maxLength=500;draft.rows=3;draft.value=typeof params.commentDraft==='string'?params.commentDraft.slice(0,500):'';draft.placeholder='聊聊你喜欢的色彩与创作灵感…';draft.setAttribute('aria-label','作品留言');
@@ -225,8 +246,8 @@ export async function mountLibrary(ctx,root,route,params={}) {
         const card=el('article','lib-card lib-post-detail'),photo=button('',()=>preview(post),'lib-photo-button');photo.append(image(post.resultUrl,post.title));card.append(photo);
         const body=el('div','lib-card-body');body.append(el('p','lib-meta',`${post.authorName} · ${post.date}`),el('h2','',post.title),el('p','lib-story',post.story||''));if(post.origUrl)body.append(button('查看修护前原片与对比',()=>preview(post),'lib-link'));
         const bar=actions(),like=button((post.liked?'♥ 已喜欢':'♡ 喜欢')+' '+post.likes,()=>write(like,async()=>{const r=await ctx.api('/api/community/posts/'+encode(post.id)+'/like',{method:'PUT',data:{liked:!post.liked}});if(valid()){Object.assign(post,r);like.textContent=(r.liked?'♥ 已喜欢':'♡ 喜欢')+' '+r.likes;}}),'lib-link');bar.append(like);
-        if(post.templateId)bar.append(link('做同款风格 →','create',{templateId:post.templateId}));const flag=button('举报作品',()=>write(flag,async()=>report('post',post.id)),'lib-link');bar.append(flag);body.append(bar);card.append(body);details.append(card);cp.load(false);root.dataset.state='loaded';
-      }catch(e){if(valid()){details.replaceChildren();state(details,e.message||'作品已下架或不存在',e.status===404?null:loadPost);commentsHost.hidden=true;root.dataset.state='error';}}
+        if(post.templateId)bar.append(link('做同款风格 →','create',{templateId:post.templateId}));const flag=button('举报作品',()=>write(flag,async()=>report('post',post.id)),'lib-link');bar.append(flag);body.append(bar);card.append(body);details.append(card);cp.load(false,false);root.dataset.state='loaded';
+      }catch(e){if(valid()){if(e.status===404&&ctx.invalidateDisplay)ctx.invalidateDisplay('/api/community');details.replaceChildren();state(details,e.message||'作品已下架或不存在',e.status===404?null:loadPost);commentsHost.hidden=true;root.dataset.state='error';}}
     };loadPost();
   } else if(route==='submissions'){
     const head=heading('我的社区投稿','你决定公开哪些图片；审核通过后才会展示。');head.append(link('选择作品投稿','works'));
@@ -239,7 +260,7 @@ export async function mountLibrary(ctx,root,route,params={}) {
         if(!await ctx.confirm('撤回后社区停止展示并清理独立图片副本；他人已下载的副本不随之收回。精选奖励不重复发放。')||!valid())return;
         await ctx.api('/api/community/submissions/'+encode(row.id)+'/withdraw',{method:'POST',data:{revision:row.revision}});if(valid())await p.load(false);
       }),'lib-link lib-danger');withdraw.dataset.action='withdraw';bar.append(withdraw);}body.append(bar);card.append(body);return card;
-    },{empty:'还没有投稿，从已完成的作品中选一件吧。',limit:30});p.load(false);
+    },{empty:'还没有投稿，从已完成的作品中选一件吧。',limit:30});p.load(false,false);
   } else if(route==='submit'){
     heading('把新生之作，留在展厅','原图默认不公开；本次授权需要你重新确认。');const host=el('section','lib-form-card');root.append(host);const preset=params.preset||{};
     const load=async()=>{

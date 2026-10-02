@@ -56,6 +56,7 @@ if ! "$PY" -c "import cv2" >/dev/null 2>&1; then
 fi
 ok "依赖就绪"
 bash deploy/ensure-fonts.sh "$PY"
+"$PY" backend/tools/build_web_assets.py
 
 # ---- 2. 生成 systemd 单元 ----
 step "2/4 写入 systemd 服务（${SERVICE_NAME}）"

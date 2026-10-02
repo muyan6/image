@@ -114,6 +114,11 @@ if not args.legacy:
         ('test_web_creation_parity.cjs', 'web_creation_results.json'),
         ('test_web_library_parity.cjs', 'web_library_parity_results.json'),
         ('test_web_shell.cjs', 'web_shell_results.json'),
+        ('test_load_backend.py', 'load_backend_results.json'),
+        ('test_load_media.py', 'load_media_results.json'),
+        ('test_load_media_frontend.cjs', 'load_media_frontend_results.json'),
+        ('test_load_web.cjs', 'load_web_results.json'),
+        ('test_load_static.py', 'load_static_results.json'),
     ):
         path = Path(__file__).with_name(script)
         if path.is_file():

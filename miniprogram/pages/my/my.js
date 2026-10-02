@@ -64,7 +64,8 @@ Page({
       let local = w.jobId && app.globalData.mediaCache && app.globalData.mediaCache[w.jobId] &&
         app.globalData.mediaCache[w.jobId].result;
       if(local&&typeof api.isLocalImageAvailable==='function'&&!api.isLocalImageAvailable(local))local='';
-      const preview = local || (reusablePreview(w.preview) ? w.preview :
+      const small = reusablePreview(w.thumbnail) ? (typeof api.communityImage==='function'?api.communityImage(w.thumbnail):w.thumbnail) : '';
+      const preview = small || local || (reusablePreview(w.preview) ? w.preview :
         (reusablePreview(w.result) ? w.result : ''));
       return Object.assign({}, w, {preview});
     });
@@ -116,13 +117,16 @@ Page({
           app.globalData.mediaCache[j.id].result;
         if(local&&typeof api.isLocalImageAvailable==='function'&&!api.isLocalImageAvailable(local))local='';
         const fresh = api.absolute(j.result_url || '');
+        const small = api.absolute(j.thumb_url || j.result_url || '');
         return Object.assign({}, old, {
         jobId: j.id, original: api.absolute(j.orig_url || ''),
         result: j.status === 'succeeded' ? fresh : '',
-        preview: j.status === 'succeeded' && !!j.result_url &&
-          (typeof api.isJobCosUrl !== 'function' || api.isJobCosUrl(j.result_url))
-          ? (local || (typeof api.stableImageUrl==='function'?api.stableImageUrl(fresh,old.preview):
-              (old.status === 'succeeded' && reusablePreview(old.preview) ? old.preview : fresh))) : '',
+        thumbnail: j.status === 'succeeded' ? api.absolute(j.thumb_url || '') : '',
+        preview: j.status === 'succeeded' && !!small &&
+          (typeof api.isJobCosUrl !== 'function' || api.isJobCosUrl(small))
+          ? (typeof api.jobPreviewUrl==='function'?api.jobPreviewUrl(j,old.preview):
+              ((!j.thumb_url&&local) || (typeof api.stableImageUrl==='function'?api.stableImageUrl(small,old.preview):
+                (old.status === 'succeeded' && reusablePreview(old.preview) ? old.preview : small)))) : '',
         status: j.status, quality: j.quality, provider: j.provider,
         templateName: j.template_name || '', createdAt: j.created_at || 0
         });
@@ -179,13 +183,15 @@ Page({
   onPreviewError(e) {
     const jobId = e.currentTarget.dataset.jobId;
     if (!jobId) return;
-    if (app.globalData.mediaCache && app.globalData.mediaCache[jobId])
+    const item=this.data.historyList.find(w=>w.jobId===jobId);
+    if(item&&item.thumbnail&&typeof api.forgetCommunityImage==='function')api.forgetCommunityImage(item.thumbnail);
+    if (!(item&&item.thumbnail) && app.globalData.mediaCache && app.globalData.mediaCache[jobId])
       delete app.globalData.mediaCache[jobId].result;
     this._previewRepairAttempts = this._previewRepairAttempts || new Set();
     if (this._previewRepairAttempts.has(jobId)) return;
     this._previewRepairAttempts.add(jobId);
     api.repairJobMedia(jobId, 'result').then(url => {
-      const list = this.data.historyList.map(w => w.jobId === jobId ? Object.assign({},w,{preview:url,result:url}) : w);
+      const list = this.data.historyList.map(w => w.jobId === jobId ? Object.assign({},w,{preview:url,thumbnail:'',result:url}) : w);
       app.globalData.historyList = list;
       app.persist();
       update(this,{historyList:list,previewWorks:list.slice(0,3)});

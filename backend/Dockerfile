@@ -20,6 +20,8 @@ RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r re
 
 COPY *.py *.html logo.jpg ./
 COPY static/web ./static/web
+COPY tools/build_web_assets.py ./tools/build_web_assets.py
+RUN python tools/build_web_assets.py
 
 VOLUME ["/app/data", "/app/uploads"]
 

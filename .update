@@ -101,6 +101,12 @@ echo "$REQ_AFTER" > "$REQ_HASH_FILE" 2>/dev/null || true
 ok "环境就绪"
 bash deploy/ensure-fonts.sh "$PY"
 
+# Precompress/version public web files; never package uploads, databases or keys.
+"$PY" backend/tools/build_web_assets.py
+if [ -f /var/www/photo-rescue-static/nginx-web.conf ]; then
+    $SUDO "$PY" backend/tools/build_web_assets.py --output /var/www/photo-rescue-static
+fi
+
 # ---------------------------------------------------------------- 3. 重启
 step "3/5 重启后端服务"
 if has_systemd_service; then

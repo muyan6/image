@@ -148,6 +148,7 @@ Page({
   mapCloudWork(cj,old={}){
     const image=(url,prior)=>typeof api.stableImageUrl==='function'?api.stableImageUrl(url||'',prior):api.absolute(url||'');
     const work={...old,jobId:cj.id,original:image(cj.orig_url,old.original),result:cj.status==='succeeded'?image(cj.result_url,old.result):'',
+      thumbnail:cj.status==='succeeded'?image(cj.thumb_url,old.thumbnail):'',
       status:cj.status,stage:cj.stage,error:cj.error||'',violation:cj.violation||null,quality:cj.quality,provider:cj.provider,
       width:cj.width,height:cj.height,templateId:cj.template_id||'',templateName:cj.template_name||'',createdAt:cj.created_at||old.createdAt||0,
       completedAt:cj.completed_at||0,expiresAt:cj.expires_at||0,chargedAmount:cj.charged_amount,refundedAmount:cj.refunded_amount,settlement:cj.settlement,
@@ -157,8 +158,10 @@ Page({
     work.expiryLabel=work.status==='succeeded'&&work.expiresAt&&remaining<=3*86400000?(remaining>0?'还剩 '+Math.max(1,Math.ceil(remaining/86400000))+' 天，请及时保存':'云端图片已到期'):'';
     work.settlementLabel=this.settlementLabel(work);
     const pinned=old.status==='succeeded'&&reusablePreview(old.preview)?this.safePreview(old):'';
-    work.preview=cj.result_url&&(typeof api.isJobCosUrl!=='function'||api.isJobCosUrl(cj.result_url))?
-      (typeof api.stableImageUrl==='function'?image(cj.result_url,old.preview):(pinned||this.safePreview(work))):'';
+    const previewUrl=cj.thumb_url||cj.result_url;
+    work.preview=previewUrl&&(typeof api.isJobCosUrl!=='function'||api.isJobCosUrl(previewUrl))?
+      (typeof api.jobPreviewUrl==='function'?api.jobPreviewUrl(cj,old.preview):
+        (typeof api.stableImageUrl==='function'?image(previewUrl,old.preview):(pinned||this.safePreview(work)))):'';
     return work;
   },
   settlementLabel(work){
@@ -183,6 +186,7 @@ Page({
   },
 
   safePreview(work) {
+    if(work.thumbnail&&reusablePreview(work.thumbnail))return typeof api.communityImage==='function'?api.communityImage(work.thumbnail):work.thumbnail;
     let local = work.jobId && app.globalData.mediaCache && app.globalData.mediaCache[work.jobId] &&
       app.globalData.mediaCache[work.jobId].result;
     if(local&&typeof api.isLocalImageAvailable==='function'&&!api.isLocalImageAvailable(local))local='';
@@ -202,18 +206,19 @@ Page({
   onWorkImageError(e) {
     const item = this.data.works[e.currentTarget.dataset.index];
     if (!item || !item.jobId || item.status !== 'succeeded') return;
-    if (app.globalData.mediaCache && app.globalData.mediaCache[item.jobId])
+    if(item.thumbnail&&typeof api.forgetCommunityImage==='function')api.forgetCommunityImage(item.thumbnail);
+    if (!item.thumbnail && app.globalData.mediaCache && app.globalData.mediaCache[item.jobId])
       delete app.globalData.mediaCache[item.jobId].result;
     this._previewRepairAttempts = this._previewRepairAttempts || new Set();
     if (this._previewRepairAttempts.has(item.jobId)) return;
     this._previewRepairAttempts.add(item.jobId);
     api.repairJobMedia(item.jobId, 'result').then(url => {
       const works = this.data.works.map(w => w.jobId === item.jobId ?
-        Object.assign({}, w, {result:url, preview:url, error:''}) : w);
+        Object.assign({}, w, {result:url, thumbnail:'', preview:url, error:''}) : w);
       this.setWorks(works);
     }).catch(err => {
       const works = this.data.works.map(w => w.jobId === item.jobId ?
-        Object.assign({}, w, {result:'', preview:'', error:err.message || '结果图暂不可用'}) : w);
+        Object.assign({}, w, {result:'', thumbnail:'', preview:'', error:err.message || '结果图暂不可用'}) : w);
       this.setWorks(works);
     });
   },

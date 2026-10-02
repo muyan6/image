@@ -79,8 +79,10 @@ Page({
           return old&&old===next?old:next;
         };
         // Remote signatures stay private to image-load handlers; they are not visual data.
-        this._imageSources=this._imageSources||{};this._imageSources[item.id]={result:api.absolute(item.resultUrl),orig:api.absolute(item.origUrl)};
+        const small=this._thumbnailFallbacks&&this._thumbnailFallbacks.has(item.id)?item.resultUrl:(item.thumbnailUrl||item.resultUrl);
+        this._imageSources=this._imageSources||{};this._imageSources[item.id]={result:api.absolute(small),orig:api.absolute(item.origUrl)};
         return {...item,
+          thumbnailUrl:display(small,prior&&prior.thumbnailUrl),
           resultUrl:display(item.resultUrl,prior&&prior.resultUrl),origUrl:display(item.origUrl,prior&&prior.origUrl),
           authorAvatar:item.authorAvatar?api.absolute(item.authorAvatar):''};
       });
@@ -139,6 +141,9 @@ Page({
     if(this._visible===false)return;
     const id=e.currentTarget.dataset.id;if(!id)return;
     const item=this.data.items.find(x=>x.id===id);
+    if(e.currentTarget.dataset.kind==='result'&&item&&item.thumbnailUrl!==item.resultUrl){
+      this._thumbnailFallbacks=this._thumbnailFallbacks||new Set();this._thumbnailFallbacks.add(id);
+    }
     if(item&&typeof api.forgetCommunityImage==='function')api.forgetCommunityImage(this._imageSources&&this._imageSources[id]&&this._imageSources[id][e.currentTarget.dataset.kind]);
     this._mediaRetries=this._mediaRetries||new Set();if(this._mediaRetries.has(id))return;
     this._mediaRetries.add(id);this.loadCommunity(true);

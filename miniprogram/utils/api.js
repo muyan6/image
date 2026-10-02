@@ -238,6 +238,12 @@ function stableImageUrl(url, previous, version, previousVersion) {
       (!/[?&]q-signature=/i.test(previous) || isReusableMediaUrl(previous))) return previous;
   return communityImage(fresh, version);
 }
+/** Small list media is a distinct COS variant; result/orig download caches stay HD. */
+function jobPreviewUrl(job, previous) {
+  const url = job && (job.thumb_url || job.result_url) || '';
+  if (!url || !isJobCosUrl(absolute(url))) return '';
+  return stableImageUrl(url, previous);
+}
 function setDataStable(page, patch) {
   const changed={};
   Object.keys(patch).forEach(key=>{
@@ -268,9 +274,10 @@ function rememberCommunityImage(url, version) {
   if (!src) return Promise.resolve('');
   const cached = communityImage(src,version);
   if (cached !== src) return Promise.resolve(cached);
-  if (communityImageTasks[key]) return communityImageTasks[key];
   const cache = communityMediaCache();
-  communityImageTasks[key] = new Promise((resolve) => {
+  if (communityImageTasks[key] && communityImageTasks[key].cache === cache) return communityImageTasks[key].promise;
+  const task = {cache};
+  task.promise = new Promise((resolve) => {
     wx.getImageInfo({src, success(info) {
       // Never retain an unbounded set of downloaded image paths.
       if (info.path && info.path !== src && cache === communityMediaCache()) {
@@ -280,8 +287,9 @@ function rememberCommunityImage(url, version) {
       }
       resolve(info.path || src);
     }, fail:()=>resolve(src)});
-  }).finally(()=>{delete communityImageTasks[key];});
-  return communityImageTasks[key];
+  }).finally(()=>{if(communityImageTasks[key]===task)delete communityImageTasks[key];});
+  communityImageTasks[key] = task;
+  return task.promise;
 }
 function forgetCommunityImage(url, version) { delete communityMediaCache()[imageCacheKey(absolute(url),version)]; }
 
@@ -666,6 +674,7 @@ module.exports = {
   rememberCommunityImage,
   forgetCommunityImage,
   stableImageUrl,
+  jobPreviewUrl,
   setDataStable,
   isLocalImageAvailable,
   request,

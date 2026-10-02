@@ -43,8 +43,8 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, Response, Uploa
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from web_delivery import create_web_assets, web_home_path, favicon_path
 
 from admin_api import ensure_admin_password, make_admin_router
 from cleanup_store import CleanupStore
@@ -224,7 +224,7 @@ app = FastAPI(
 # Windows registry can override .js to text/plain. Module scripts require the
 # explicit JavaScript media type in both StaticFiles and FileResponse paths.
 mimetypes.add_type('text/javascript','.js')
-app.mount('/web-assets', StaticFiles(directory=os.path.join(BASE_DIR,'static','web'),check_dir=False), name='web-assets')
+app.mount('/web-assets', create_web_assets(BASE_DIR), name='web-assets')
 
 app.add_middleware(
     CORSMiddleware,
@@ -756,6 +756,7 @@ class JobStore:
                  db_path: Optional[str] = None) -> None:
         self._data: Dict[str, Dict[str, Any]] = {}
         self._processing = set()
+        self._by_owner: Dict[str, Dict[str, set]] = {}
         self._lock = threading.Lock()
         self._ttl = ttl
         self._max = max_entries
@@ -802,11 +803,16 @@ class JobStore:
         self._reload()
 
     def _reload(self) -> None:
+        with self._lock:
+            self._reload_locked()
+
+    def _reload_locked(self) -> None:
         """启动时把未过期的任务读回内存，重启不影响前端轮询。"""
         now = time.time()
         rows = self._conn.execute(
             "SELECT %s FROM jobs" % ", ".join(self._COLUMNS)).fetchall()
         interrupted = []
+        restored = []
         all_statuses = {}
         for row in rows:
             job = dict(zip(self._COLUMNS, row))
@@ -833,13 +839,16 @@ class JobStore:
             if now > self._expires_at(job):
                 self._startup_evicted.append(job)
                 continue
-            self._data[job["id"]] = job
-            if job['status']=='processing' and not job.get('deleted_at'):self._processing.add(job['id'])
+            restored.append(job)
         for job in interrupted:
             # Refund first; re-running after a crash is harmless (ledger unique key).
             users.refund_job(job.get("openid") or "", job["id"])
             self._persist(job)
         self._delete_rows([job["id"] for job in self._startup_evicted])
+        self._data.clear()
+        self._processing.clear()
+        self._by_owner.clear()
+        for job in restored: self._publish_locked(job)
         users.reconcile_charges(all_statuses)
         if rows:
             log.info("任务表恢复：%d 条记录（在途中断 %d 条，已执行扣款流水恢复）",
@@ -858,6 +867,28 @@ class JobStore:
         except sqlite3.Error:
             self._conn.rollback()
             raise
+
+    def _forget_locked(self, job_id: str) -> None:
+        """Remove a committed record from all process-local indexes together."""
+        old = self._data.pop(job_id, None)
+        self._processing.discard(job_id)
+        if old and not old.get('deleted_at'):
+            owner = old.get('openid')
+            statuses = self._by_owner.get(owner)
+            if statuses:
+                ids = statuses.get(old.get('status'))
+                if ids is not None:
+                    ids.discard(job_id)
+                    if not ids: statuses.pop(old.get('status'), None)
+                if not statuses: self._by_owner.pop(owner, None)
+
+    def _publish_locked(self, job: Dict[str, Any]) -> None:
+        """Publish only after persistence succeeds; callers hold the job lock."""
+        self._forget_locked(job['id'])
+        self._data[job['id']] = job
+        if not job.get('deleted_at'):
+            self._by_owner.setdefault(job.get('openid'), {}).setdefault(job.get('status'), set()).add(job['id'])
+            if job.get('status') == 'processing': self._processing.add(job['id'])
 
     def _delete_rows(self, job_ids: List[str]) -> None:
         """驱逐任务时同步删除落盘行。调用方必须持锁。"""
@@ -885,8 +916,7 @@ class JobStore:
             if len(self._processing) >= self._max:
                 raise HTTPException(status_code=503, detail="任务队列已满，请稍后再试")
             self._persist(job)
-            self._data[job_id] = job
-            if job['status']=='processing' and not job.get('deleted_at'):self._processing.add(job_id)
+            self._publish_locked(job)
             evicted: List[Dict[str, Any]] = []
             if len(self._data) > self._max:
                 evicted = self._evict_locked(keep=job_id)
@@ -908,9 +938,7 @@ class JobStore:
             if job.get("deleted_at") and fields.get("status") == "succeeded":
                 return
             self._persist(updated)
-            self._data[job_id] = updated
-            if updated['status']=='processing' and not updated.get('deleted_at'):self._processing.add(job_id)
-            else:self._processing.discard(job_id)
+            self._publish_locked(updated)
 
     def begin_cloud_submission(self, job_id: str) -> bool:
         """Serialize the paid-submit boundary with deletion; never retry a marked POST."""
@@ -922,7 +950,7 @@ class JobStore:
             now = time.time()
             updated = {**job, 'cloud_phase': 'submitting', 'submitted_at': now, 'updated_at': now}
             self._persist(updated)
-            self._data[job_id] = updated
+            self._publish_locked(updated)
             return True
 
     def fail_cloud_job(self, job_id: str, **fields: Any) -> bool:
@@ -933,8 +961,7 @@ class JobStore:
                 return False
             updated = {**job, **fields, 'status': 'failed', 'updated_at': time.time()}
             self._persist(updated)
-            self._data[job_id] = updated
-            self._processing.discard(job_id)
+            self._publish_locked(updated)
             return True
 
     def _expires_at(self, job: Dict[str, Any]) -> float:
@@ -951,8 +978,7 @@ class JobStore:
                 updated.update(status="failed", error="作品已删除，任务已取消")
                 updated['cancel_without_refund'] = bool(job.get('cloud_pipeline') and job.get('submitted_at'))
             self._persist(updated)
-            self._data[job_id] = updated
-            self._processing.discard(job_id)
+            self._publish_locked(updated)
             return dict(updated)
 
     def pending_cloud(self):
@@ -964,11 +990,9 @@ class JobStore:
         """Expire records only; capacity must not delete retained works early."""
         evicted: List[Dict[str, Any]] = []
         now = time.time()
-        for jid in [k for k, v in self._data.items()
-                    if now > self._expires_at(v)]:
-            evicted.append(self._data.pop(jid))
-        for job in evicted:self._processing.discard(job['id'])
+        evicted = [v for v in self._data.values() if now > self._expires_at(v)]
         self._delete_rows([j.get("id") for j in evicted if j.get("id")])
+        for job in evicted: self._forget_locked(job['id'])
         return evicted
 
     def _notify_evicted(self, evicted: List[Dict[str, Any]]) -> None:
@@ -1013,13 +1037,15 @@ class JobStore:
             snapshot = [dict(job) for job in self._data.values()]
             self._delete_rows([job["id"] for job in snapshot])
             self._data.clear()
+            self._processing.clear()
+            self._by_owner.clear()
             return snapshot
 
     def restore_purged(self, snapshot: List[Dict[str, Any]]) -> None:
         with self._lock:
             for job in snapshot:
                 self._persist(job)
-                self._data[job["id"]] = dict(job)
+                self._publish_locked(dict(job))
 
     def cleanup_purged(self, snapshot: List[Dict[str, Any]]) -> None:
         self._notify_evicted(snapshot)
@@ -1027,25 +1053,34 @@ class JobStore:
     def list_for_openid(self, openid: str, offset: int = 0, limit: int = 50,
                         status: str = 'all') -> List[Dict[str, Any]]:
         """按 openid 筛选当前用户的任务列表：按创建时间倒序。"""
-        owners=aliases(users,openid)
+        return self.page_for_openid(openid, offset, limit, status)[0]
+
+    def page_for_openid(self, openid: str, offset: int = 0, limit: int = 50,
+                        status: str = 'all'):
+        """Read one alias-aware page and its counts from a single index snapshot."""
+        owners = aliases(users, openid)
         with self._lock:
-            matched = [
-                dict(j) for j in self._data.values()
-                if j.get("openid") in owners and not j.get("deleted_at")
-                and (status == 'all' or j.get('status') == status)
-            ]
-            matched.sort(key=lambda j: j.get("created_at", 0), reverse=True)
-            return matched[offset:offset + limit]
+            selected = set()
+            counts = {name: 0 for name in ('processing', 'succeeded', 'failed')}
+            total = 0
+            for owner in owners:
+                for name, ids in self._by_owner.get(owner, {}).items():
+                    total += len(ids)
+                    if name in counts: counts[name] += len(ids)
+                    if status == 'all' or status == name: selected.update(ids)
+            # No copies of another account's records, and only the page is copied.
+            ordered = sorted(selected, key=lambda jid: (self._data[jid].get('created_at', 0), jid), reverse=True)
+            page = [dict(self._data[jid]) for jid in ordered[offset:offset + limit]]
+            return page, {'total': total, 'processing_count': counts['processing'], 'status_counts': counts}
 
     def counts_for_openid(self, openid: str) -> Dict[str, int]:
         """Authoritative totals; the mini-program only needs one thumbnail page."""
-        owners=aliases(users,openid)
+        owners = aliases(users, openid)
         with self._lock:
-            matched = [job for job in self._data.values()
-                       if job.get("openid") in owners and not job.get("deleted_at")]
-            counts = {status: sum(job.get('status') == status for job in matched)
+            counts = {status: sum(len(self._by_owner.get(owner, {}).get(status, ())) for owner in owners)
                       for status in ('processing', 'succeeded', 'failed')}
-            return {"total": len(matched), "processing_count": counts['processing'],
+            total = sum(len(ids) for owner in owners for ids in self._by_owner.get(owner, {}).values())
+            return {"total": total, "processing_count": counts['processing'],
                     "status_counts": counts}
 
 
@@ -1264,6 +1299,21 @@ def _job_media_url(job: Dict[str, Any], kind: str) -> Optional[str]:
         return None
     expiry = int(time.time()) + ttl
     return "/api/images/%s?expires=%d&sig=%s" % (filename, expiry, _media_signature(job, filename, expiry))
+
+
+def _job_thumbnail_url(job: Dict[str, Any]) -> Optional[str]:
+    """Owner authorization remains at callers; only retained COS results qualify."""
+    now = time.time()
+    if (not job or job.get('deleted_at') or job.get('status') != 'succeeded'
+            or not job.get('result_cos') or not settings.cos_ready()):
+        return None
+    ttl = min(MEDIA_URL_TTL_SECONDS, int(_media_expires_at(job, 'result') - now))
+    if ttl <= 0: return None
+    from cos_store import thumbnail_url
+    try:
+        return thumbnail_url(settings, job['result_cos'], ttl_seconds=ttl, width=480)
+    except CosError:
+        return None
 
 
 def _media_type(path: str) -> str:
@@ -1710,7 +1760,16 @@ def public_config() -> Dict[str, Any]:
     """小程序启动时拉取：价格、维护状态、风格表、调试免扣费开关、社区与广告开关。"""
     ads = settings.ads()
     text_conf = settings.text_generation()
-    community = CommunityStore(settings)._normalize()
+    # Ordinary startup reads need two scalar fields, not every community story
+    # and unrelated secret/provider configuration. Preserve the one-time legacy
+    # migration before reading its enabled flag.
+    with settings._lock:
+        community = settings._data.get('community') or {}
+        needs_migration = community.get('posts_version') != 1
+        community_enabled = bool(community.get('enabled'))
+        ci_enabled = bool((settings._data.get('processing') or {}).get('ci_enabled'))
+    if needs_migration:
+        community_enabled = bool(CommunityStore(settings)._normalize()['enabled'])
     return {
         "prices": settings.prices(),
         "rewards": settings.rewards(),
@@ -1720,11 +1779,11 @@ def public_config() -> Dict[str, Any]:
         "cloud_pipeline": cloud.snapshot(),
         "template_quality_options": ["light", "fine"],
         "text_generation": {'ready':text_generation_ready(sys.modules[__name__],text_conf),'price':text_conf['price']},
-        "image_processing": {"ci_enabled":settings.snapshot()["processing"]["ci_enabled"],"local_image_parallelism":1},
+        "image_processing": {"ci_enabled":ci_enabled,"local_image_parallelism":1},
         "maintenance": settings.maintenance(),
         "styles": settings.styles(),
         # 社区（灵感沙龙）：enabled=False 时小程序端隐藏 tab 与入口
-        "community": {"enabled": community["enabled"]},
+        "community": {"enabled": community_enabled},
         # 激励视频广告：ready=False 时小程序端不显示"看视频补给"入口
         "ads": {
             "rewarded_video_enabled": ads["rewarded_video_enabled"],
@@ -1854,7 +1913,7 @@ def home_page(request: Request):
     if q.get("echostr") and (q.get("signature") or q.get("msg_signature")):
         return wxpush_verify(request)
     return FileResponse(
-        os.path.join(BASE_DIR, "index.html"),
+        web_home_path(BASE_DIR),
         media_type="text/html; charset=utf-8",
         headers={"Cache-Control": "no-store"},
     )
@@ -1874,6 +1933,12 @@ def app_logo() -> FileResponse:
         media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+@app.get('/favicon.svg')
+def app_favicon() -> FileResponse:
+    return FileResponse(favicon_path(BASE_DIR), media_type='image/svg+xml',
+                        headers={'Cache-Control': 'public, max-age=86400'})
 
 
 @app.get("/admin")
@@ -2096,7 +2161,7 @@ def get_me(request: Request):
         "wechat_bound": user.get('auth_source')=='site' and user['auth_identity']!=openid,
         "balance": user["balance"],
         "total_jobs": user["total_jobs"],
-        "credit_record_count": experience_for(users).credit_records(openid, limit=1)['total'],
+        "credit_record_count": experience_for(users).credit_record_count(openid),
         "invite_code": user["invite_code"],
         "nickname": user.get("nickname", ""),
         "banned": user.get("banned", False),
@@ -2484,6 +2549,7 @@ def query_job_status(job_id: str, request: Request):
         "violation": users.violation_for_job(user["openid"],job["id"]) if job.get("status")=="failed" else None,
         "orig_url": _job_media_url(job, "orig"),
         "result_url": _job_media_url(job, "result"),
+        "thumb_url": _job_thumbnail_url(job),
         "created_at": job.get("created_at"),
         "expires_at": _media_expires_at(job, 'result'),
         **experience_for(users).settlement(user['openid'], job['id']),
@@ -2557,8 +2623,9 @@ def get_my_jobs(request: Request, limit: int = 30, offset: int = 0, status: str 
     if status not in ('all', 'processing', 'succeeded', 'failed'):
         raise HTTPException(400, detail='作品状态筛选无效')
     limit=min(max(1,limit),100);offset=max(0,offset)
-    page=jobs.list_for_openid(user["openid"],offset=offset,limit=limit+1,status=status)
+    page, counts=jobs.page_for_openid(user["openid"],offset=offset,limit=limit+1,status=status)
     more=len(page)>limit;raw_list=page[:limit]
+    settlements = experience_for(users).settlements(user['openid'], (job['id'] for job in raw_list))
     res = []
     for job in raw_list:
         res.append({
@@ -2577,12 +2644,12 @@ def get_my_jobs(request: Request, limit: int = 30, offset: int = 0, status: str 
             "violation": users.violation_for_job(user["openid"],job["id"]) if job.get("status")=="failed" else None,
             "orig_url": _job_media_url(job, "orig"),
             "result_url": _job_media_url(job, "result"),
+            "thumb_url": _job_thumbnail_url(job),
             "created_at": job.get("created_at"),
             "completed_at": job.get("completed_at"),
             "expires_at": _media_expires_at(job, 'result'),
-            **experience_for(users).settlement(user['openid'], job['id']),
+            **settlements[job['id']],
         })
-    counts = jobs.counts_for_openid(user["openid"])
     total = counts['total'] if status == 'all' else counts['status_counts'][status]
     return {"jobs": res,"has_more":more,"next_offset":offset+len(res),
             **counts, 'total': total, 'all_total': counts['total']}

@@ -142,13 +142,15 @@ Page({
         ? item.covers
         : (item.cover ? [item.cover] : []);
       const old=this._coverRetries&&this._coverRetries.has(item.id)?null:prior.get(item.id),version=item.cover_version;
-      this._coverSources[item.id]={urls:rawCovers.map(c=>api.absolute(c)),version};
+      const small=this._coverRetries&&this._coverRetries.has(item.id)?rawCovers[0]:(item.thumbnail||item.thumbnailUrl||rawCovers[0]);
+      this._coverSources[item.id]={urls:rawCovers.map(c=>api.absolute(c)),thumbnail:api.absolute(small),version};
       const coverUrls = rawCovers.map((c,i) => typeof api.stableImageUrl==='function'
         ? api.stableImageUrl(c,old&&old.covers&&old.covers[i],version,old&&old.cover_version) : api.absolute(c)).filter(Boolean);
       return Object.assign({}, item, {
         cover: coverUrls[0] || '',
         covers: coverUrls,
-        coverUrl: coverUrls[0] || (item.cover ? api.absolute(item.cover) : '/images/logo.jpg'),
+        thumbnail: typeof api.stableImageUrl==='function'?api.stableImageUrl(small,old&&old.thumbnail,version,old&&old.cover_version):api.absolute(small),
+        coverUrl: (typeof api.stableImageUrl==='function'?api.stableImageUrl(small,old&&old.coverUrl,version,old&&old.cover_version):api.absolute(small)) || coverUrls[0] || (item.cover ? api.absolute(item.cover) : '/images/logo.jpg'),
         costText: cost, favorite:this.data.favoriteIds.includes(item.id)
       });
     });
@@ -179,12 +181,12 @@ Page({
 
   onTemplateImageLoad(e) {
     const source=this._coverSources&&this._coverSources[e.currentTarget.dataset.id];
-    if(source&&typeof api.rememberCommunityImage==='function')api.rememberCommunityImage(source.urls[0],source.version).catch(()=>{});
+    if(source&&typeof api.rememberCommunityImage==='function')api.rememberCommunityImage(source.thumbnail,source.version).catch(()=>{});
   },
   onTemplateImageError(e) {
     const id=e.currentTarget.dataset.id,source=this._coverSources&&this._coverSources[id];
     this._coverRetries=this._coverRetries||new Set();if(this._coverRetries.has(id)||!source)return;this._coverRetries.add(id);
-    if(typeof api.forgetCommunityImage==='function')api.forgetCommunityImage(source.urls[0],source.version);
+    if(typeof api.forgetCommunityImage==='function')api.forgetCommunityImage(source.thumbnail,source.version);
     return this.fetchTemplates(null,true);
   },
 

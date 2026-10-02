@@ -438,6 +438,29 @@ class SettingsStore:
         with self._lock:
             return copy.deepcopy(self._data)
 
+    def section_revision(self, key: str) -> int:
+        """Runtime source token, without copying unrelated settings or returning secrets.
+
+        Atomic writes replace their detached source. Retain the last object so
+        Python identity reuse can never make a newer section look unchanged.
+        Tokens are local cache metadata and are never persisted to configuration.
+        """
+        if key not in ("community", "tencent"):
+            raise ValueError("Unsupported cache section")
+        with self._lock:
+            sources = getattr(self, "_cache_sources", None)
+            if sources is None:
+                sources = self._cache_sources = {}
+            source = self._data.get(key)
+            prior = sources.get(key)
+            if prior is None or prior[0] is not source:
+                sources[key] = (source, 1 if prior is None else prior[1] + 1)
+            return sources[key][1]
+
+    def community_snapshot(self) -> Dict[str, Any]:
+        """Detached community section, including migration version, not whole settings."""
+        return self._section("community")
+
     def update(self, patch: Dict[str, Any]) -> Dict[str, Any]:
         """递归合并 patch,关键节点兜底补齐,校验通过才落盘。返回更新后的完整快照。"""
         with self._lock:

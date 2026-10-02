@@ -1,5 +1,6 @@
 import {mountCreation} from './creation.js';
 import {mountLibrary} from './library.js';
+import {createDisplayCache} from './shared-load.js';
 const CREATION=new Set(['create','text','templates','result']);
 const ROUTES=new Set([...CREATION,'works','community','post','submissions','submit','my','credits','orders','invites','privacy','retention']);
 const issue=(message,status=0,data={})=>Object.assign(new Error(message),{status,detail:data.detail||message,data});
@@ -7,7 +8,7 @@ const message=data=>typeof data.detail==='string'?data.detail:Array.isArray(data
 
 export function createApplication(options={}){
  const doc=options.document||globalThis.document,win=doc.defaultView||globalThis.window,fetcher=options.fetch||globalThis.fetch.bind(globalThis);
- const state={user:null,auth:null,config:null};let accountVersion=0,mountGeneration=0,accountSequence=0,started=false,destroyed=false,cleanup=null,authWait=null,authFinish=null,toastTimer;
+ const state={user:null,auth:null,config:null},displayCache=createDisplayCache();let accountVersion=0,mountGeneration=0,accountSequence=0,started=false,destroyed=false,cleanup=null,authWait=null,authFinish=null,toastTimer;
  let current={route:'create',params:{}},authNetwork=false,responseSequence=0,lastBalanceApplied=0;const dialogs=new Set(),cancellations=new Set();
  const element=(tag,cls='',text)=>{const n=doc.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=String(text);return n;};
  const button=(text,fn,cls='shell-button')=>{const n=element('button',cls,text);n.type='button';n.addEventListener('click',fn);return n;};
@@ -17,7 +18,7 @@ export function createApplication(options={}){
  header.append(button('废片新生所',()=>navigate('create'),'site-brand'),nav,identity);identity.append(balance,account);nav.setAttribute('aria-label','主导航');host.id='site-content';notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');
  const tabs=[];[['create','创作','◌'],['templates','模板','▦'],['community','社区','◇'],['my','我的','○']].forEach(([r,label,icon])=>{const b=button('',()=>navigate(r),'site-tab');b.append(element('span','site-tab-icon',icon),element('span','',label));b.dataset.route=r;b.setAttribute('aria-label',label);tabs.push(b);nav.append(b);});
  footer.append(element('span','','照片修复 · 风格创作'),button('隐私与本地草稿',()=>navigate('privacy'),'shell-link'),button('照片保存期限',()=>navigate('retention'),'shell-link'));shell.append(header,banners,host,footer,notice);container.replaceChildren(shell);
- const ctx={state,element,api,requireLogin,navigate,toast,setBalance,startWechatLink,changePassword,logout,invalidateAccount,confirm:confirmAction,creationOptions:options.creationOptions};
+ const ctx={state,document:doc,element,api,displayGet,invalidateDisplay,requireLogin,navigate,toast,setBalance,startWechatLink,changePassword,logout,invalidateAccount,confirm:confirmAction,creationOptions:options.creationOptions};
  Object.defineProperty(ctx,'accountVersion',{get:()=>accountVersion});Object.defineProperty(ctx,'mountGeneration',{get:()=>mountGeneration});
  function renderHeader(){if(destroyed)return;account.textContent=state.user?(state.user.nickname||state.user.username||'我的账号'):'注册 / 登录';balance.textContent=state.user?(Number.isFinite(state.user.balance)?'✦ '+state.user.balance:'✦ —'):'';balance.hidden=!state.user;
   const selected=CREATION.has(current.route)?current.route==='templates'?'templates':'create':['community','post'].includes(current.route)?'community':'my';tabs.forEach(b=>{b.classList.toggle('site-tab-active',b.dataset.route===selected);b.setAttribute('aria-current',b.dataset.route===selected?'page':'false');});}
@@ -27,20 +28,29 @@ export function createApplication(options={}){
  function modal(title,body,cancel){const dialog=element('dialog','shell-dialog'),content=element('section','shell-dialog-body'),top=element('header','shell-dialog-heading');top.append(element('h2','',title),button('关闭',cancel,'shell-dialog-close'));content.append(top,body);dialog.append(content);doc.body.append(dialog);dialogs.add(dialog);dialog.addEventListener('cancel',e=>{e.preventDefault();cancel();});dialog.addEventListener('click',e=>{if(e.target===dialog)cancel();});if(typeof dialog.showModal==='function')dialog.showModal();else dialog.setAttribute('open','');return dialog;}
  function confirmAction(text){if(destroyed)return Promise.resolve(false);if(options.confirm)return Promise.resolve(options.confirm(text));return new Promise(resolve=>{let done=false,dialog;const finish=v=>{if(done)return;done=true;cancellations.delete(cancel);close(dialog);resolve(v);},cancel=()=>finish(false),body=element('div'),bar=element('div','shell-modal-actions');cancellations.add(cancel);bar.append(button('取消',cancel,'shell-button shell-secondary'),button('确认',()=>finish(true)));body.append(element('p','shell-copy',text),bar);dialog=modal('请确认本次操作',body,cancel);});}
  function banner(key,text,retry){if(destroyed)return;let box=banners.querySelector('[data-banner="'+key+'"]');if(!text){if(box)box.remove();return;}if(!box){box=element('div','site-banner');box.dataset.banner=key;banners.append(box);}box.replaceChildren(element('span','',text));if(retry)box.append(button('重试',retry,'shell-link'));}
+ function invalidateDisplay(prefix=''){displayCache.invalidate(prefix);}
+ function displayGet(path,{force=false,public:publicData=false}={}){
+  // Only presentation data is cached; financial reads and prices always reach the server.
+  const cacheable=publicData?path==='/api/templates':/^\/api\/(my\/jobs(?:\?|$)|me\/preferences$|community(?:\?|\/submissions\/mine\?|\/posts\/[^/]+\/comments\?))/.test(path);
+  if(!cacheable)return api(path);
+  const user=state.user,owner=user&&(user.account_user_id||user.user_id),scope=publicData?'public:':'private:'+(owner||'guest')+':'+accountVersion;
+  return displayCache.get(scope+'\n'+path,()=>api(path),{force});
+ }
  async function api(path,settings={}){
   if(!/^\/api(?:\/|\?|$)/.test(path)||/[\\\r\n#]/.test(path))throw issue('接口地址格式错误');
   const v=accountVersion,g=mountGeneration,seq=++responseSequence,method=(settings.method||'GET').toUpperCase(),headers={'X-Site-Request':'1',...(settings.headers||{})};
   if(state.auth&&state.auth.token)headers.Authorization='Bearer '+state.auth.token;
   if(state.auth&&state.auth.csrf_token){headers['X-CSRF-Token']=state.auth.csrf_token;headers['X-Site-CSRF']=state.auth.csrf_token;}
   const init={method,headers,credentials:'same-origin'};if(settings.signal)init.signal=settings.signal;if(settings.data!==undefined){headers['Content-Type']='application/json';init.body=JSON.stringify(settings.data);}
-  let response;try{response=await fetcher(path,init);}catch(e){throw issue('网络连接暂未完成，请检查后重试',0,{detail:e.message||'网络连接失败'});}
+  const mutation=!['GET','HEAD'].includes(method);if(mutation)invalidateDisplay('private:');
+  let response;try{response=await fetcher(path,init);}catch(e){throw issue('网络连接暂未完成，请检查后重试',0,{detail:e.message||'网络连接失败'});}finally{if(mutation)invalidateDisplay('private:');}
   let data={};if(response.status!==204)try{data=await response.json();}catch(e){throw issue('响应暂未确认，请稍后核对',response.status||0,{detail:'响应数据异常'});}
-  if(!response.ok){if(response.status===401&&state.user&&valid(v,g)&&!/^\/api\/auth\/site\/(login|register)$/.test(path))clearAccount('登录状态已过期，请重新登录');throw issue(message(data),response.status,data);}
+  if(!response.ok){if(response.status===404&&method==='GET'&&/^\/api\/(jobs\/|community\/posts\/)/.test(path))invalidateDisplay(path.startsWith('/api/jobs/')?'/api/my/jobs':'/api/community');if(response.status===401&&state.user&&valid(v,g)&&!/^\/api\/auth\/site\/(login|register)$/.test(path))clearAccount('登录状态已过期，请重新登录');throw issue(message(data),response.status,data);}
   if(valid(v,g)&&Number.isFinite(data.balance)&&seq>=lastBalanceApplied){lastBalanceApplied=seq;setBalance(data.balance);}return data;
  }
- function applyAuth(auth,remount=false){if(!auth||!auth.user||auth.auth_source!=='site')return false;accountVersion++;accountSequence++;state.auth={...auth};state.user={...auth.user};if(Number.isFinite(auth.balance))state.user.balance=auth.balance;renderHeader();banner('session','');if(authFinish)authFinish(true);
+ function applyAuth(auth,remount=false){if(!auth||!auth.user||auth.auth_source!=='site')return false;invalidateDisplay('private:');accountVersion++;accountSequence++;state.auth={...auth};state.user={...auth.user};if(Number.isFinite(auth.balance))state.user.balance=auth.balance;renderHeader();banner('session','');if(authFinish)authFinish(true);
   if(remount&&!CREATION.has(current.route))queueMicrotask(()=>{if(!destroyed)navigate(current.route,current.params,{replace:true});});return true;}
- function clearAccount(text=''){if(cleanup){cleanup();cleanup=null;}accountVersion++;accountSequence++;state.user=null;state.auth=null;if(authFinish)authFinish(false);renderHeader();if(text)toast(text);if(!destroyed)navigate('create',{}, {replace:true});}
+ function clearAccount(text=''){if(cleanup){cleanup();cleanup=null;}invalidateDisplay('private:');accountVersion++;accountSequence++;state.user=null;state.auth=null;if(authFinish)authFinish(false);renderHeader();if(text)toast(text);if(!destroyed)navigate('create',{}, {replace:true});}
  function field(title,input){const label=element('label','shell-field');label.append(element('span','',title),input);return label;}
  function requireLogin(){
   if(destroyed)return Promise.resolve(false);if(state.user&&state.auth&&state.auth.auth_source==='site')return Promise.resolve(true);if(authWait)return authWait;
@@ -77,6 +87,6 @@ export function createApplication(options={}){
  async function loadSession(defer=false){const v=accountVersion,seq=++accountSequence;try{const auth=await api('/api/auth/site/session');if(valid(v)&&seq===accountSequence){if(defer)return {auth,version:v,sequence:seq};applyAuth(auth);}}catch(e){if(valid(v)&&seq===accountSequence&&e.status!==401)banner('session','账号状态尚未同步；公开模板与社区仍可浏览',()=>loadSession(false));}}
  async function loadConfig(){const v=accountVersion;try{const config=await api('/api/config');if(valid(v)){state.config=config;banner('config','');}}catch(e){if(valid(v))banner('config','创作配置尚未加载，价格确认后再开始生成',async()=>{await loadConfig();if(!destroyed)navigate(current.route,current.params,{replace:true});});}}
  async function start(){if(started||destroyed)return app;started=true;current=readRoute();renderHeader();host.append(element('p','shell-loading','正在准备创作空间…'));const results=await Promise.allSettled([loadConfig(),loadSession(true)]),session=results[1].status==='fulfilled'&&results[1].value;if(session&&valid(session.version)&&session.sequence===accountSequence)applyAuth(session.auth,mountGeneration>0);if(!destroyed&&mountGeneration===0)await navigate(current.route,current.params,{replace:true});return app;}
- function destroy(){if(destroyed)return;destroyed=true;if(cleanup)cleanup();cleanup=null;clearTimeout(toastTimer);cancellations.forEach(fn=>fn());cancellations.clear();dialogs.forEach(close);dialogs.clear();win.removeEventListener('popstate',history);shell.remove();}
+ function destroy(){if(destroyed)return;destroyed=true;if(cleanup)cleanup();cleanup=null;displayCache.clear();clearTimeout(toastTimer);cancellations.forEach(fn=>fn());cancellations.clear();dialogs.forEach(close);dialogs.clear();win.removeEventListener('popstate',history);shell.remove();}
  const app={start,destroy,navigate,api,requireLogin,ctx,state,logout,changePassword,startWechatLink,invalidateAccount,get current(){return current;},get accountVersion(){return accountVersion;},get mountGeneration(){return mountGeneration;}};return app;
 }

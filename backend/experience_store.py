@@ -9,11 +9,13 @@ import re
 import time
 import uuid
 from account_links import canonical_unlocked, aliases_unlocked, marks
+from read_projection import CreditProjection
 
 
 class ExperienceStore:
     def __init__(self, users):
         self.users = users
+        self._credit_projection = CreditProjection(users)
         with users._lock, users._conn:
             users._conn.executescript('''
                 CREATE TABLE IF NOT EXISTS template_preferences(
@@ -121,80 +123,34 @@ class ExperienceStore:
                 'WHERE openid=? AND request_id=?',
                 (state, str(error)[:500], http_status, time.time(), row['openid'], request_id))
 
-    def settlement(self, openid, job_id):
+    def settlements(self, openid, job_ids):
+        """One owner-checked ledger query for a page; unknown history stays unknown."""
+        ids = tuple(dict.fromkeys(job_ids))
+        unknown = {'charged_amount': None, 'refunded_amount': None, 'settlement': 'historical_unknown'}
+        result = {jid: dict(unknown) for jid in ids}
+        if not ids:
+            return result
         with self.users._lock:
             owners = aliases_unlocked(self.users, openid)
-            row = self.users._conn.execute(
-                'SELECT amount,refunded,state FROM job_charges WHERE openid IN ('+marks(owners)+') AND job_id=?',
-                (*owners, job_id)).fetchone()
-        if not row:
-            return {'charged_amount': None, 'refunded_amount': None, 'settlement': 'historical_unknown'}
-        return {'charged_amount': int(row[0]), 'refunded_amount': int(row[0]) if row[1] else 0,
-                'settlement': row[2]}
+            rows = self.users._conn.execute(
+                'SELECT job_id,amount,refunded,state FROM job_charges WHERE openid IN ('+marks(owners)+') '
+                'AND job_id IN ('+marks(ids)+')', (*owners, *ids)).fetchall()
+        for jid, amount, refunded, state in rows:
+            result[jid] = {'charged_amount': int(amount), 'refunded_amount': int(amount) if refunded else 0,
+                           'settlement': state}
+        return result
+
+    def settlement(self, openid, job_id):
+        return self.settlements(openid, (job_id,))[job_id]
+
+    def credit_record_count(self, openid):
+        """Exact recorded-history count, with bounded revision-aware metadata cache."""
+        return self._credit_projection.count(openid)
 
     def credit_records(self, openid, offset=0, limit=30):
-        """Expose recorded amounts only; never infer an old welcome balance or delta.
-
-        Debits are sourced from the reservation ledger, refunds/rewards from
-        audited amounts, payment entries from their ledger. No mutation or balance
-        reconstruction occurs here. Unknown absolute admin edits are omitted.
-        """
+        """Read-only SQLite pagination; recorded amounts never reconstruct balance."""
         offset = max(0, offset); limit = max(1, min(100, limit))
-        records = []
-        def add(identity, kind, title, amount, at, job_id=None, order_id=None):
-            if type(amount) is int and amount:
-                records.append({'id': identity, 'kind': kind, 'title': title, 'amount': amount,
-                                'created_at': at, 'job_id': job_id, 'order_id': order_id})
-        with self.users._lock:
-            db = self.users._conn
-            owners = aliases_unlocked(self.users, openid)
-            clause = ' IN ('+marks(owners)+')'
-            for jid, amount, at in db.execute(
-                    'SELECT job_id,amount,created_at FROM job_charges WHERE openid'+clause, owners):
-                add('charge:' + jid, 'generation', '生成作品', -int(amount), at, jid)
-            violations = {r[0]: int(r[1]) for r in db.execute(
-                'SELECT id,charged FROM violations WHERE openid'+clause, owners)}
-            for aid, at, action, detail in db.execute(
-                    "SELECT id,ts,action,detail FROM audit WHERE openid"+clause+" AND action IN "
-                    "('refund','earn_checkin','earn_video','community_featured','blocked','violation_review','admin_adjust_balance')",
-                    owners):
-                amount = None; title = ''; kind = action; jid = None
-                job = re.search(r'(?:^|\s)job=([A-Za-z0-9_-]+)', detail)
-                if job: jid = job.group(1)
-                plus = re.search(r'(?:^|\s)\+=(\d+)|(?:^|\s)\+(\d+)', detail)
-                if action == 'refund' and jid and plus:
-                    amount = int(plus.group(1) or plus.group(2)); title = '生成退款'
-                elif action in ('earn_checkin', 'earn_video', 'community_featured') and plus:
-                    amount = int(plus.group(1) or plus.group(2))
-                    title = {'earn_checkin': '签到奖励', 'earn_video': '视频奖励',
-                             'community_featured': '社区精选奖励'}[action]
-                elif action == 'blocked':
-                    charged = re.search(r'(?:^|\s)charged=(\d+)', detail)
-                    if charged: amount = -int(charged.group(1)); title = '审核扣除'
-                elif action == 'violation_review' and 'status=overturned' in detail:
-                    identity = re.search(r'(?:^|\s)id=([A-Za-z0-9_-]+)', detail)
-                    if identity and identity.group(1) in violations:
-                        amount = violations[identity.group(1)]; title = '审核申诉退款'
-                elif action == 'admin_adjust_balance':
-                    delta = re.search(r'(?:^|\s)delta=(-?\d+)(?:\s|$)', detail)
-                    if delta: amount = int(delta.group(1)); title = '光子调整'
-                if amount is not None: add('audit:' + str(aid), kind, title, amount, at, jid)
-            # The bindings retain historical reward amounts; older NULL entries
-            # explicitly lack that evidence and are not replaced by today's price.
-            for invitee, inviter, at, reward in db.execute(
-                    'SELECT invitee,inviter,created_at,reward FROM invite_bindings WHERE invitee'+clause+' OR inviter'+clause,
-                    (*owners, *owners)):
-                if reward is not None:
-                    identity = hashlib.sha256((openid + '\0' + invitee).encode()).hexdigest()[:20]
-                    add('invite:' + identity, 'invite', '邀请奖励', int(reward), at)
-            exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='payment_ledger'").fetchone()
-            if exists:
-                for lid, oid, action, delta, at in db.execute(
-                        'SELECT id,order_id,action,delta,created_at FROM payment_ledger WHERE openid'+clause, owners):
-                    add('payment:' + str(lid), 'payment_' + action,
-                        '充值到账' if action == 'credit' else '充值退款扣回', int(delta), at, order_id=oid)
-        records.sort(key=lambda r: (r['created_at'], r['id']), reverse=True)
-        total = len(records); items = records[offset:offset + limit]
+        items, total = self._credit_projection.page(openid, offset, limit)
         return {'items': items, 'total': total, 'has_more': offset + len(items) < total,
                 'next_offset': offset + len(items), 'history_complete': False,
                 'history_note': '仅展示已记录金额的流水，历史赠送及未记录增减金额不作推算'}

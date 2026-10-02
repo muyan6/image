@@ -24,6 +24,7 @@ class PaymentStore:
               id INTEGER PRIMARY KEY,order_id TEXT NOT NULL,openid TEXT NOT NULL,
               action TEXT NOT NULL,delta INTEGER NOT NULL,refund_total INTEGER NOT NULL,
               created_at REAL NOT NULL,UNIQUE(order_id,action,refund_total));
+            CREATE INDEX IF NOT EXISTS idx_payment_ledger_user_time ON payment_ledger(openid,created_at DESC,id DESC);
             ''')
     def _one(self,query,args):
         cur=self.users._conn.execute(query,args);row=cur.fetchone()

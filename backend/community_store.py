@@ -6,11 +6,38 @@ import os
 import re
 import time
 import uuid
-from urllib.parse import urlsplit
+import io
+import threading
+from collections import OrderedDict
+from urllib.parse import urlsplit, unquote
 
 CATEGORIES = {"all": "其它", "portrait": "冷白人像", "film": "复古胶片",
               "old_photo": "老照片复苏", "anime": "动漫重绘"}
 MEDIA_PREFIX = "/api/community/media/"
+
+
+def editorial_thumbnail(settings, url):
+    """Small media for a published editorial row; third-party/signed URLs stay intact."""
+    url=str(url or '')
+    if re.fullmatch(re.escape(MEDIA_PREFIX)+r'[0-9a-f]{32}\.jpg',url):
+        filename=url[len(MEDIA_PREFIX):]
+        try:
+            source=os.stat(os.path.join(CommunityStore(settings).media_dir,filename))
+            return url+'/thumbnail?v='+str(source.st_mtime_ns)
+        except OSError:return url
+    try:
+        parsed=urlsplit(url)
+        if parsed.scheme!='https' or parsed.port not in (None,443) or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            return url
+        conf=settings.tencent()
+        from cos_store import thumbnail_url, _host
+        hosts={urlsplit('https://'+host).hostname for host in
+               (_host(conf), '%s.cos.%s.myqcloud.com'%(conf.get('cos_bucket',''),conf.get('cos_region','')))}
+        if parsed.hostname not in hosts:return url
+        key=unquote(parsed.path).lstrip('/')
+        if not key or '%' in key or '\\' in key or any(x in ('.','..') for x in key.split('/')) or any(ord(x)<32 for x in key):return url
+        return thumbnail_url(settings,key,ttl_seconds=300)
+    except (ValueError,KeyError,RuntimeError):return url
 
 
 class CommunityStore:
@@ -22,7 +49,8 @@ class CommunityStore:
         return os.path.join(os.path.dirname(self.settings._path), "community_media")
 
     def _normalize(self):
-        conf = self.settings.snapshot().get("community") or {}
+        conf = (self.settings.community_snapshot() if hasattr(self.settings, "community_snapshot")
+                else self.settings.snapshot().get("community")) or {}
         if conf.get("posts_version") == 1:
             return conf
         def migrate(doc):
@@ -55,6 +83,71 @@ class CommunityStore:
                 items.append(item)
             doc.update(enabled=True, items=items, posts_version=1)
         return self.settings.mutate_community(migrate)
+
+    def public_items(self):
+        """Bounded, non-personalized editorial projection; no media signatures/users.
+
+        The source revision is checked under the settings write lock, so pause,
+        deletion and edits invalidate before the next read. Submission visibility,
+        account bans, likes and comments are deliberately never cached here.
+        """
+        if not hasattr(self.settings, "section_revision"):
+            return self.list(status="published", limit=200)["items"]
+        with self.settings._lock:
+            revision = self.settings.section_revision("community")
+            cached = getattr(self.settings, "_community_public_cache", None)
+            now = time.time()
+            if not cached or cached[0] != revision or not 0 <= now - cached[1] < 30:
+                rows = self.list(status="published", limit=200)["items"]
+                # Normalization can atomically replace the legacy source.
+                revision = self.settings.section_revision("community")
+                cached = (revision, now, rows)
+                self.settings._community_public_cache = cached
+            return copy.deepcopy(cached[2])
+
+    def thumbnail_bytes(self, filename):
+        """Read-only legacy media variant, gated on current published references.
+
+        This does not write a thumbnail file or alter the 1600px editorial source.
+        Source mtime+size invalidates a 32-image/8MiB in-memory cache. Visibility
+        is checked before every cache hit and after decoding; only image work
+        is serialized by the separate cache lock, never the settings write lock.
+        """
+        if not re.fullmatch(r'[0-9a-f]{32}\.jpg',filename):raise FileNotFoundError(filename)
+        ref=MEDIA_PREFIX+filename
+        with self.settings._lock:
+            if not self._public_media_visible(ref):raise FileNotFoundError(filename)
+            lock=getattr(self.settings,'_community_thumbnail_lock',None)
+            if lock is None:lock=self.settings._community_thumbnail_lock=threading.RLock()
+        with lock:
+            path=os.path.join(self.media_dir,filename);stat=os.stat(path)
+            key=(filename,stat.st_mtime_ns,stat.st_size)
+            cache=getattr(self.settings,'_community_thumbnail_cache',None)
+            if cache is None:cache=self.settings._community_thumbnail_cache=OrderedDict()
+            if key in cache:
+                cache.move_to_end(key);data=cache[key]
+            else:
+                from PIL import Image, ImageOps
+                with Image.open(path) as source:
+                    if source.width*source.height>40_000_000:raise ValueError('Editorial image is too large')
+                    image=ImageOps.exif_transpose(source).convert('RGB');image.thumbnail((480,480))
+                    output=io.BytesIO();image.save(output,'JPEG',quality=70);data=output.getvalue()
+                for old in list(cache):
+                    if old[0]==filename:del cache[old]
+                if len(data)<=8*1024*1024:
+                    while cache and (len(cache)>=32 or sum(len(v) for v in cache.values())+len(data)>8*1024*1024):cache.popitem(last=False)
+                    cache[key]=data
+        with self.settings._lock:
+            if not self._public_media_visible(ref):raise FileNotFoundError(filename)
+        return data
+
+    def _public_media_visible(self, ref):
+        """Caller holds settings._lock; no whole-section clone for a byte request."""
+        conf=self.settings._data.get('community') or {}
+        if not conf.get('enabled'):return False
+        if conf.get('posts_version')!=1:conf=self._normalize()
+        return any(p.get('status')=='published' and any(p.get(field)==ref for field in
+            ('result_url','orig_url','author_avatar')) for p in conf.get('items',[]) if isinstance(p,dict))
 
     def list(self, status="all", query="", offset=0, limit=30):
         if status not in ("all", "published", "paused"):

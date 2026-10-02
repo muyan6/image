@@ -67,7 +67,7 @@
       <!-- 双图对比展框 (原图 vs 新生图) -->
       <view class="compare-frame {{!item.origUrl ? 'compare-frame-single' : ''}}">
         <view class="frame-photo-box">
-          <image class="frame-photo" bindload="onCommunityImageLoad" binderror="onCommunityImageError" data-kind="result" data-id="{{item.id}}" src="{{ item.resultUrl }}" mode="aspectFill" lazy-load></image>
+          <image class="frame-photo" bindload="onCommunityImageLoad" binderror="onCommunityImageError" data-kind="result" data-id="{{item.id}}" src="{{ item.thumbnailUrl || item.resultUrl }}" mode="aspectFill" lazy-load></image>
           <view class="frame-tag frame-tag-after">{{ item.quality === 'fine' ? '精细生成' : '轻量生成' }}</view>
         </view>
         <view wx:if="{{item.origUrl}}" class="frame-photo-box frame-photo-before">

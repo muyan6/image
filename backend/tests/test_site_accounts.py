@@ -278,7 +278,8 @@ class SiteTests(WorkflowTests):
             for relative in imports:
                 loaded=self.browser.get('/web-assets/'+relative[2:]);self.assertEqual(loaded.status_code,200,relative)
                 self.assertIn('javascript',loaded.headers['content-type'])
-        self.assertEqual(self.browser.get('/web-assets/fixture.txt').text, 'fixture asset')
+        # Delivery now exports only JS/CSS/SVG; unrelated files stay inaccessible.
+        self.assertEqual(self.browser.get('/web-assets/fixture.txt').status_code, 404)
         self.assertEqual(self.browser.get('/web-assets/../../user_store.py').status_code, 404)
         self.assertEqual(self.browser.get('/web-assets/%2e%2e/%2e%2e/user_store.py').status_code, 404)
 

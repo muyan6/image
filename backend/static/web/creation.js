@@ -1,4 +1,5 @@
 /* Creation parity. Business requests use ctx.api; image bytes go directly to COS. */
+import {createVisibilityGate,mediaReusable,reuseDisplayMedia,reconcileById,armReadTimeout} from './shared-load.js';
 const STAGES={queued:'云端排队中',normalize:'正在准备照片',enhance:'正在生成画面',finalize:'正在整理成品',store_cos:'正在保存成品',submission_unknown:'正在确认生成状态'};
 const PHOTO_RATIOS=['original','1:1','3:4','4:3','9:16','16:9'];
 const TEXT_RATIOS=['1:1','3:2','2:3'];
@@ -60,19 +61,21 @@ export class CreationSession {
     this.config=ctx.state.config||null;this.preferences={template_favorites:[],recent_templates:[]};
     this.receipts=options.receipts||createReceiptStore();this.drafts=options.drafts||createDraftStore();
     this.fetch=options.fetch||globalThis.fetch.bind(globalThis);this.delay=options.delay||(ms=>new Promise(r=>{this.timer=setTimeout(r,ms);this.timerResolve=r;}));
+    this.document=options.document||ctx.document||globalThis.document;this.visibility=createVisibilityGate(this.document,()=>this.active());
+    this.visibility.subscribe(()=>{if(this.timer){clearTimeout(this.timer);this.timerResolve&&this.timerResolve();}if(!this.visibility.visible()&&this.pollController)this.pollController.abort();});
   }
   active(){return !this.closed&&this.ctx.accountVersion===this.version;}
   assertActive(){if(!this.active())throw problem('页面或登录状态已变化，请在当前页面继续',0,'INACTIVE');}
-  close(){this.closed=true;if(this.timer){clearTimeout(this.timer);this.timerResolve&&this.timerResolve();}}
+  close(){this.closed=true;this.visibility.close();if(this.pollController)this.pollController.abort();if(this.timer){clearTimeout(this.timer);this.timerResolve&&this.timerResolve();}}
   async login(){const ok=await this.ctx.requireLogin();if(!ok)return false;this.assertActive();this.owner=account(this.ctx);if(!this.owner)throw problem('登录信息尚未就绪，请重新登录',401);return true;}
-  async catalog(targetId=''){
-    const data=await this.ctx.api('/api/templates');this.assertActive();
-    this.templates=Array.isArray(data.items)?data.items:[];this.groups=Array.isArray(data.groups)?data.groups:[];
+  async catalog(targetId='',force=false){
+    const data=await (this.ctx.displayGet?this.ctx.displayGet('/api/templates',{public:true,force}):this.ctx.api('/api/templates'));this.assertActive();
+    const old=new Map(this.templates.map(item=>[item.id,item]));this.templates=(Array.isArray(data.items)?data.items:[]).map(item=>reuseDisplayMedia(item,old.get(item.id)));this.groups=Array.isArray(data.groups)?data.groups:[];
     const target=targetId?this.templates.find(t=>t.id===targetId):null;
-    if(targetId&&!target)throw problem('所选风格已下架或暂不可用，请重试或主动选择其他风格',404,'TEMPLATE_MISSING');
+    if(targetId&&!target){if(!force&&this.ctx.displayGet)return this.catalog(targetId,true);throw problem('所选风格已下架或暂不可用，请重试或主动选择其他风格',404,'TEMPLATE_MISSING');}
     return target;
   }
-  async loadPreferences(){if(!account(this.ctx))return this.preferences;const value=await this.ctx.api('/api/me/preferences');this.assertActive();
+  async loadPreferences(){if(!account(this.ctx))return this.preferences;const value=await (this.ctx.displayGet?this.ctx.displayGet('/api/me/preferences'):this.ctx.api('/api/me/preferences'));this.assertActive();
     this.preferences={template_favorites:value.template_favorites||[],recent_templates:value.recent_templates||[]};return this.preferences;}
   filter(query='',category='all',scope='all'){
     const words=query.trim().toLowerCase().split(/\s+/).filter(Boolean),prefs=this.preferences;
@@ -157,6 +160,7 @@ export class CreationSession {
         if(!source.blob||!/^image\//.test(source.blob.type||''))throw problem('请先选择可用的照片');
         if(!draft.rights)throw problem('请先确认照片使用权');
         if(source.template_id&&!this.templates.some(t=>t.id===source.template_id))throw problem('所选风格尚未确认，重试成功前不会生成');
+        if(source.template_id)await this.catalog(source.template_id,true);
         if(source.template_id&&(!Array.isArray(this.config.template_quality_options)||!this.config.template_quality_options.includes(source.quality)))throw problem('当前生成档位尚未开放');
         if(source.template_id&&source.template_output_mode==='single'&&!(this.config.template_output_modes||[]).includes('single'))throw problem('单图模式尚未开放');
         if(!this.config.cos_ready)throw problem('照片上传通道尚未就绪，请稍后重试');
@@ -194,10 +198,16 @@ export class CreationSession {
     }finally{this.busy=false;}
   }
   async poll(jobId,onTick){
-    if(this.polling)return;this.polling=true;const until=Date.now()+180000;
-    try{while(this.active()&&Date.now()<until){const job=await this.ctx.api('/api/jobs/'+encodeURIComponent(jobId));this.assertActive();onTick(job);
-      if(job.status==='succeeded'||job.status==='failed')return job;await this.delay(1500);}return null;
-    }finally{this.polling=false;}
+    if(this.polling)return;this.polling=true;const started=Date.now(),hardUntil=started+30*60*1000;let until=started+180000,remaining=180000,paused=!this.visibility.visible(),last='',failures=0;
+    // Hidden time does not consume the three-minute foreground budget; absolute lifetime is bounded.
+    const unsubscribe=this.visibility.subscribe(visible=>{if(visible&&paused){until=Math.min(hardUntil,Date.now()+remaining);paused=false;}else if(!visible&&!paused){remaining=Math.max(0,until-Date.now());paused=true;}});
+    try{while(this.active()&&Date.now()<hardUntil&&(paused||Date.now()<until)){if(!this.visibility.visible())await this.visibility.wait();this.assertActive();if(Date.now()>=until||Date.now()>=hardUntil)return null;
+      let job,cancelRead=()=>{};try{const Controller=this.document&&this.document.defaultView&&this.document.defaultView.AbortController||globalThis.AbortController;this.pollController=Controller?new Controller():null;cancelRead=armReadTimeout(this.pollController,Math.min(until,hardUntil));job=await this.ctx.api('/api/jobs/'+encodeURIComponent(jobId),this.pollController?{signal:this.pollController.signal}:{});this.assertActive();failures=0;
+        if(!this.visibility.visible())continue;const signature=job.status+':'+job.stage;if(signature!==last){last=signature;onTick(job);}if(job.status==='succeeded'||job.status==='failed')return job;
+      }catch(e){this.assertActive();if(!this.visibility.visible())continue;if(e.status>=400&&e.status<500&&e.status!==429)throw e;failures++;}
+      finally{cancelRead();this.pollController=null;}
+      await this.delay(Math.min(failures?Math.min(15000,1500*2**Math.min(failures,4)):Date.now()-started<60000?1500:5000,Math.max(0,until-Date.now())));
+    }return null;}finally{unsubscribe();this.polling=false;}
   }
   async newCreation(){this.assertActive();const receipt=this.receipt();if(receipt&&!(receipt.state==='accepted'&&receipt.job_id))throw problem('上次提交仍待确认，请先核对');if(receipt)this.receipts.clear(this.owner,receipt.client_request_id);}
 }
@@ -222,22 +232,25 @@ export async function mountCreation(ctx,root,route,params={}) {
   }
   function money(mode=draft.input_mode){try{return price(session.config,mode,draft.quality);}catch(e){return null;}}
   function templateCard(item){
-    const card=node('article','creation-template-card'),img=node('img','creation-template-cover');img.src=item.cover||(item.covers||[])[0]||'/logo.jpg';img.alt=item.name||'风格示例';img.loading='lazy';
+    const card=node('article','creation-template-card'),img=node('img','creation-template-cover');img.src=item.thumbnail||item.thumbnailUrl||item.cover||(item.covers||[])[0]||'/favicon.svg';img.alt=item.name||'风格示例';img.loading='lazy';
+    let repair=0;img.addEventListener('error',run(async()=>{if(!active())return;if(repair++===0){try{await session.catalog('',true);if(!active())return;const fresh=session.templates.find(t=>t.id===item.id);if(!fresh){card.remove();return;}Object.assign(item,fresh);const url=fresh.thumbnail||fresh.thumbnailUrl;if(url&&url!==img.src&&mediaReusable(url)){img.src=url;return;}}catch(e){if(!active())return;img.alt='风格图片信息读取失败';ctx.toast(e.message||'风格图片信息读取失败，请刷新');return;}}if(repair<=2){const full=item.cover||(item.covers||[])[0];if(full&&mediaReusable(full)){img.src=full;return;}}img.alt='风格图片暂不可用';}));
     add(card,img,node('h3','',item.name),note(item.subtitle||''),note((item.usage_count||0)+' 次创作'));
     add(card,button('了解风格',()=>detail(item)),button(session.preferences.template_favorites.includes(item.id)?'已收藏 ♥':'收藏 ♡',run(async()=>{if(!await login())return;await session.favorite(item.id);renderTemplates();}),'creation-link-button'));
     return card;
   }
   let category='all',scope='all',search='';
-  function renderTemplates(){if(!active())return;root.replaceChildren();const head=node('header','creation-heading');add(head,node('p','creation-eyebrow','风格画廊'),node('h1','','寻找这次的表达方式'),note('先看示例与选图建议，再决定如何创作。'));root.append(head);
+  function renderTemplates(){if(!active())return;const existingGrid=root.querySelector('.creation-template-grid');root.replaceChildren();const head=node('header','creation-heading');add(head,node('p','creation-eyebrow','风格画廊'),node('h1','','寻找这次的表达方式'),note('先看示例与选图建议，再决定如何创作。'));root.append(head);
     const query=input(search,value=>{search=value;renderTemplateGrid();},false,40,false);query.placeholder='搜索风格名称、标签与场景';query.setAttribute('aria-label','搜索风格');root.append(query);
     const tabs=node('nav','creation-tabs');[['all','全部'],['favorites','我的收藏'],['recent','最近使用']].forEach(([id,name])=>tabs.append(button(name,run(async()=>{if(id!=='all'&&!await login())return;scope=id;renderTemplates();}),'creation-tab'+(scope===id?' is-active':''))));root.append(tabs);
     const cats=node('nav','creation-tabs');[{id:'all',name:'全部分类'},...session.groups].forEach(group=>cats.append(button(group.name,()=>{category=group.id;renderTemplates();},'creation-tab'+(category===group.id?' is-active':''))));root.append(cats);
-    if(templateError)add(root,note(templateError),button('重新加载风格',run(loadCatalog)));
-    if(status)root.append(note(status));root.append(node('div','creation-template-grid'));renderTemplateGrid();
+    if(templateError)add(root,note(templateError),button('重新加载风格',run(()=>loadCatalog(true))));
+    if(status)root.append(note(status));root.append(existingGrid||node('div','creation-template-grid'));renderTemplateGrid();
   }
-  function renderTemplateGrid(){if(!active())return;const grid=root.querySelector('.creation-template-grid');if(!grid)return;grid.replaceChildren();const items=session.filter(search,category,scope);items.forEach(item=>grid.append(templateCard(item)));if(!items.length)grid.append(note(templateError?'加载后再浏览风格':'没有找到符合条件的风格，试试其他关键词或分类。'));}
+  function renderTemplateGrid(){if(!active())return;const grid=root.querySelector('.creation-template-grid');if(!grid)return;const items=session.filter(search,category,scope).map(item=>({...item,display_favorite:session.preferences.template_favorites.includes(item.id)}));reconcileById(grid,items,templateCard);if(!items.length)grid.append(note(templateError?'加载后再浏览风格':'没有找到符合条件的风格，试试其他关键词或分类。'));}
   function detail(item){
-    if(!active())return;const dialog=node('dialog','creation-dialog'),content=node('section','creation-template-detail');
+    if(!active())return;
+    if((Array.isArray(item.covers)?item.covers:[item.cover]).filter(Boolean).some(url=>!mediaReusable(url))){run(async()=>{await session.catalog(item.id,true);const fresh=session.templates.find(t=>t.id===item.id);if(fresh&&(Array.isArray(fresh.covers)?fresh.covers:[fresh.cover]).filter(Boolean).every(url=>mediaReusable(url)))detail(fresh);else throw problem('风格图片签名尚未更新，请刷新后重试');})();return;}
+    const dialog=node('dialog','creation-dialog'),content=node('section','creation-template-detail');
     const covers=(Array.isArray(item.covers)&&item.covers.length?item.covers:[item.cover]).filter(Boolean);covers.forEach((url,i)=>{const img=node('img','creation-detail-image');img.src=url;img.alt=(item.name||'风格')+'示例 '+(i+1);content.append(img);});
     add(content,node('h2','',item.name),note(item.subtitle||''),note(item.guide&&item.guide.advice||'请选择主体清楚、遮挡较少的照片。'));
     for(const [key,title]of [['suitable','适合这样的照片'],['unsuitable','不太适合']])if(item.guide&&Array.isArray(item.guide[key])&&item.guide[key].length){content.append(node('h3','',title));const list=node('ul','creation-advice');item.guide[key].forEach(text=>list.append(node('li','',text)));content.append(list);}
@@ -245,7 +258,7 @@ export async function mountCreation(ctx,root,route,params={}) {
     add(content,button('使用这个风格',()=>{dialog.close();ctx.navigate('create',{templateId:item.id});}),button('关闭',()=>dialog.close(),'creation-link-button'));dialog.append(content);root.append(dialog);dialog.addEventListener('close',()=>dialog.remove());dialog.showModal();
   }
   let catalogVersion=0;
-  async function loadCatalog(){const version=++catalogVersion,requested=draft.template_id||'';templateError='';try{const found=await session.catalog(requested);if(version!==catalogVersion||requested!==draft.template_id)return;target=found;if(target&&!Object.keys(draft.text_fields||{}).length)(target.text_fields||[]).forEach(f=>draft.text_fields[f.key]=f.default||'');if(!session.config){session.config=await ctx.api('/api/config');session.assertActive();}if(account(ctx))await session.loadPreferences();}catch(e){if(!active()||version!==catalogVersion||requested!==draft.template_id)return;templateError=e.message||'风格加载失败，请稍后重试';target=null;}if(active())render();}
+  async function loadCatalog(force=false){const version=++catalogVersion,requested=draft.template_id||'';templateError='';try{const found=draft.input_mode==='text'&&route!=='templates'&&!requested?null:await session.catalog(requested,force);if(version!==catalogVersion||requested!==draft.template_id)return;target=found;if(target&&!Object.keys(draft.text_fields||{}).length)(target.text_fields||[]).forEach(f=>draft.text_fields[f.key]=f.default||'');if(!session.config){session.config=await ctx.api('/api/config');session.assertActive();}if(account(ctx)&&route==='templates')await session.loadPreferences();}catch(e){if(!active()||version!==catalogVersion||requested!==draft.template_id)return;templateError=e.message||'风格加载失败，请稍后重试';target=null;}if(active())render();}
   async function restore(value){const restored=Object.assign(freshDraft(value.input_mode),value,{rights:false});if(restored.input_mode==='text'&&route!=='text'){ctx.navigate('text',{initialDraft:restored});return;}
     draft=restored;if(draft.template_id){try{target=await session.catalog(draft.template_id);templateError='';}catch(e){target=null;templateError=e.message;}}if(active())render();}
   async function chooseFile(file){if(!file||!/^image\//.test(file.type||''))throw problem('请选择照片文件');const previous=draft.blob;draft.blob=file;draft.rights=false;if(!await login()){if(ctx.accountVersion===session.version)draft.blob=previous;return;}const receipt=session.receipt();if(receipt&&receipt.state!=='accepted'&&!retryable)throw problem('上次提交仍待确认，暂不更换原图');
@@ -266,7 +279,7 @@ export async function mountCreation(ctx,root,route,params={}) {
     [['photo','照片创作'],['text','文字生图']].forEach(([mode,label])=>{const entry=button(label,run(()=>switchMode(mode)),'creation-tab'+(mode===draft.input_mode?' is-active':''));entry.dataset.action='mode-'+mode;entry.setAttribute('aria-current',mode===draft.input_mode?'page':'false');entry.disabled=formBusy;modes.append(entry);});root.append(modes);
     const grid=node('div','creation-form-grid'),preview=node('section','creation-preview-column'),form=node('section','creation-form-column');
     if(status)add(form,node('div','creation-state',status));
-    if(templateError)add(form,node('div','creation-state',templateError),button('重试所选风格',run(loadCatalog)));
+    if(templateError)add(form,node('div','creation-state',templateError),button('重试所选风格',run(()=>loadCatalog(true))));
     if(draft.input_mode==='photo'){
       const picker=node('input','creation-file');picker.type='file';picker.accept='image/*';picker.setAttribute('aria-label','选择照片');picker.disabled=formBusy;picker.addEventListener('change',run(async()=>{await chooseFile(picker.files&&picker.files[0]);}));
       add(preview,field('选择照片',picker,'选图与个人草稿需要登录；照片不会自动公开到社区。'));

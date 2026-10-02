@@ -1,10 +1,10 @@
 """Consent-bound community publication; no client-selected media keys or rewards."""
 import time
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, StrictBool, Field
 import cos_store as cos
-from community_store import CommunityStore, CATEGORIES
+from community_store import CommunityStore, CATEGORIES, editorial_thumbnail
 from community_submissions import store_for, PENDING_TTL
 from community_interactions import interactions_for, REPORT_REASONS
 import wechat_sec
@@ -52,7 +52,7 @@ def visible_post(m, sid):
         if row['status']!='published' or not author or author.get('banned') or not m.settings.cos_ready():
             raise HTTPException(404,detail='帖子已下架或不存在')
         return row
-    row=next((p for p in CommunityStore(m.settings).list(status='published',limit=200)['items'] if p['id']==sid),None)
+    row=next((p for p in CommunityStore(m.settings).public_items() if p['id']==sid),None)
     if not row:raise HTTPException(404,detail='帖子已下架或不存在')
     return row
 
@@ -98,8 +98,9 @@ def keys(row):
     return [row['payload'][k] for k in ('result_key','orig_key') if row['payload'].get(k)]
 
 
-def signed(m, key):
+def signed(m, key, *, thumbnail=False):
     if not key or not m.settings.cos_ready():return ''
+    if thumbnail:return cos.thumbnail_url(m.settings,key,ttl_seconds=300)
     return cos.presign(m.settings,'get',key,ttl_seconds=300)
 
 
@@ -110,6 +111,7 @@ def owner_view(m, row):
             'share_original':p['share_original'],'reason':row['reason'],'featured':bool(row['featured']),
             'reward':row['reward'],'rewarded':store_for(m.users).rewarded(row['id']),'submitted_at':row['submitted'],
             'result_url':signed(m,p['result_key']) if visible else '',
+            'thumbnail_url':signed(m,p['result_key'],thumbnail=True) if row['status']=='published' else '',
             'orig_url':signed(m,p['orig_key']) if visible and p['share_original'] else ''}
 
 
@@ -134,6 +136,13 @@ def community_user(m,request):
 
 def make_community_router(runtime):
     router=APIRouter()
+
+    @router.get('/api/community/media/{filename}/thumbnail')
+    def editorial_media_thumbnail(filename:str):
+        try:data=CommunityStore(runtime().settings).thumbnail_bytes(filename)
+        except (OSError,ValueError):raise HTTPException(404,detail='图片不存在')
+        # Browser/proxy caches must not extend a paused publication's visibility.
+        return Response(data,media_type='image/jpeg',headers={'Cache-Control':'private, no-store'})
 
     @router.post('/api/community/submissions')
     def submit(body:SubmissionBody,request:Request):
@@ -225,7 +234,7 @@ def make_community_router(runtime):
                 author=m.users.get_user(row['owner']) if row else None
                 if not row or row['status']!='published' or not author or author.get('banned'):raise HTTPException(404,detail='帖子已下架或不存在')
             else:
-                row=next((p for p in CommunityStore(m.settings).list(status='published',limit=200)['items'] if p['id']==sid),None)
+                row=next((p for p in CommunityStore(m.settings).public_items() if p['id']==sid),None)
                 if not row:raise HTTPException(404,detail='帖子已下架或不存在')
                 base=max(0,int(row.get('likes') or 0))
             s.set_like(sid,u['openid'],body.liked);count,liked=s.likes([sid],u['openid'])[sid] if body.liked else s.likes([sid],u['openid']).get(sid,(0,False))
@@ -313,33 +322,34 @@ def public_feed(m,request,offset=0,limit=200,liked_only=False,category='all'):
         except HTTPException:pass  # Viewing is public; writes still require a valid session.
     if liked_only:
         viewer=m._current_user(request)['openid']
-    s=store_for(m.users);items=[];liked_ids=None
+    s=store_for(m.users);items=[];liked_ids=None;editorial_candidates=[]
+    offset=max(0,offset);limit=max(1,min(200,limit))
     if liked_only:
         with m.users._lock:
             viewers=aliases_unlocked(m.users,viewer)
             liked_ids={r[0] for r in m.users._conn.execute('SELECT post_id FROM community_likes WHERE owner IN ('+marks(viewers)+')',viewers)}
-    for p in CommunityStore(m.settings).list(status='published',limit=200)['items']:
+    for p in CommunityStore(m.settings).public_items():
         if liked_ids is not None and p['id'] not in liked_ids:continue
         if category!='all' and p.get('category','all')!=category:continue
+        editorial_candidates.append(p)
         items.append({'id':p['id'],'title':p.get('title',''),'story':p.get('story',''),
             'authorName':p.get('author_name',''),'authorAvatar':p.get('author_avatar',''),'date':p.get('date',''),
             'category':p.get('category','all'),'categoryName':p.get('category_name',''),
             'templateId':p.get('template_id',''),'templateName':p.get('template_name',''),
             'quality':p.get('quality','light'),'resultUrl':p.get('result_url',''),'origUrl':p.get('orig_url',''),
+            'thumbnailUrl':p.get('result_url',''),
             'likes':m._community_likes(p.get('likes')),'liked':False,'pinned':bool(p.get('pinned')),
             'featured':False,'_sort':(not p.get('pinned'),p.get('sort',100),-float(p.get('created_at') or 0),p['id'])})
-    submission_rows=[];submission_offset=0
-    while True:
-        batch,total_submissions=s.list(status='published',offset=submission_offset,limit=200)
-        submission_rows.extend(batch);submission_offset+=len(batch)
-        if not batch or submission_offset>=total_submissions:break
-    author_cache={};cos_ready=m.settings.cos_ready()
-    for row in submission_rows:
-        if liked_ids is not None and row['id'] not in liked_ids:continue
-        if not cos_ready:continue
-        if row['owner'] not in author_cache:author_cache[row['owner']]=m.users.get_user(row['owner'])
-        author=author_cache[row['owner']]
-        if not author or author.get('banned'):continue
+    candidates,total=s.public_page(editorial_candidates,offset=offset,limit=limit,category=category,
+        liked_viewer=viewer if liked_only else None,cos_ready=m.settings.cos_ready())
+    editorial_views={p['id']:p for p in items}
+    submission_rows=s.public_rows([p['id'] for p in candidates if p['source']=='submission'])
+    items=[]
+    for candidate in candidates:
+        if candidate['source']=='editorial':
+            items.append(editorial_views[candidate['id']]);continue
+        row=submission_rows.get(candidate['id'])
+        if not row:continue
         p=row['payload']
         if category!='all' and p.get('category','all')!=category:continue
         if not p.get('result_key'):continue
@@ -350,12 +360,14 @@ def public_feed(m,request,offset=0,limit=200,liked_only=False,category='all'):
             '_media_keys':(p['result_key'],p['orig_key'] if p['share_original'] else ''),
             'likes':0,'liked':False,'pinned':bool(row['featured']),'featured':bool(row['featured']),
             '_sort':(not row['featured'],100,-row['submitted'],row['id'])})
-    items.sort(key=lambda p:p['_sort']);total=len(items);offset=max(0,offset);limit=max(1,min(200,limit));items=items[offset:offset+limit]
     likes=s.likes([p['id'] for p in items],viewer)
     counts=interactions_for(m.users).counts([p['id'] for p in items])
     for p in items:
         media_keys=p.pop('_media_keys',None)
-        if media_keys:p['resultUrl']=signed(m,media_keys[0]);p['origUrl']=signed(m,media_keys[1])
+        if media_keys:
+            p['resultUrl']=signed(m,media_keys[0]);p['origUrl']=signed(m,media_keys[1])
+            p['thumbnailUrl']=signed(m,media_keys[0],thumbnail=True)
+        else:p['thumbnailUrl']=editorial_thumbnail(m.settings,p.get('resultUrl',''))
         count,liked=likes.get(p['id'],(0,False));p['likes']+=count;p['liked']=liked;p.pop('_sort',None)
         p['comments']=counts.get(p['id'],0)
     return {'enabled':True,'items':items,'featured_reward':m.settings.rewards()['community_featured'],
@@ -370,11 +382,13 @@ def post_view(m,row):
                 'category':p['category'],'categoryName':CATEGORIES[p['category']],
                 'templateId':p['template_id'],'templateName':p['template_name'],'quality':p['quality'],
                 'resultUrl':signed(m,p['result_key']),'origUrl':signed(m,p['orig_key']) if p['share_original'] else '',
+                'thumbnailUrl':signed(m,p['result_key'],thumbnail=True),
                 'likes':0,'liked':False,'featured':bool(row['featured']),'pinned':bool(row['featured'])}
     fields={'authorName':'author_name','authorAvatar':'author_avatar','categoryName':'category_name',
             'templateId':'template_id','templateName':'template_name','resultUrl':'result_url','origUrl':'orig_url'}
     return {**{k:row.get(k,'') for k in ('id','title','story','date','category','quality')},
             **{k:row.get(v,'') for k,v in fields.items()},'likes':m._community_likes(row.get('likes')),
+            'thumbnailUrl':editorial_thumbnail(m.settings,row.get('result_url','')),
             'liked':False,'featured':False,'pinned':bool(row.get('pinned'))}
 
 

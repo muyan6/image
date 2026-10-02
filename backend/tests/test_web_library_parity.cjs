@@ -13,7 +13,8 @@ async function test(name,fn){try{await fn();cases.push({case:name,passed:true});
  window.HTMLAnchorElement.prototype.click=function(){window.downloads.push({filename:this.download,url:this.href});};
  window.URL.createObjectURL=()=> 'blob:http://fixture.local/mock-image';window.URL.revokeObjectURL=()=>{};
  window.fetch=async url=>{if(window.events)window.events.mediaFetches.push(url);return {ok:true,status:200,blob:async()=>new window.Blob(['fixture-image'],{type:'image/png'})};};
- vm.runInContext(fs.readFileSync(path.join(root,'backend/static/web/library.js'),'utf8').replace('export async function mountLibrary','async function mountLibrary')+'\nwindow.mountLibrary=mountLibrary;',dom.getInternalVMContext());
+ const sharedSource=fs.readFileSync(path.join(root,'backend/static/web/shared-load.js'),'utf8').replace(/\bexport (?=(?:async )?function|class)/g,'');
+ vm.runInContext(sharedSource+'\n'+fs.readFileSync(path.join(root,'backend/static/web/library.js'),'utf8').replace(/^import .*;\r?\n/gm,'').replace('export async function mountLibrary','async function mountLibrary')+'\nwindow.mountLibrary=mountLibrary;',dom.getInternalVMContext());
  const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
  function locator(select){
   const nodes=()=>typeof select==='function'?select():Array.from(window.document.querySelectorAll(select));
