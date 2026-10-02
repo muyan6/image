@@ -2,3 +2,31 @@
 .eyebrow,.headline,.subtitle,.field-label,.hint,.error{display:block;}.eyebrow{font-size:21rpx;color:var(--accent-gold);letter-spacing:3rpx}.headline{font-family:var(--font-serif);font-size:40rpx;font-weight:600;margin:16rpx 0}.subtitle,.hint{font-size:24rpx;color:var(--ink-muted);line-height:1.8}.share-header{margin-bottom:26rpx}.form-card{padding:26rpx;background:var(--paper-card);border:1rpx solid var(--paper-border);margin:20rpx 0}.field-label{font-size:25rpx;font-weight:600;margin:20rpx 0 12rpx;color:var(--ink-title)}
 input,textarea{width:100%;padding:18rpx;background:var(--paper-card-subtle);border:1rpx solid var(--paper-border);color:var(--ink-body);font-size:25rpx;box-sizing:border-box;border-radius:4rpx;}input{height:78rpx}textarea{height:160rpx;line-height:1.7}.prompt-input{height:300rpx}.notice,.reason{padding:20rpx;background:var(--paper-card-subtle);border-left:3rpx solid var(--accent-gold);font-size:23rpx;line-height:1.8;color:var(--ink-muted);margin:18rpx 0}.reason,.error{color:var(--accent-rust)}.error{font-size:24rpx;line-height:1.7;margin:18rpx 0}
 .cover-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12rpx;margin-top:16rpx}.cover-card{min-width:0}.cover-card image{width:100%;height:180rpx;background:var(--paper-card-subtle)}button{font-size:24rpx;line-height:2.5;border-radius:5rpx;color:var(--ink-body);background:var(--paper-card);border:1rpx solid var(--paper-border)}.cover-card button{margin:6rpx 0 0;padding:0;width:100%;font-size:21rpx}.cover-add{display:flex;align-items:center;justify-content:center;height:180rpx;width:100%;padding:8rpx;margin:0;font-size:22rpx}.guide-heading{display:flex;flex-wrap:wrap;gap:10rpx;align-items:center;justify-content:space-between}.guide-heading button{font-size:22rpx;margin:0;padding:0 14rpx}.small-action{margin:12rpx 0 0;font-size:23rpx}.consent{display:flex;align-items:flex-start;gap:12rpx;font-size:24rpx;line-height:1.7;color:var(--ink-body);margin:22rpx 0}.consent text{flex:1;min-width:0}.form-actions{display:flex;gap:14rpx;flex-wrap:wrap}.form-actions button{flex:1;min-width:240rpx;margin:0;padding:10rpx 16rpx}.primary{background:var(--ink-title);color:var(--paper-bg)}button[disabled]{opacity:.45}.footer-links{display:flex;justify-content:space-between;gap:12rpx;margin-top:24rpx}.footer-links button{flex:1;margin:0;font-size:22rpx;padding:0 12rpx}
+
+/* Paste-first workflow: compact square controls, editable details stay available. */
+input,textarea{border-radius:0}
+button{box-sizing:border-box;display:flex;align-items:center;justify-content:center;min-height:80rpx;line-height:1.35;padding:12rpx 20rpx;border-radius:0;margin:0}
+button::after{border:none}
+.section-title{display:block;font-size:28rpx;font-weight:600;color:var(--ink-title);margin:0 0 14rpx}
+.import-tools{display:flex;gap:12rpx;margin:20rpx 0;align-items:stretch}
+.import-tools button{flex:1;min-width:0;font-size:24rpx}
+.import-tools .text-action{flex:0 0 150rpx;background:var(--paper-card-subtle);font-size:23rpx;padding:12rpx}
+.ai-reply-input{height:240rpx;margin-top:16rpx}
+.instruction-box{box-sizing:border-box;height:360rpx;padding:20rpx;background:var(--paper-card-subtle);border:1rpx solid var(--paper-border);margin:18rpx 0}
+.instruction-box text{display:block;white-space:pre-wrap;word-break:break-all;font-size:23rpx;line-height:1.7}
+.success-text{display:block;font-size:23rpx;line-height:1.7;color:#52664e;margin:16rpx 0 0}
+.import-card .error{margin-bottom:0}
+.guide-heading{margin-bottom:12rpx;flex-wrap:nowrap}
+.guide-heading .section-title{margin:0;flex:1;min-width:0}
+.guide-heading button{flex-shrink:0;min-width:140rpx;min-height:72rpx;font-size:23rpx}
+.template-summary{padding:20rpx;background:var(--paper-card-subtle);border:1rpx solid var(--paper-border);margin-top:18rpx}
+.summary-name,.summary-subtitle,.summary-prompt{display:block;word-break:break-all}
+.summary-name{font-size:28rpx;font-weight:600;line-height:1.5;color:var(--ink-title)}
+.summary-subtitle{font-size:24rpx;line-height:1.7;color:var(--ink-muted);margin-top:10rpx}
+.summary-prompt{font-size:23rpx;line-height:1.7;color:var(--ink-muted);margin-top:12rpx;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap}
+.reward-card{border:1rpx solid var(--paper-border);background:var(--paper-card-subtle);padding:24rpx;margin:22rpx 0}
+.reward-title,.reward-copy,.reward-rules{display:block}
+.reward-title{font-size:28rpx;color:var(--accent-gold);font-weight:600;margin-bottom:12rpx}
+.reward-copy{font-size:24rpx;line-height:1.8;color:var(--ink-body)}
+.reward-rules{font-size:22rpx;line-height:1.8;color:var(--ink-muted);margin-top:12rpx}
+.form-actions button{min-width:0;min-height:88rpx}

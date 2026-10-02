@@ -1,10 +1,11 @@
-const app=getApp(),api=require('../../utils/api.js');
+const app=getApp(),api=require('../../utils/api.js'),sharing=require('../../utils/template-sharing.js');
 const labels={draft:'草稿',pending:'审核中',rejected:'已退回',approved:'已上架',withdrawn:'已撤回'};
 const coverUrl=x=>typeof x==='string'?x:x&&(x.thumbnail_url||x.preview_url)||'';
 Page({
- data:{items:[],loading:false,error:'',hasMore:false,rewards:null},
- onShow(){this._visible=true;if(this._owner!==undefined&&this._owner!==(app.globalData.userId||''))this.setData({items:[],rewards:null});this.loadMine();},onHide(){this._visible=false;},onUnload(){this._unloaded=true;this._version=(this._version||0)+1;},
- onPullDownRefresh(){this.loadMine().finally(()=>wx.stopPullDownRefresh());},
+ data:{items:[],loading:false,error:'',hasMore:false,rewards:null,rewardTitle:'作者奖励',rewardText:'正在读取奖励规则…',rewardRules:'',policyError:'',policyLoading:false},
+ onShow(){this._visible=true;if(this._owner!==undefined&&this._owner!==(app.globalData.userId||''))this.setData({items:[],rewards:null});this.loadMine();this.loadPolicy();},onHide(){this._visible=false;},onUnload(){this._unloaded=true;this._version=(this._version||0)+1;},
+ onPullDownRefresh(){Promise.all([this.loadMine(),this.loadPolicy()]).finally(()=>wx.stopPullDownRefresh());},
+ async loadPolicy(){const version=(this._policyVersion||0)+1;this._policyVersion=version;this.setData({policyLoading:true,policyError:''});try{const r=await api.config(),copy=sharing.rewardCopy(r.template_sharing);if(!this._unloaded&&version===this._policyVersion)this.setData(copy);}catch(e){if(!this._unloaded&&version===this._policyVersion)this.setData({rewardTitle:'作者奖励',rewardText:'奖励规则暂未读取，请重试。',rewardRules:'',policyError:'奖励金额和条件以后台配置为准'});}finally{if(!this._unloaded&&version===this._policyVersion)this.setData({policyLoading:false});}},
  async loadMine(more=false){more=more===true;if(more&&(this.data.loading||!this.data.hasMore))return;const version=(this._version||0)+1;this._version=version;const offset=more?this._nextOffset||0:0;this.setData({loading:true,error:''});
   try{await api.ensureLogin();const owner=app.globalData.userId||'';this._owner=owner;const r=await api.request('/api/template-shares/mine?limit=24&offset='+offset);if(this._unloaded||version!==this._version)return;if(owner!==(app.globalData.userId||'')){this.setData({items:[],rewards:null,error:'账号已切换，请重新读取'});return;}const items=(r.items||[]).map(x=>({...x,template_id:x.template_id||x.published_template_id,statusLabel:labels[x.status]||x.status,coverUrl:api.absolute(coverUrl((x.covers||[])[0])),updatedLabel:x.updated_at?new Date(x.updated_at*1000).toLocaleDateString():''}));this._nextOffset=r.next_offset;this.setData({items:[...new Map((more?[...this.data.items,...items]:items).map(x=>[x.id,x])).values()],hasMore:!!r.has_more,rewards:r.rewards||null});}
   catch(e){if(!this._unloaded&&version===this._version)this.setData({error:e.message||'我的模板读取失败'});}finally{if(!this._unloaded&&version===this._version)this.setData({loading:false});}

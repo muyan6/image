@@ -2,3 +2,13 @@
 .notice-error{display:flex;align-items:center;gap:16rpx;flex-wrap:wrap}
 .notice-error-message{flex:1;min-width:0;word-break:break-word}
 .notice-retry{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:auto;min-width:96rpx;min-height:72rpx;margin:0;padding:0 22rpx;line-height:1.4}
+
+.reward-card{border:1rpx solid var(--paper-border);background:var(--paper-card);padding:24rpx;margin:22rpx 0}
+.reward-title,.reward-copy,.reward-rules{display:block}
+.reward-title{font-size:30rpx;color:var(--accent-gold);font-weight:600;margin-bottom:12rpx}
+.reward-copy{font-size:25rpx;line-height:1.8;color:var(--ink-body)}
+.reward-rules{font-size:22rpx;line-height:1.8;color:var(--ink-muted);margin-top:12rpx}
+.reward-card .notice-retry{margin-top:16rpx}
+button{box-sizing:border-box;display:flex;align-items:center;justify-content:center;min-height:80rpx;border-radius:0;line-height:1.35;padding:12rpx 20rpx}
+button::after{border:none}
+.primary{width:100%;min-height:88rpx}
