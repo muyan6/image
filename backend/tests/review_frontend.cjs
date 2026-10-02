@@ -61,7 +61,7 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
   await test('home_quick_entries_are_compact_inside_photo_card_before_style_showcase',()=>{
     const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/index/index.wxml'),'utf8');
     const css=fs.readFileSync(path.join(ROOT,'miniprogram/pages/index/index.wxss'),'utf8');
-    return [xml.indexOf('home-quick-actions')>xml.indexOf('portal-btn') && xml.indexOf('home-quick-actions')<xml.indexOf('portal-desc') && xml.indexOf('portal-desc')<xml.indexOf('portal-specs') && xml.indexOf('home-quick-actions')<xml.indexOf('generation-warning') &&
+    return [xml.indexOf('home-quick-actions')>xml.indexOf('portal-btn') && xml.indexOf('home-quick-actions')<xml.indexOf('portal-hint') && !xml.includes('class=\"portal-desc\"') && !xml.includes('class=\"portal-specs\"') && xml.indexOf('home-quick-actions')<xml.indexOf('generation-warning') &&
       xml.includes('catchtap="onOpenTextGeneration"')&&xml.includes('catchtap="onOpenHistory"')&&css.includes('min-height:88rpx'),
       {insidePhotoCard:xml.indexOf('home-quick-actions')<xml.indexOf('generation-warning'),compact:css.includes('min-height:88rpx')}];
   });

@@ -55,8 +55,7 @@
             <text class="quick-action-label">我的作品<text wx:if="{{ historyCount > 0 }}">（{{ historyCount }}）</text></text><text class="quick-action-arrow" aria-hidden="true">→</text>
           </button>
         </view>
-        <text class="portal-desc">点击从手机相册选择，或现场拍照</text>
-        <text class="portal-specs">支持 JPG / PNG / WebP · 自动适配超清</text>
+        <text class="portal-hint">相册 / 拍照 · JPG、PNG、WebP</text>
       </view>
     </view>
 
