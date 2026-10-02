@@ -8,6 +8,7 @@ import json
 import re
 import time
 import uuid
+from account_links import canonical_unlocked, aliases_unlocked, marks
 
 
 class ExperienceStore:
@@ -35,9 +36,15 @@ class ExperienceStore:
 
     def preferences(self, openid, available=None):
         with self.users._lock:
+            owners = aliases_unlocked(self.users, openid)
             rows = self.users._conn.execute(
                 'SELECT template_id,favorite,used_at,updated_at FROM template_preferences '
-                'WHERE openid=? ORDER BY updated_at DESC,template_id', (openid,)).fetchall()
+                'WHERE openid IN ('+marks(owners)+') ORDER BY updated_at DESC,template_id', owners).fetchall()
+        combined = {}
+        for identity, favorite, used_at, updated_at in rows:
+            previous = combined.get(identity, (identity, 0, None, 0))
+            combined[identity] = (identity, max(favorite, previous[1]), max(used_at or 0, previous[2] or 0) or None, max(updated_at, previous[3]))
+        rows = sorted(combined.values(), key=lambda row: (-row[3], row[0]))
         if available is not None:
             rows = [r for r in rows if r[0] in available]
         return {'template_favorites': [r[0] for r in rows if r[1]],
@@ -48,27 +55,33 @@ class ExperienceStore:
         now = time.time()
         with self.users._lock, self.users._conn:
             self.users._conn.execute('BEGIN IMMEDIATE')
+            owners = aliases_unlocked(self.users, openid)
+            openid = canonical_unlocked(self.users, openid)
             self.users._conn.execute(
                 'INSERT OR IGNORE INTO template_preferences(openid,template_id,updated_at) VALUES(?,?,?)',
                 (openid, template_id, now))
             if favorite is not None:
                 self.users._conn.execute(
-                    'UPDATE template_preferences SET favorite=?,updated_at=? WHERE openid=? AND template_id=?',
-                    (int(favorite), now, openid, template_id))
+                    'UPDATE template_preferences SET favorite=?,updated_at=? WHERE openid IN ('+marks(owners)+') AND template_id=?',
+                    (int(favorite), now, *owners, template_id))
             if recent:
                 self.users._conn.execute(
                     'UPDATE template_preferences SET used_at=?,updated_at=? WHERE openid=? AND template_id=?',
                     (now, now, openid, template_id))
                 # Retain only the last 20 recent ids; favorites remain intact.
                 self.users._conn.execute(
-                    'UPDATE template_preferences SET used_at=NULL WHERE openid=? AND used_at IS NOT NULL '
-                    'AND template_id NOT IN (SELECT template_id FROM template_preferences WHERE openid=? '
-                    'AND used_at IS NOT NULL ORDER BY used_at DESC,template_id LIMIT 20)', (openid, openid))
+                    'UPDATE template_preferences SET used_at=NULL WHERE openid IN ('+marks(owners)+') AND used_at IS NOT NULL '
+                    'AND template_id NOT IN (SELECT template_id FROM template_preferences WHERE openid IN ('+marks(owners)+') '
+                    'AND used_at IS NOT NULL GROUP BY template_id ORDER BY MAX(used_at) DESC,template_id LIMIT 20)', (*owners, *owners))
 
     def _submission(self, openid, request_id):
+        owners = aliases_unlocked(self.users, openid)
         cur = self.users._conn.execute(
-            'SELECT * FROM client_submissions WHERE openid=? AND request_id=?', (openid, request_id))
-        row = cur.fetchone()
+            'SELECT * FROM client_submissions WHERE openid IN ('+marks(owners)+') AND request_id=?', (*owners, request_id))
+        rows = cur.fetchall()
+        if len(rows) > 1:
+            raise ValueError('绑定账户的提交编号存在冲突，请在作品页核对')
+        row = rows[0] if rows else None
         return dict(zip([c[0] for c in cur.description], row)) if row else None
 
     def submission(self, openid, request_id):
@@ -84,6 +97,7 @@ class ExperienceStore:
         now = time.time()
         with self.users._lock, self.users._conn:
             self.users._conn.execute('BEGIN IMMEDIATE')
+            openid = canonical_unlocked(self.users, openid)
             row = self._submission(openid, request_id)
             if row:
                 if row['fingerprint'] != fingerprint:
@@ -99,16 +113,20 @@ class ExperienceStore:
 
     def settle(self, openid, request_id, state, error='', http_status=None):
         with self.users._lock, self.users._conn:
+            row = self._submission(openid, request_id)
+            if not row:
+                return
             self.users._conn.execute(
                 'UPDATE client_submissions SET state=?,error=?,http_status=?,updated_at=? '
                 'WHERE openid=? AND request_id=?',
-                (state, str(error)[:500], http_status, time.time(), openid, request_id))
+                (state, str(error)[:500], http_status, time.time(), row['openid'], request_id))
 
     def settlement(self, openid, job_id):
         with self.users._lock:
+            owners = aliases_unlocked(self.users, openid)
             row = self.users._conn.execute(
-                'SELECT amount,refunded,state FROM job_charges WHERE openid=? AND job_id=?',
-                (openid, job_id)).fetchone()
+                'SELECT amount,refunded,state FROM job_charges WHERE openid IN ('+marks(owners)+') AND job_id=?',
+                (*owners, job_id)).fetchone()
         if not row:
             return {'charged_amount': None, 'refunded_amount': None, 'settlement': 'historical_unknown'}
         return {'charged_amount': int(row[0]), 'refunded_amount': int(row[0]) if row[1] else 0,
@@ -129,15 +147,17 @@ class ExperienceStore:
                                 'created_at': at, 'job_id': job_id, 'order_id': order_id})
         with self.users._lock:
             db = self.users._conn
+            owners = aliases_unlocked(self.users, openid)
+            clause = ' IN ('+marks(owners)+')'
             for jid, amount, at in db.execute(
-                    'SELECT job_id,amount,created_at FROM job_charges WHERE openid=?', (openid,)):
+                    'SELECT job_id,amount,created_at FROM job_charges WHERE openid'+clause, owners):
                 add('charge:' + jid, 'generation', '生成作品', -int(amount), at, jid)
             violations = {r[0]: int(r[1]) for r in db.execute(
-                'SELECT id,charged FROM violations WHERE openid=?', (openid,))}
+                'SELECT id,charged FROM violations WHERE openid'+clause, owners)}
             for aid, at, action, detail in db.execute(
-                    "SELECT id,ts,action,detail FROM audit WHERE openid=? AND action IN "
+                    "SELECT id,ts,action,detail FROM audit WHERE openid"+clause+" AND action IN "
                     "('refund','earn_checkin','earn_video','community_featured','blocked','violation_review','admin_adjust_balance')",
-                    (openid,)):
+                    owners):
                 amount = None; title = ''; kind = action; jid = None
                 job = re.search(r'(?:^|\s)job=([A-Za-z0-9_-]+)', detail)
                 if job: jid = job.group(1)
@@ -162,15 +182,15 @@ class ExperienceStore:
             # The bindings retain historical reward amounts; older NULL entries
             # explicitly lack that evidence and are not replaced by today's price.
             for invitee, inviter, at, reward in db.execute(
-                    'SELECT invitee,inviter,created_at,reward FROM invite_bindings WHERE invitee=? OR inviter=?',
-                    (openid, openid)):
+                    'SELECT invitee,inviter,created_at,reward FROM invite_bindings WHERE invitee'+clause+' OR inviter'+clause,
+                    (*owners, *owners)):
                 if reward is not None:
                     identity = hashlib.sha256((openid + '\0' + invitee).encode()).hexdigest()[:20]
                     add('invite:' + identity, 'invite', '邀请奖励', int(reward), at)
             exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='payment_ledger'").fetchone()
             if exists:
                 for lid, oid, action, delta, at in db.execute(
-                        'SELECT id,order_id,action,delta,created_at FROM payment_ledger WHERE openid=?', (openid,)):
+                        'SELECT id,order_id,action,delta,created_at FROM payment_ledger WHERE openid'+clause, owners):
                     add('payment:' + str(lid), 'payment_' + action,
                         '充值到账' if action == 'credit' else '充值退款扣回', int(delta), at, order_id=oid)
         records.sort(key=lambda r: (r['created_at'], r['id']), reverse=True)

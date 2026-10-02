@@ -587,7 +587,19 @@
           <p class="muted" style="margin:0">填好后小程序才能正常登录，且才能调用微信官方免费内容安全审核接口（mediaCheckAsync）</p>
         </div>
         <div class="card">
-          <div class="card-head"><h2>微信虚拟支付配置<small>凭证仅保存在服务端；商品上架与验单发货完成前不开放收款</small></h2></div>
+          <div class="card-head"><h2>网站注册与微信绑定<small>网站可独立注册；初始光子固定为 0，仅通过账号管理手动增加</small></h2></div>
+          <div class="form-grid">
+            <div class="field"><label><input type="checkbox" id="site-wx-enabled">启用网站微信绑定</label><small>未申请公众号或开放平台网站应用时保持关闭，不影响网站注册与创作。</small></div>
+            <div class="field"><label>接入类型</label><select id="site-wx-kind"><option value="official">公众号网页授权（微信内手机）</option><option value="open">开放平台网站应用（浏览器扫码）</option></select></div>
+            <div class="field"><label>网站微信 AppID</label><input id="site-wx-appid" placeholder="公众号或网站应用的 AppID"></div>
+            <div class="field"><label>网站微信 AppSecret <small>打码表示保持原值</small></label><input id="site-wx-secret" type="password" autocomplete="new-password"></div>
+            <div class="field"><label>网站公开 HTTPS 地址</label><input id="site-wx-origin" type="url" placeholder="https://image.myil.top"></div>
+          </div>
+          <p class="muted">回调路径固定为 <code>/api/auth/site/wechat/callback</code>。公众号/网站应用和小程序须绑定同一开放平台，通过服务端核验 UnionID 后同步账户。不同 AppID 的 OpenID 不会凭名称或手机号猜测合并。</p>
+          <p class="muted">已有网页余额只合并一次；原网页与小程序作品、流水仍保留，绑定不重复赠送。未取得配置前，网页显示“微信绑定尚未配置”，不生成假的绑定结果。</p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>微信虚拟支付配置<small>仅小程序渠道；网站注册账户不开放购买或自动奖励</small></h2></div>
           <div class="form-grid">
             <div class="field"><label><input type="checkbox" id="pay-enabled">启用光子充值</label><small>确认商品、发货推送及新版小程序已部署后开启；由用户主动确认付款。</small></div>
             <div class="field"><label>支付环境</label><select id="pay-env" disabled><option value="0">现网（个人主体固定 env=0）</option></select></div>
@@ -650,11 +662,11 @@
       <section id="page-users" hidden>
         <div class="card">
           <div class="card-head">
-            <h2>账号管理<small id="users-summary">微信账号与网页访客分别统计</small></h2>
+            <h2>账号管理<small id="users-summary">微信账号与已注册网站账户；普通访客不建立用户</small></h2>
             <select id="users-source" onchange="loadUsers()" style="width:auto;margin-left:auto;margin-right:12px">
+              <option value="all">全部注册账号</option>
               <option value="wechat">微信小程序账号</option>
-              <option value="web">网页访客</option>
-              <option value="all">全部账号</option>
+              <option value="web">网站注册账号</option>
             </select>
             <button class="btn-ghost btn-small" onclick="loadUsers()">刷新</button>
             <button class="btn-danger btn-small" onclick="openPurgeUsersModal()">全部移出列表</button>
@@ -842,7 +854,7 @@ async function loadOverview() {
       stat("≈¥" + (s.today_cost_cny ?? 0).toFixed(2), "今日网关参考成本") +
       stat("≈$" + (s.today_cost_usd ?? 0).toFixed(3), "今日 fal 参考成本") +
       stat(s.wechat_users_total ?? s.users_total ?? 0, "微信小程序账号") +
-      stat(s.web_users_total ?? 0, "网页访客（单独统计）");
+      stat(s.web_registered_total ?? s.web_users_total ?? 0, "网站注册账号（不含访客）");
     $("chain-line").textContent = "降级链：" + o.chain.join(" → ") +
       (o.free_mode ? "　【调试模式】" : "");
     const NAMES = { worldcodes: "中转网关", fal: "fal.ai", baidu: "百度 AI", local: "本地引擎" };
@@ -1078,6 +1090,11 @@ window.saveCommerce=async()=>{
 function renderSec() {
   $("wx-appid").value = SETTINGS.wechat?.app_id || "";
   $("wx-secret").value = SETTINGS.wechat?.app_secret || "";
+  $("site-wx-enabled").checked = SETTINGS.web_wechat?.enabled === true;
+  $("site-wx-kind").value = SETTINGS.web_wechat?.kind || "official";
+  $("site-wx-appid").value = SETTINGS.web_wechat?.app_id || "";
+  $("site-wx-secret").value = SETTINGS.web_wechat?.app_secret || "";
+  $("site-wx-origin").value = SETTINGS.web_wechat?.public_origin || "";
   $("pay-offer-id").value = SETTINGS.payment?.offer_id || "";
   $("pay-enabled").checked = SETTINGS.payment?.enabled === true;
   $("pay-env").value = 0;
@@ -1154,6 +1171,9 @@ window.testWechat = async () => {
 
 window.saveSec = async () => saveSettingsPatch({
       wechat: { app_id: $("wx-appid").value.trim(), app_secret: $("wx-secret").value.trim() },
+      web_wechat:{enabled:$("site-wx-enabled").checked,kind:$("site-wx-kind").value,
+                 app_id:$("site-wx-appid").value.trim(),app_secret:$("site-wx-secret").value.trim(),
+                 public_origin:$("site-wx-origin").value.trim(),callback_path:"/api/auth/site/wechat/callback"},
       payment: {enabled:$("pay-enabled").checked,env:0, offer_id: $("pay-offer-id").value.trim(),
                  production_app_key: $("pay-production-key").value.trim() },
       tencent: { secret_id: $("tc-id").value.trim(), secret_key: $("tc-key").value.trim(),
@@ -1779,11 +1799,11 @@ window.saveCommunityPost = async id => {
 /* ---------- 用户管理 ---------- */
 async function loadUsers() {
   try {
-    const source = $("users-source").value || "wechat";
+    const source = $("users-source").value || "all";
     const data = await api("/users?limit=30&account_type=" + encodeURIComponent(source));
     const counts = data.stats || {};
     $("users-summary").textContent = "微信账号 " + (counts.wechat_users_total ?? 0) +
-      " · 网页访客 " + (counts.web_users_total ?? 0) + "（当前管理列表，按来源区分）";
+      " · 网站注册 " + (counts.web_registered_total ?? 0) + "（普通访客不计入）";
     const t = $("users-table");
     t.innerHTML = tableColumns([190,170,125,125,65,65,90,90,225]) + "<thead><tr><th>固定账号编号</th><th>来源 / AppID</th><th>首次使用</th><th>最近活跃</th><th>已修图</th><th>被拦截</th><th>光子余额</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody>";
     const tbody = t.tBodies[0];
@@ -1791,13 +1811,14 @@ async function loadUsers() {
       const tr = document.createElement("tr");
       const identity = u.user_id || u.openid;
       const masked = u.openid.slice(0, 6) + "…" + u.openid.slice(-4);
-      const sourceLabel = u.account_type === "web" ? "网页访客" : "微信小程序";
+      const sourceLabel = u.account_type === "web" ? "网站注册账号" : "微信小程序";
       tr.innerHTML = `<td><code title="${esc(u.openid)}">${esc(identity)}</code><br><small class="muted">${esc(masked)}</small></td>` +
-        `<td><span class="badge">${sourceLabel}</span><br><small class="muted">${esc(u.app_id || (u.account_type === "web" ? "独立浏览器身份" : "历史 AppID 未记录"))}</small></td>` +
+        `<td><span class="badge">${sourceLabel}</span><br><small class="muted">${esc(u.username || u.app_id || (u.account_type === "web" ? "已注册网站账户" : "历史 AppID 未记录"))}${u.wechat_bound?' · 微信已绑定':''}</small></td>` +
         `<td>${fmtTime(u.created_at)}</td><td>${fmtTime(u.last_seen)}</td>` +
         `<td>${u.total_jobs}</td><td>${u.blocked}</td><td>✦ ${u.balance ?? 0}</td>` +
         `<td>${u.banned ? '<span class="badge red">已封禁</span>' : '<span class="badge">正常</span>'}</td>` +
-        `<td><button class="btn-ghost" data-act="bal" style="padding:3px 10px;font-size:12px" data-oid="${esc(u.openid)}" data-bal="${u.balance ?? 0}">改光子</button> ` +
+        `<td><button class="btn-ghost" data-act="bal" style="padding:3px 10px;font-size:12px" data-oid="${esc(u.openid)}" data-bal="${u.balance ?? 0}">手动改光子</button> ` +
+        (u.web_registered?`<button class="btn-ghost" data-act="site-password" style="padding:3px 10px;font-size:12px" data-oid="${esc(u.openid)}">重置网页密码</button> `:'') +
         `<button class="btn-danger" data-act="ban" style="padding:3px 10px;font-size:12px" data-oid="${esc(u.openid)}" data-banned="${u.banned ? 1 : 0}">${u.banned ? "解封" : "封禁"}</button> ` +
         `<button class="btn-ghost" data-act="cleanup" style="padding:3px 10px;font-size:12px" data-oid="${esc(u.openid)}" title="只清理管理列表，再次使用自动显示">移出列表</button></td>`;
       tbody.appendChild(tr);
@@ -1894,6 +1915,13 @@ $("users-table").addEventListener("click", async (e) => {
       alert("已更新，当前余额 ✦" + r.balance);
       loadUsers();
     } catch (err) { alert("失败: " + err.message); }
+  } else if (btn.dataset.act === "site-password") {
+    const value=prompt('设置新的网页密码（10–128个字符）。保存后该网站账户的所有会话将失效，需要重新登录。');
+    if(value===null)return;
+    if(value.length<10||value.length>128)return alert('请输入10–128个字符的新密码');
+    if(!confirm('确认重置该网站账户密码并撤销所有网页会话？'))return;
+    try{await api('/users/'+encodeURIComponent(oid)+'/site-password',{method:'POST',body:{new_password:value}});toast('网页密码已重置，旧会话已撤销');}
+    catch(err){alert(err.message);}
   } else if (btn.dataset.act === "cleanup") {
     if (!confirm("从管理列表移出此用户？\n不封禁，不删除余额与作品；用户再次使用会自动显示。")) return;
     try {

@@ -422,13 +422,33 @@ def make_admin_router(*, settings: SettingsStore,
         return {"ok": True}
 
     @router.get("/users")
-    def list_users(request: Request, limit: int = 30, account_type: str = "wechat") -> Dict[str, Any]:
+    def list_users(request: Request, limit: int = 30, account_type: str = "all") -> Dict[str, Any]:
         _guard(request)
-        try:
-            items = users.list_users(min(max(1, limit), 200), account_type=account_type)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"items": items, "account_type": account_type, "stats": users.stats()}
+        if account_type not in ('all','wechat','web'):
+            raise HTTPException(400,detail='账号来源无效')
+        from account_links import canonical_unlocked, aliases_unlocked
+        from web_accounts import store_for as site_accounts
+        site_accounts(users)  # Creates schema only; browsing never creates a user.
+        with users._lock:
+            columns=','.join('u.'+name.strip() for name in users._USER_COLS.split(','))
+            query='SELECT '+columns+' FROM users u LEFT JOIN account_aliases a ON a.alias_openid=u.openid JOIN users c ON c.openid=COALESCE(a.canonical_openid,u.openid) WHERE c.admin_hidden=0 AND (u.account_type=\'wechat\' OR EXISTS(SELECT 1 FROM web_credentials w WHERE w.account_id=u.openid))'
+            args=[]
+            if account_type!='all':query+=' AND u.account_type=?';args.append(account_type)
+            query+=' ORDER BY c.last_seen DESC,u.created_at DESC LIMIT ?';args.append(min(max(1,limit),200))
+            items=[users._user_row(row) for row in users._conn.execute(query,args).fetchall()]
+            credentials=dict(users._conn.execute('SELECT account_id,username FROM web_credentials').fetchall())
+            rows=[]
+            for item in items:
+                original=item['openid']
+                if item['account_type']=='web' and original not in credentials:continue
+                owner=canonical_unlocked(users,original)
+                identities=aliases_unlocked(users,owner)
+                username=next((credentials[k] for k in identities if k in credentials),'')
+                balance_row=users._conn.execute('SELECT balance,admin_hidden FROM users WHERE openid=?',(owner,)).fetchone()
+                if balance_row and balance_row[1]:continue
+                rows.append({**item,'balance':int(balance_row[0]) if balance_row else item['balance'],
+                             'username':username,'web_registered':bool(username),'wechat_bound':bool(username and not owner.startswith('web-'))})
+        return {"items": rows, "account_type": account_type, "stats": users.stats()}
 
     @router.get("/users/remove-summary")
     def remove_users_summary(request: Request) -> Dict[str, Any]:
@@ -467,15 +487,18 @@ def make_admin_router(*, settings: SettingsStore,
             raise HTTPException(status_code=404, detail="用户不存在")
         body = await _json_body(request)
         try:
-            if body.get("delta") is not None:
-                balance = users.add_balance(openid, int(body["delta"]))
-            else:
-                balance = users.set_balance(openid, int(body.get("balance") or 0))
+            balance = users.admin_adjust_balance(openid, delta=body.get('delta'), balance=body.get('balance'))
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail="金额必须是整数") from exc
-        users.audit(openid, "admin_adjust_balance",
-                    "delta=%s balance=%s" % (body.get("delta"), balance))
         return {"ok": True, "balance": balance}
+
+    @router.post('/users/{openid}/site-password')
+    async def reset_site_password(openid: str, request: Request):
+        _guard(request)
+        body=await _json_body(request)
+        from web_accounts import store_for as site_accounts
+        try:return site_accounts(users).admin_reset(openid,body.get('new_password'))
+        except (TypeError,ValueError) as exc:raise HTTPException(400,detail=str(exc)) from exc
 
     @router.put("/users/{openid}/ban")
     async def set_user_ban(openid: str, request: Request) -> Dict[str, Any]:

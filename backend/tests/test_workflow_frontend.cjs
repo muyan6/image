@@ -32,7 +32,7 @@ const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/or
     assert(xml.includes('wx:if="{{ historyCount > 0 }}"'));
     const p=page('index');assert.equal(typeof p.onOpenHistory,'function');
     assert(!xml.slice(xml.indexOf('class="history-entry"')).includes('bindtap="onOpenTextGeneration"'));
-    assert(fs.readFileSync(path.join(root,'backend/index.html'),'utf8').includes('旧日瞬间 · 重现眼前'));
+    const creation=fs.readFileSync(path.join(root,'backend/static/web/creation.js'),'utf8');assert(creation.includes('旧日瞬间')&&creation.includes('重现眼前'));
   });
   await test('invite_button_uses_shorter_label_and_keeps_share_handler',()=>{
     const xml=fs.readFileSync(path.join(root,'miniprogram/pages/invite/invite.wxml'),'utf8');

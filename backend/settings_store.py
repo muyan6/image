@@ -83,6 +83,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
                        "poll_interval": 5, "timeout_seconds": 1800, "ci_biz_type": "", "audit_mode": "wechat_auto"},
     "text_generation": {"enabled":False,"model":"","endpoint":"/v1/images/generations","price":40},
     "wechat": {"app_id": "", "app_secret": ""},
+    "web_wechat": {"enabled": False, "kind": "official", "app_id": "", "app_secret": "",
+                   "public_origin": "", "callback_path": "/api/auth/site/wechat/callback"},
     "payment": {"enabled":False,"env":0,"offer_id": "", "sandbox_app_key": "", "production_app_key": ""},
     "tencent": {"secret_id": "", "secret_key": "", "cos_bucket": "", "cos_region": "ap-guangzhou", "cos_custom_domain": ""},
     "moderation": {"enabled": False, "block_on_error": False, "wechat_push_token": ""},
@@ -123,7 +125,7 @@ def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # 误删后服务会残废的关键结构：合并后一律用默认值兜底补齐
-_DICT_SECTIONS = ("providers", "wechat", "payment", "tencent", "moderation", "quota", "processing", "text_generation", "cloud_pipeline",
+_DICT_SECTIONS = ("providers", "wechat", "web_wechat", "payment", "tencent", "moderation", "quota", "processing", "text_generation", "cloud_pipeline",
                   "prompts", "prices", "rewards", "maintenance", "quality_to_style",
                   "community", "ads", "commerce")
 
@@ -255,6 +257,23 @@ def _validate(doc: Dict[str, Any]) -> None:
     for field in ("app_id", "app_secret"):
         if not isinstance(wx.get(field, ""), str) or len(wx.get(field, "")) > 128:
             raise ValueError("wechat.%s 必须是不超过 128 字的文本" % field)
+    web_wx=doc.get('web_wechat',{})
+    if type(web_wx.get('enabled')) is not bool or web_wx.get('kind') not in ('official','open'):
+        raise ValueError('网站微信配置需要 enabled 布尔值及 official/open 类型')
+    for field in ('app_id','app_secret'):
+        if not isinstance(web_wx.get(field,''),str) or len(web_wx.get(field,''))>200:
+            raise ValueError('网站微信应用配置字段无效')
+    origin=web_wx.get('public_origin','')
+    if not isinstance(origin,str) or len(origin)>200:raise ValueError('网站微信公开地址无效')
+    if origin:
+        try:parsed=urlsplit(origin);port=parsed.port
+        except ValueError:raise ValueError('网站微信公开地址端口无效')
+        if (parsed.scheme!='https' or not parsed.hostname or parsed.username is not None or parsed.password is not None
+                or parsed.path not in ('','/') or parsed.query or parsed.fragment or port==0
+                or any(c.isspace() or ord(c)<32 for c in origin) or parsed.netloc.endswith(':')):
+            raise ValueError('网站微信公开地址必须为 HTTPS 源地址')
+    if web_wx.get('callback_path')!='/api/auth/site/wechat/callback':
+        raise ValueError('网站微信回调路径必须为 /api/auth/site/wechat/callback')
     payment = doc.get("payment", {})
     for field in ("offer_id", "sandbox_app_key", "production_app_key"):
         if not isinstance(payment.get(field, ""), str) or len(payment.get(field, "")) > 200:
@@ -484,6 +503,9 @@ class SettingsStore:
 
     def wechat(self) -> Dict[str, str]:
         return self._section("wechat")
+
+    def web_wechat(self) -> Dict[str, Any]:
+        return self._section('web_wechat')
 
     def tencent(self) -> Dict[str, str]:
         return self._section("tencent")

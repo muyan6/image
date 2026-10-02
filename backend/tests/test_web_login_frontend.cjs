@@ -4,34 +4,18 @@ const root=path.resolve(process.env.REVIEW_ROOT||path.resolve(__dirname,'../..')
 const out=path.resolve(process.env.REVIEW_OUTPUT||path.join(root,'audit/platform-frontend-tests'));
 fs.mkdirSync(out,{recursive:true});const rows=[];
 async function test(name,fn){try{await fn();rows.push({case:name,passed:true});}catch(e){console.error(name,e);rows.push({case:name,passed:false});}}
-const html=fs.readFileSync(path.join(root,'backend/index.html'),'utf8');
-const script=[...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map(x=>x[1]).join('\n');
-function node(){return {style:{},classList:{add(){},remove(){},toggle(){}},addEventListener(){},appendChild(){},click(){},getBoundingClientRect(){return {left:0,width:100};}};}
-function setup(){
- const nodes=new Map(),get=id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);};const calls=[];
- const response=(data,status=200)=>({ok:status>=200&&status<300,status,json:async()=>data,blob:async()=>({})});
- const c={document:{getElementById:get,createElement:node,body:node()},console,localStorage:{getItem:()=>'',setItem(){},removeItem(){}},
-  URL:{createObjectURL:()=> 'blob:fixture',revokeObjectURL(){}},FileReader:function(){},Image:function(){},
-  setInterval:()=>1,clearInterval(){},setTimeout,alert(){},
-  fetch:async(url,opts={})=>{calls.push({url,opts});
-   if(url==='/api/auth/web')return response({token:'fixture-token',balance:100});
-   if(url==='/api/uploads')return response({upload_id:'owned-upload',url:'https://cos.invalid/owned.jpg'});
-   if(url.startsWith('https://cos.invalid'))return response({});
-   if(url.endsWith('/complete'))return response({ok:true});
-   if(url==='/api/rescue/by-upload')return response({code:0,job_id:'fixture'});
-   throw Error('Unexpected URL '+url);
-  }};c.window=c;vm.createContext(c);vm.runInContext(script,c);return {c,calls};
-}
+const {fixture,photo}=require('./test_web_creation_parity.cjs');
 (async()=>{
  await test('web_upload_bytes_only_go_to_cos',async()=>{
-  const t=setup();await vm.runInContext("submitWebPicture({name:'fixture.jpg',size:123,type:'image/jpeg'},'light')",t.c);
-  const put=t.calls.find(x=>x.opts.method==='PUT');assert(put.url.startsWith('https://cos.invalid'));
+  const t=fixture(),session=t.session();await session.submit(photo(),40);
+  const put=t.calls.find(x=>x.cos&&x.opts.method==='PUT');assert(put.cos.startsWith('https://cos.invalid'));
+  assert(!put.opts.headers.Authorization);assert.equal(put.opts.credentials,'omit');
   assert(!t.calls.some(x=>x.url==='/api/rescue'));
-  const submit=t.calls.find(x=>x.url==='/api/rescue/by-upload');assert.equal(JSON.parse(submit.opts.body).upload_id,'owned-upload');
+  const submitted=t.calls.find(x=>x.url==='/api/rescue/by-upload');assert.equal(submitted.opts.data.upload_id,'ticket');
  });
  await test('web_does_not_submit_when_cos_upload_fails',async()=>{
-  const t=setup();const fetch=t.c.fetch;t.c.fetch=async(url,opts)=>url.startsWith('https://cos.invalid')?{ok:false}:fetch(url,opts);
-  await assert.rejects(vm.runInContext("submitWebPicture({name:'fixture.jpg',size:123},'light')",t.c),/COS/);
+  const t=fixture({fetch:async()=>({ok:false,status:503})}),session=t.session();
+  await assert.rejects(session.submit(photo(),40),/直传/);
   assert(!t.calls.some(x=>x.url==='/api/rescue/by-upload'));
  });
  await test('mini_program_approval_is_explicit_and_uses_authenticated_request',async()=>{

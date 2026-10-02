@@ -18,6 +18,7 @@ import os
 import sqlite3
 import threading
 import time
+from account_links import canonical_unlocked, aliases_unlocked, init_links, adjust_balance_unlocked
 from typing import Any, Dict, List, Optional, Tuple
 
 # 光子经济常量
@@ -47,6 +48,12 @@ def invite_code_of(openid: str) -> str:
 BUSINESS_TIMEZONE = datetime.timezone(datetime.timedelta(hours=8))
 
 
+def exact_balance(value):
+    if type(value) is not int or not -(2**63)<=value<2**63:
+        raise ValueError('账户余额不是有效的数据库整数，请由后台核对')
+    return value
+
+
 def business_date(timestamp: float) -> datetime.date:
     """The product's calendar day is Beijing time, independent of host timezone."""
     return datetime.datetime.fromtimestamp(timestamp, BUSINESS_TIMEZONE).date()
@@ -71,6 +78,7 @@ class UserStore:
         self._conn = sqlite3.connect(self._path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._init_schema()
+        init_links(self)
 
     def _init_schema(self) -> None:
         with self._lock:
@@ -159,11 +167,14 @@ class UserStore:
                     quota: Dict[str, int], free_mode: bool = False) -> int:
         """Balance and quota reservation share one durable, serialized transaction."""
         now = time.time()
-        amount = max(0, int(amount))
+        if type(amount) is not int or not 0<=amount<2**63:
+            raise AdmissionError(400,'任务扣点必须是非负整数')
         with self._lock, self._conn:
             if self._purging:
                 raise AdmissionError(503, "账号清理中，请稍后再试")
             self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
+            owners = aliases_unlocked(self, openid); marks = ','.join('?' for _ in owners)
             row = self._conn.execute(
                 "SELECT balance, banned FROM users WHERE openid=?", (openid,)).fetchone()
             if row is None or row[1]:
@@ -180,20 +191,20 @@ class UserStore:
                 if limit <= 0 or (field == "daily" and free_mode):
                     continue
                 count = self._conn.execute(
-                    "SELECT COUNT(*) FROM audit WHERE openid=? AND action='submitted' AND ts>=?",
-                    (openid, start)).fetchone()[0]
+                    "SELECT COUNT(*) FROM audit WHERE openid IN (" + marks + ") AND action='submitted' AND ts>=?",
+                    (*owners, start)).fetchone()[0]
                 reserved = self._conn.execute(
-                    "SELECT COUNT(*) FROM job_charges WHERE openid=? "
-                    "AND state='reserved' AND created_at>=?", (openid, start)).fetchone()[0]
+                    "SELECT COUNT(*) FROM job_charges WHERE openid IN (" + marks + ") "
+                    "AND state='reserved' AND created_at>=?", (*owners, start)).fetchone()[0]
                 if count + reserved >= limit:
                     raise AdmissionError(429, message)
-            balance = int(row[0])
+            balance = exact_balance(row[0])
             if balance < amount:
                 raise AdmissionError(402, "光子不足：本次需要 %d ✦，当前余额 %d ✦" % (amount, balance))
-            self._conn.execute("UPDATE users SET balance=balance-? WHERE openid=?", (amount, openid))
+            balance=adjust_balance_unlocked(self,openid,-amount)
             self._conn.execute("INSERT INTO job_charges(job_id,openid,amount,created_at) VALUES(?,?,?,?)",
                                (job_id, openid, amount, now))
-            return balance - amount
+            return balance
 
     def confirm_job(self, job_id: str, detail: str) -> None:
         # Every submission audit must be attributable to its charge reservation.
@@ -207,10 +218,11 @@ class UserStore:
             row = self._conn.execute("SELECT openid,state FROM job_charges WHERE job_id=?", (job_id,)).fetchone()
             if row is None or row[1] != "reserved":
                 return
+            owner = canonical_unlocked(self, row[0])
             self._conn.execute("UPDATE job_charges SET state='submitted' WHERE job_id=?", (job_id,))
-            self._conn.execute("UPDATE users SET total_jobs=total_jobs+1 WHERE openid=?", (row[0],))
+            self._conn.execute("UPDATE users SET total_jobs=total_jobs+1 WHERE openid=?", (owner,))
             self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
-                               (time.time(), row[0], "submitted", detail[:500]))
+                               (time.time(), owner, "submitted", detail[:500]))
 
     def charged_amount(self, job_id: str) -> Optional[int]:
         with self._lock:
@@ -221,11 +233,13 @@ class UserStore:
         """Exactly-once refund from the actual debit ledger, never current prices."""
         with self._lock, self._conn:
             self._conn.execute("BEGIN IMMEDIATE")
-            row = self._conn.execute("SELECT amount,refunded FROM job_charges WHERE job_id=? AND openid=?",
-                                     (job_id, openid)).fetchone()
+            openid = canonical_unlocked(self, openid)
+            owners = aliases_unlocked(self, openid); marks = ','.join('?' for _ in owners)
+            row = self._conn.execute("SELECT amount,refunded FROM job_charges WHERE job_id=? AND openid IN (" + marks + ')',
+                                     (job_id, *owners)).fetchone()
             if row and not row[1]:
-                amount = int(row[0])
-                self._conn.execute("UPDATE users SET balance=balance+? WHERE openid=?", (amount, openid))
+                amount = exact_balance(row[0])
+                adjust_balance_unlocked(self,openid,amount)
                 self._conn.execute("UPDATE job_charges SET refunded=1,state=? WHERE job_id=?",
                                    ("cancelled" if cancel else "failed", job_id))
                 if amount:
@@ -233,12 +247,16 @@ class UserStore:
                                        (time.time(), openid, "refund", "job=%s +=%d" % (job_id, amount)))
             if row and cancel:
                 self._conn.execute("UPDATE job_charges SET state='cancelled' WHERE job_id=?", (job_id,))
-                removed = self._conn.execute("DELETE FROM audit WHERE openid=? AND action='submitted' "
-                                             "AND detail LIKE ?", (openid, "job=" + job_id + " %")).rowcount
+                counters = self._conn.execute("SELECT openid,COUNT(*) FROM audit WHERE openid IN (" + marks + ") "
+                                              "AND action='submitted' AND detail LIKE ? GROUP BY openid",
+                                              (*owners, 'job=' + job_id + ' %')).fetchall()
+                removed = self._conn.execute("DELETE FROM audit WHERE openid IN (" + marks + ") AND action='submitted' "
+                                             "AND detail LIKE ?", (*owners, "job=" + job_id + " %")).rowcount
                 if removed:
-                    self._conn.execute("UPDATE users SET total_jobs=MAX(0,total_jobs-1) WHERE openid=?", (openid,))
+                    for counter_owner, count in counters:
+                        self._conn.execute("UPDATE users SET total_jobs=MAX(0,total_jobs-?) WHERE openid=?", (count, counter_owner))
             result = self._conn.execute("SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
-            return int(result[0]) if result else 0
+            return exact_balance(result[0]) if result else 0
 
     def reconcile_charges(self, statuses: Dict[str, str]) -> None:
         """Recover debits left between the user DB commit and job DB commit."""
@@ -268,32 +286,38 @@ class UserStore:
                          reason: str, price: int) -> Dict[str, Any]:
         """审核确定拦截后，原子记录、扣点和滚动七日封禁。服务故障不调用此方法。"""
         now = time.time()
+        if type(price) is not int or price<0:raise ValueError('审核扣点价格必须是非负整数')
         with self._lock, self._conn:
             self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
             row = self._conn.execute("SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
             if row is None:
                 raise ValueError("账号不存在")
-            charge = min(max(0, int(price)), max(0, int(row[0])))
-            self._conn.execute("UPDATE users SET balance=balance-?,blocked=blocked+1 WHERE openid=?",
-                               (charge, openid))
+            charge = min(price, max(0, exact_balance(row[0])))
+            balance=adjust_balance_unlocked(self,openid,-charge)
+            self._conn.execute("UPDATE users SET blocked=blocked+1 WHERE openid=?",(openid,))
             self._conn.execute("INSERT INTO violations VALUES(?,?,?,?,?,?,?,?)",
                                (violation_id, openid, now, kind, reason[:200], charge, "active", ""))
+            owners=aliases_unlocked(self,openid);marks=','.join('?' for _ in owners)
             count = self._conn.execute(
-                "SELECT COUNT(*) FROM violations WHERE openid=? AND status IN ('active','upheld') AND created_at>=? "
+                "SELECT COUNT(*) FROM violations WHERE openid IN ("+marks+") AND status IN ('active','upheld') AND created_at>=? "
                 "AND created_at>(SELECT ban_reset_at FROM users WHERE openid=?)",
-                (openid, now - 7 * 86400,openid)).fetchone()[0]
+                (*owners, now - 7 * 86400,openid)).fetchone()[0]
             banned = count >= 3
             if banned:
                 self._conn.execute("UPDATE users SET banned=1,auto_banned=1 WHERE openid=? AND banned=0", (openid,))
             self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
                                (now, openid, "blocked", "id=%s kind=%s charged=%d" % (violation_id, kind, charge)))
             return {"violation_id": violation_id, "charged": charge,
-                    "balance": int(row[0]) - charge, "weekly_count": count, "banned": banned}
+                    "balance": balance, "weekly_count": count, "banned": banned}
 
     def submit_violation_feedback(self, openid: str, violation_id: str, message: str) -> bool:
         with self._lock, self._conn:
-            row = self._conn.execute("SELECT status,feedback FROM violations WHERE id=? AND openid=?",
-                                     (violation_id, openid)).fetchone()
+            self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
+            owners = aliases_unlocked(self, openid); marks = ','.join('?' for _ in owners)
+            row = self._conn.execute("SELECT status,feedback FROM violations WHERE id=? AND openid IN (" + marks + ')',
+                                     (violation_id, *owners)).fetchone()
             if not row or row[0] != "active" or row[1]:
                 return False
             self._conn.execute("UPDATE violations SET feedback=? WHERE id=?", (message[:500], violation_id))
@@ -303,9 +327,10 @@ class UserStore:
 
     def violation_for_job(self, openid, job_id):
         with self._lock:
-            row=self._conn.execute('SELECT id,reason,charged,status,feedback FROM violations WHERE id=? AND openid=?',(job_id,openid)).fetchone()
+            openid=canonical_unlocked(self,openid);owners=aliases_unlocked(self,openid);marks=','.join('?' for _ in owners)
+            row=self._conn.execute('SELECT id,reason,charged,status,feedback FROM violations WHERE id=? AND openid IN ('+marks+')',(job_id,*owners)).fetchone()
             if not row:return None
-            count=self._conn.execute("SELECT COUNT(*) FROM violations WHERE openid=? AND status IN ('active','upheld') AND created_at>=? AND created_at>(SELECT ban_reset_at FROM users WHERE openid=?)",(openid,time.time()-7*86400,openid)).fetchone()[0]
+            count=self._conn.execute("SELECT COUNT(*) FROM violations WHERE openid IN ("+marks+") AND status IN ('active','upheld') AND created_at>=? AND created_at>(SELECT ban_reset_at FROM users WHERE openid=?)",(*owners,time.time()-7*86400,openid)).fetchone()[0]
             banned=self._conn.execute('SELECT banned FROM users WHERE openid=?',(openid,)).fetchone()[0]
         return {'code':'CONTENT_VIOLATION','violation_id':row[0],'message':row[1],'charged':row[2],
                 'status':row[3],'feedback_submitted':bool(row[4]),'weekly_count':count,'banned':bool(banned)}
@@ -346,76 +371,86 @@ class UserStore:
                                      (violation_id,)).fetchone()
             if not row:
                 return None
-            openid, charged, status = row
+            openid, charged, status = row; violation_owner = openid
+            openid = canonical_unlocked(self, openid)
             if status != "active":
                 return {"status": status, "balance": self._conn.execute(
                     "SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()[0]}
             next_status = "overturned" if accepted else "upheld"
             self._conn.execute("UPDATE violations SET status=? WHERE id=?", (next_status, violation_id))
             if accepted:
-                self._conn.execute("UPDATE users SET balance=balance+?,blocked=MAX(0,blocked-1) WHERE openid=?",
-                                   (charged, openid))
-                remaining = self._conn.execute("SELECT COUNT(*) FROM violations WHERE openid=? "
+                adjust_balance_unlocked(self,openid,exact_balance(charged))
+                self._conn.execute("UPDATE users SET blocked=MAX(0,blocked-1) WHERE openid=?", (violation_owner,))
+                owners=aliases_unlocked(self,openid);marks=','.join('?' for _ in owners)
+                remaining = self._conn.execute("SELECT COUNT(*) FROM violations WHERE openid IN ("+marks+") "
                                                "AND status IN ('active','upheld') AND created_at>=? AND created_at>"
                                                "(SELECT ban_reset_at FROM users WHERE openid=?)",
-                                               (openid, time.time() - 7 * 86400,openid)).fetchone()[0]
+                                                (*owners, time.time() - 7 * 86400,openid)).fetchone()[0]
                 if remaining < 3:
                     self._conn.execute("UPDATE users SET banned=0,auto_banned=0 WHERE openid=? AND auto_banned=1", (openid,))
             self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
                                (time.time(), openid, "violation_review", "id=%s status=%s" % (violation_id, next_status)))
             balance = self._conn.execute("SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()[0]
-            return {"status": next_status, "balance": int(balance)}
+            return {"status": next_status, "balance": exact_balance(balance)}
 
     def bind_invite_once(self, openid: str, code: str, reward: int = INVITE_REWARD) -> Tuple[int, int]:
+        if type(reward) is not int or reward<0:raise ValueError('邀请奖励必须是非负整数')
         with self._lock, self._conn:
             self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
+            owners=aliases_unlocked(self,openid);marks=','.join('?' for _ in owners)
             inviter = self._conn.execute("SELECT openid FROM users WHERE invite_code=?", (code,)).fetchone()
+            if inviter: inviter = (canonical_unlocked(self, inviter[0]),)
             if inviter is None or inviter[0] == openid:
                 raise ValueError("邀请码不存在或属于自己")
             # Honor historical audit rows when upgrading an existing installation.
-            bound = self._conn.execute("SELECT 1 FROM audit WHERE openid=? AND action='invite_bound' LIMIT 1", (openid,)).fetchone()
-            if bound or self._conn.execute("SELECT 1 FROM invite_bindings WHERE invitee=?", (openid,)).fetchone():
+            bound = self._conn.execute("SELECT 1 FROM audit WHERE openid IN ("+marks+") AND action='invite_bound' LIMIT 1", owners).fetchone()
+            if bound or self._conn.execute("SELECT 1 FROM invite_bindings WHERE invitee IN ("+marks+")", owners).fetchone():
                 raise ValueError("已经绑定过邀请码了")
             self._conn.execute("INSERT INTO invite_bindings(invitee,inviter,created_at,reward) VALUES(?,?,?,?)", (openid, inviter[0], time.time(), reward))
             for target, action, detail in ((openid, "invite_bound", "by=" + code),
                                             (inviter[0], "invite_reward", "invitee=%s***" % openid[:6])):
-                self._conn.execute("UPDATE users SET balance=balance+? WHERE openid=?", (reward, target))
+                adjust_balance_unlocked(self,target,reward)
                 self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
                                    (time.time(), target, action, detail))
-            return tuple(int(self._conn.execute("SELECT balance FROM users WHERE openid=?", (target,)).fetchone()[0])
+            return tuple(exact_balance(self._conn.execute("SELECT balance FROM users WHERE openid=?", (target,)).fetchone()[0])
                          for target in (openid, inviter[0]))
 
     def invite_records(self, openid: str, offset: int = 0, limit: int = 30) -> Dict[str, Any]:
         offset=max(0,offset);limit=max(1,min(50,limit))
         with self._lock:
+            openid=canonical_unlocked(self,openid);owners=aliases_unlocked(self,openid);marks=','.join('?' for _ in owners)
             total, recorded, unknown = self._conn.execute(
-                'SELECT COUNT(*),COALESCE(SUM(reward),0),COALESCE(SUM(reward IS NULL),0) FROM invite_bindings WHERE inviter=?',
-                (openid,)).fetchone()
-            rows=self._conn.execute('SELECT b.invitee,b.created_at,b.reward,u.nickname FROM invite_bindings b LEFT JOIN users u ON u.openid=b.invitee WHERE b.inviter=? ORDER BY b.created_at DESC,b.invitee LIMIT ? OFFSET ?',
-                                    (openid,limit,offset)).fetchall()
+                'SELECT COUNT(*),COALESCE(SUM(reward),0),COALESCE(SUM(reward IS NULL),0) FROM invite_bindings WHERE inviter IN ('+marks+')',
+                owners).fetchone()
+            rows=self._conn.execute('SELECT b.invitee,b.created_at,b.reward,u.nickname FROM invite_bindings b LEFT JOIN users u ON u.openid=b.invitee WHERE b.inviter IN ('+marks+') ORDER BY b.created_at DESC,b.invitee LIMIT ? OFFSET ?',
+                                    (*owners,limit,offset)).fetchall()
         items=[{'id':hashlib.sha256((openid+'\0'+r[0]).encode()).hexdigest()[:16],
                 'nickname':r[3] or '新生创作者','bound_at':r[1],'reward':r[2],'status':'credited'} for r in rows]
         return {'items':items,'total':total,'recorded_reward':recorded,'historical_unknown':unknown,
                 'next_offset':offset+len(items),'has_more':offset+len(items)<total}
 
     def claim_video_reward(self, openid: str, event_id: str, reward: int, limit: int) -> Tuple[bool, int, int]:
+        if type(reward) is not int or reward<0:raise ValueError('视频奖励必须是非负整数')
         with self._lock, self._conn:
             self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
+            owners=aliases_unlocked(self,openid);marks=','.join('?' for _ in owners)
             prior = self._conn.execute("SELECT openid FROM ad_rewards WHERE event_id=?", (event_id,)).fetchone()
-            count = self._conn.execute("SELECT COUNT(*) FROM audit WHERE openid=? AND action='earn_video' AND ts>=?",
-                                       (openid, _local_midnight())).fetchone()[0]
-            balance = self._conn.execute("SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()[0]
+            count = self._conn.execute("SELECT COUNT(*) FROM audit WHERE openid IN ("+marks+") AND action='earn_video' AND ts>=?",
+                                       (*owners, _local_midnight())).fetchone()[0]
+            balance = exact_balance(self._conn.execute("SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()[0])
             if prior:
-                if prior[0] != openid:
+                if canonical_unlocked(self, prior[0]) != openid:
                     raise ValueError("广告凭据已经使用")
-                return True, int(balance), count
+                return True, balance, count
             if count >= limit:
-                return False, int(balance), count
+                return False, balance, count
             self._conn.execute("INSERT INTO ad_rewards VALUES(?,?,?,?)", (event_id, openid, time.time(), reward))
-            self._conn.execute("UPDATE users SET balance=balance+? WHERE openid=?", (reward, openid))
+            balance=adjust_balance_unlocked(self,openid,reward)
             self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
                                (time.time(), openid, "earn_video", "event=%s +%d" % (event_id, reward)))
-            return True, int(balance) + reward, count + 1
+            return True, balance, count + 1
 
     _USER_COLS = ("openid, created_at, last_seen, total_jobs, blocked, "
                   "balance, invite_code, banned, account_type, app_id, admin_hidden, nickname")
@@ -424,7 +459,7 @@ class UserStore:
     def _user_row(row) -> Dict[str, Any]:
         return {"openid": row[0], "created_at": row[1], "last_seen": row[2],
                 "total_jobs": row[3], "blocked": row[4],
-                "balance": int(row[5] or 0), "invite_code": row[6] or "",
+                "balance": exact_balance(row[5]), "invite_code": row[6] or "",
                 "banned": bool(row[7]), "account_type": row[8], "app_id": row[9],
                 "admin_hidden": bool(row[10]), "nickname": row[11] or "",
                 "user_id": public_user_id(row[0], row[8])}
@@ -465,17 +500,23 @@ class UserStore:
         """Activity is not registration; cap writes to one per five minutes."""
         now = time.time()
         with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
             self._conn.execute("UPDATE users SET last_seen=?,admin_hidden=0 "
                                "WHERE openid=? AND (last_seen<? OR admin_hidden=1)", (now, openid, now - 300))
 
     def set_nickname(self, openid: str, nickname: str) -> str:
         with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
             self._conn.execute("UPDATE users SET nickname=? WHERE openid=?", (nickname, openid))
         return nickname
 
     def hide_from_admin(self, openid: str) -> bool:
         """Remove from management lists, not authentication, balances, works or bans."""
         with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
             found = self._conn.execute("UPDATE users SET admin_hidden=1 WHERE openid=?", (openid,)).rowcount
             if found:
                 self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
@@ -502,57 +543,81 @@ class UserStore:
 
     def get_user(self, openid: str) -> Optional[Dict[str, Any]]:
         with self._lock:
+            openid = canonical_unlocked(self, openid)
             row = self._conn.execute(
                 "SELECT %s FROM users WHERE openid=?" % self._USER_COLS,
                 (openid,)).fetchone()
+            if row:
+                owners = aliases_unlocked(self, openid); marks = ','.join('?' for _ in owners)
+                counters = self._conn.execute('SELECT SUM(total_jobs),SUM(blocked) FROM users WHERE openid IN (' + marks + ')', owners).fetchone()
         if row is None:
             return None
-        return self._user_row(row)
+        result = self._user_row(row)
+        result['total_jobs'] = int(counters[0] or 0); result['blocked'] = int(counters[1] or 0)
+        return result
 
     # ------------------------------------------------------------------ #
     # 光子余额（扣费的唯一事实来源，客户端数值仅作展示）
     # ------------------------------------------------------------------ #
     def get_balance(self, openid: str) -> int:
         with self._lock:
+            openid = canonical_unlocked(self, openid)
             row = self._conn.execute(
                 "SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
-        return int(row[0] or 0) if row else 0
+        return exact_balance(row[0]) if row else 0
 
     def try_spend(self, openid: str, amount: int) -> Tuple[bool, int]:
         """原子扣减光子。余额不足返回 (False, 当前余额)，不产生任何写入。"""
-        if amount <= 0:
+        if type(amount) is not int or amount<0:raise ValueError('扣点必须是非负整数')
+        if amount == 0:
             return True, self.get_balance(openid)
-        with self._lock:
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
             row = self._conn.execute(
                 "SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
             if row is None:
                 return False, 0
-            bal = int(row[0] or 0)
+            bal = exact_balance(row[0])
             if bal < amount:
                 return False, bal
-            cur = self._conn.execute(
-                "UPDATE users SET balance=balance-? WHERE openid=? AND balance>=?",
-                (amount, openid, amount))
-            if cur.rowcount != 1:  # 并发扣减被抢空
-                self._conn.rollback()
-                return False, bal
-            self._conn.commit()
-            return True, bal - amount
+            balance=adjust_balance_unlocked(self,openid,-amount)
+            return True, balance
 
     def set_balance(self, openid: str, value: int) -> int:
         """管理员直接设置余额（后台改光子用），返回设置后的余额。"""
-        with self._lock:
-            self._conn.execute(
-                "UPDATE users SET balance=? WHERE openid=?",
-                (max(0, int(value)), openid))
-            self._conn.commit()
-            row = self._conn.execute(
-                "SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
-        return int(row[0] or 0) if row else 0
+        if type(value) is not int or not 0<=value<2**63:raise ValueError('目标余额必须是有效的非负整数')
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
+            row=self._conn.execute('SELECT balance FROM users WHERE openid=?',(openid,)).fetchone()
+            if not row:return 0
+            return adjust_balance_unlocked(self,openid,value-exact_balance(row[0]))
+
+    def admin_adjust_balance(self, openid: str, *, delta=None, balance=None) -> int:
+        """The actual manual delta and resulting balance commit together."""
+        if (delta is None) == (balance is None):raise ValueError('请仅指定增减量或目标余额')
+        value=delta if delta is not None else balance
+        if type(value) is not int:raise ValueError('光子数量必须是整数')
+        if balance is not None and balance<0:raise ValueError('目标余额不能为负数')
+        with self._lock,self._conn:
+            self._conn.execute('BEGIN IMMEDIATE');openid=canonical_unlocked(self,openid)
+            row=self._conn.execute('SELECT balance FROM users WHERE openid=?',(openid,)).fetchone()
+            if not row:raise ValueError('账户不存在')
+            previous=exact_balance(row[0]);next_balance=previous+delta if delta is not None else balance
+            if not -(2**63)<=next_balance<=2**63-1:raise ValueError('余额超出整数记账范围')
+            change=next_balance-previous
+            if not -(2**63)<=change<=2**63-1:raise ValueError('增减量超出整数记账范围')
+            next_balance=adjust_balance_unlocked(self,openid,change)
+            self._conn.execute('INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)',
+                               (time.time(),openid,'admin_adjust_balance','delta=%d balance=%d'%(change,next_balance)))
+            return next_balance
 
     def set_banned(self, openid: str, banned: bool, *, reset_count: bool = False) -> None:
         """封禁/解封：封禁后无法提交任务（登录与历史查看不受影响）。"""
-        with self._lock:
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
             self._conn.execute(
                 "UPDATE users SET banned=?,auto_banned=0 WHERE openid=?",
                 (1 if banned else 0, openid))
@@ -562,14 +627,10 @@ class UserStore:
 
     def add_balance(self, openid: str, delta: int) -> int:
         """加光子（奖励/退款），返回加完后的余额。"""
-        with self._lock:
-            self._conn.execute(
-                "UPDATE users SET balance=balance+? WHERE openid=?",
-                (int(delta), openid))
-            self._conn.commit()
-            row = self._conn.execute(
-                "SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
-        return int(row[0] or 0) if row else 0
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
+            return adjust_balance_unlocked(self,openid,delta)
 
     # ------------------------------------------------------------------ #
     # 每日奖励（签到 / 看视频）：次数与发放同事务，刷不掉
@@ -578,26 +639,28 @@ class UserStore:
              daily_limit: int) -> Tuple[bool, int, int]:
         """尝试发放 kind 类奖励。返回 (是否成功, 最新余额, 今日已领次数)。"""
         action = "earn_" + kind
+        if type(reward) is not int or reward<0:raise ValueError('领取奖励必须是非负整数')
         midnight = _local_midnight()
         now = time.time()
-        with self._lock:
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
+            owners=aliases_unlocked(self,openid);marks=','.join('?' for _ in owners)
             cnt = int(self._conn.execute(
                 "SELECT COUNT(*) FROM audit "
-                "WHERE openid=? AND action=? AND ts>=?",
-                (openid, action, midnight)).fetchone()[0])
+                "WHERE openid IN ("+marks+") AND action=? AND ts>=?",
+                (*owners, action, midnight)).fetchone()[0])
             row = self._conn.execute(
                 "SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
-            bal = int(row[0] or 0) if row else 0
+            bal = exact_balance(row[0]) if row else 0
             if cnt >= daily_limit:
                 return False, bal, cnt
-            self._conn.execute(
-                "UPDATE users SET balance=balance+? WHERE openid=?",
-                (reward, openid))
+            balance=adjust_balance_unlocked(self,openid,reward)
             self._conn.execute(
                 "INSERT INTO audit(ts, openid, action, detail) VALUES(?,?,?,?)",
                 (now, openid, action, "+%d" % reward))
             self._conn.commit()
-            return True, bal + reward, cnt + 1
+            return True, balance, cnt + 1
 
     def earn_count_today(self, openid: str, kind: str) -> int:
         return self.action_count_in_window(
@@ -605,8 +668,9 @@ class UserStore:
 
     def _checkin_status_locked(self, openid: str, now: float) -> Dict[str, Any]:
         today = business_date(now).toordinal()
-        rows = self._conn.execute("SELECT ts FROM audit WHERE openid=? AND action='earn_checkin'",
-                                  (openid,)).fetchall()
+        owners=aliases_unlocked(self,openid);marks=','.join('?' for _ in owners)
+        rows = self._conn.execute("SELECT ts FROM audit WHERE openid IN ("+marks+") AND action='earn_checkin'",
+                                  owners).fetchall()
         days = {business_date(ts).toordinal() for (ts,) in rows}
         done = today in days
         cursor = today if done else today - 1
@@ -625,23 +689,26 @@ class UserStore:
 
     def claim_checkin(self, openid: str, reward: int, seventh_bonus: int) -> Dict[str, Any]:
         """每日一次与七日奖励在同一事务完成；重复请求不重复发放。"""
+        if type(reward) is not int or type(seventh_bonus) is not int or min(reward,seventh_bonus)<0:
+            raise ValueError('签到奖励必须是非负整数')
         with self._lock, self._conn:
             self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
             now = time.time()
             status = self._checkin_status_locked(openid, now)
             balance_row = self._conn.execute("SELECT balance FROM users WHERE openid=?", (openid,)).fetchone()
             if balance_row is None:
                 raise ValueError("账号不存在")
             if status["checkin_done"]:
-                return {**status, "claimed": False, "balance": int(balance_row[0]),
+                return {**status, "claimed": False, "balance": exact_balance(balance_row[0]),
                         "reward": 0, "bonus_awarded": 0}
             streak = status["checkin_streak"] + 1
             bonus = seventh_bonus if streak % 7 == 0 else 0
             total = reward + bonus
-            self._conn.execute("UPDATE users SET balance=balance+? WHERE openid=?", (total, openid))
+            balance=adjust_balance_unlocked(self,openid,total)
             self._conn.execute("INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)",
                                (now, openid, "earn_checkin", "+%d streak=%d bonus=%d" % (total, streak, bonus)))
-            return {"claimed": True, "balance": int(balance_row[0]) + total,
+            return {"claimed": True, "balance": balance,
                     "reward": total, "bonus_awarded": bonus, "checkin_done": True,
                     "checkin_streak": streak, "checkin_progress": (streak - 1) % 7 + 1,
                     "checkin_day": (streak - 1) % 7 + 1}
@@ -652,10 +719,11 @@ class UserStore:
     def action_count_in_window(self, openid: str, action: str,
                                window_start: float) -> int:
         with self._lock:
+            owners=aliases_unlocked(self,openid);marks=','.join('?' for _ in owners)
             row = self._conn.execute(
                 "SELECT COUNT(*) FROM audit "
-                "WHERE openid=? AND action=? AND ts>=?",
-                (openid, action, window_start)).fetchone()
+                "WHERE openid IN ("+marks+") AND action=? AND ts>=?",
+                (*owners, action, window_start)).fetchone()
         return int(row[0])
 
     def get_by_invite_code(self, code: str) -> Optional[Dict[str, Any]]:
@@ -663,19 +731,23 @@ class UserStore:
             row = self._conn.execute(
                 "SELECT %s FROM users WHERE invite_code=?" % self._USER_COLS,
                 (code,)).fetchone()
-        return self._user_row(row) if row else None
+        return self.get_user(row[0]) if row else None
 
     # ------------------------------------------------------------------ #
     # 计数与审计
     # ------------------------------------------------------------------ #
     def inc_total(self, openid: str) -> None:
-        with self._lock:
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
             self._conn.execute(
                 "UPDATE users SET total_jobs=total_jobs+1 WHERE openid=?", (openid,))
             self._conn.commit()
 
     def inc_blocked(self, openid: str) -> None:
-        with self._lock:
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            openid = canonical_unlocked(self, openid)
             self._conn.execute(
                 "UPDATE users SET blocked=blocked+1 WHERE openid=?", (openid,))
             self._conn.commit()
@@ -685,7 +757,9 @@ class UserStore:
 
     def audit(self, openid: str, action: str, detail: str = "") -> None:
         try:
-            with self._lock:
+            with self._lock, self._conn:
+                self._conn.execute("BEGIN IMMEDIATE")
+                openid = canonical_unlocked(self, openid)
                 self._conn.execute(
                     "INSERT INTO audit(ts, openid, action, detail) VALUES(?,?,?,?)",
                     (time.time(), openid, action, detail[:500]))
@@ -737,7 +811,9 @@ class UserStore:
             summary = self.purge_summary_unlocked()
             # New account-owned experience records must not reappear if a user
             # registers again after an explicitly requested account purge.
-            for table in ('template_preferences', 'client_submissions'):
+            for table in ('template_preferences', 'client_submissions', 'web_credentials', 'site_sessions',
+                          'site_oauth_states', 'pending_wechat_links', 'site_auth_attempts',
+                          'account_aliases', 'verified_wechat_identities'):
                 if self._conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                     self._conn.execute('DELETE FROM ' + table)
             for table in ("violations", "ad_rewards", "invite_bindings", "job_charges", "audit", "users"):
@@ -761,10 +837,27 @@ class UserStore:
             blocked_today = self._conn.execute(
                 "SELECT COUNT(*) FROM audit WHERE action='blocked' AND ts>=?",
                 (midnight,)).fetchone()[0]
+            registered_total=registered_today=0;registered_subjects=wechat_total;legacy_total=web_total
+            if self._conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='web_credentials'").fetchone():
+                registered_total,registered_today=self._conn.execute(
+                    'SELECT COUNT(*),COALESCE(SUM(c.created_at>=?),0) FROM web_credentials c JOIN users u ON u.openid=c.account_id '
+                    'LEFT JOIN account_aliases a ON a.alias_openid=u.openid JOIN users p ON p.openid=COALESCE(a.canonical_openid,u.openid) '
+                    'WHERE p.admin_hidden=0',
+                    (midnight,)).fetchone()
+                registered_subjects=self._conn.execute(
+                    "SELECT COUNT(DISTINCT COALESCE(a.canonical_openid,u.openid)) FROM users u LEFT JOIN account_aliases a "
+                    "ON a.alias_openid=u.openid LEFT JOIN web_credentials c ON c.account_id=u.openid "
+                    "JOIN users p ON p.openid=COALESCE(a.canonical_openid,u.openid) "
+                    "WHERE p.admin_hidden=0 AND (u.account_type='wechat' OR c.account_id IS NOT NULL)").fetchone()[0]
+                legacy_total=self._conn.execute("SELECT COUNT(*) FROM users u WHERE u.account_type='web' AND u.admin_hidden=0 "
+                    "AND NOT EXISTS(SELECT 1 FROM web_credentials c WHERE c.account_id=u.openid)").fetchone()[0]
         return {"users_total": wechat_total, "users_today": wechat_today,
                 "wechat_users_total": wechat_total, "wechat_users_today": wechat_today,
                 "web_users_total": web_total, "web_users_today": web_today,
                 "accounts_total": wechat_total + web_total,
+                "web_registered_total":registered_total,"web_registered_today":registered_today,
+                "legacy_web_visitors_total":legacy_total,
+                "registered_accounts_total":registered_subjects,
                 "blocked_today": blocked_today}
 
     def close(self) -> None:

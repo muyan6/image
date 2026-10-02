@@ -56,13 +56,17 @@ def make_payment_router(runtime):
     @r.post('/api/payment/orders')
     def create_order(body:Checkout,request:Request):
         m=runtime();u=m._current_user(request)
+        if u.get('auth_source')=='site':raise HTTPException(403,detail='网页光子仅由后台手动增加，暂不开放在线充值')
         if not re.fullmatch(r'[A-Za-z0-9_-]{12,80}',body.client_key) or not 1<=len(body.code)<=200:raise HTTPException(400,detail='下单参数无效')
         try:return m.payments.create(u,body.package_id,body.code,body.client_key)
         except (ValueError,WechatAuthError) as exc:raise HTTPException(400,detail=str(exc)) from exc
     @r.get('/api/payment/orders')
-    def list_orders(request:Request,client_key:str=''):
+    def list_orders(request:Request,client_key:str='',limit:int=50,offset:int=0):
         m=runtime();u=m._current_user(request)
-        return {'items':[public_order(o) for o in m.payments.store().list(u['openid'],client_key)],'balance':m.users.get_balance(u['openid'])}
+        limit=max(1,min(100,limit));offset=max(0,offset)
+        orders=m.payments.store().list(u['openid'],client_key,limit+1,offset)
+        items=[public_order(o) for o in orders[:limit]]
+        return {'items':items,'balance':m.users.get_balance(u['openid']),'has_more':len(orders)>limit,'next_offset':offset+len(items)}
     @r.get('/api/payment/orders/{jid}')
     def get_order(jid:str,request:Request):
         m=runtime();u=m._current_user(request);o=m.payments.store().get(jid,u['openid'])

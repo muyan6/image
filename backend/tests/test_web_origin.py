@@ -25,20 +25,22 @@ class OriginTests(PlatformTests):
     def test_https_origin_http_upstream_start_and_poll(self):
         client=TestClient(HttpUpstream(m.app),base_url='https://image.myil.top')
         try:
-            headers={'X-Web-Login':'1','Origin':'https://image.myil.top','Sec-Fetch-Site':'same-origin'}
+            headers=self.browser_headers({'Origin':'https://image.myil.top'})
             r=client.post('/api/auth/wechat-web/start',headers=headers)
             self.assertEqual(r.status_code,200,r.text)
             self.assertIn('Secure',r.headers['set-cookie']);self.assertIn('HttpOnly',r.headers['set-cookie'])
             sid=r.json()['id']
-            self.assertEqual(client.get('/api/auth/wechat-web/'+sid+'/status',headers={'X-Web-Login':'1'}).json()['state'],'pending')
+            self.assertEqual(client.get('/api/auth/wechat-web/'+sid+'/status',headers=self.browser_headers()).json()['state'],'pending')
             self.assertEqual(self.approve(sid).status_code,200)
             result=client.get('/api/auth/wechat-web/'+sid+'/status',headers=headers)
             self.assertEqual(result.status_code,200,result.text)
-            self.assertEqual(m.verify_user_token(result.json()['token']),'sample_user')
+            self.assertIsNone(m.verify_user_token(result.json()['token']))
+            from web_accounts import store_for
+            self.assertEqual(store_for(m.users).session(result.json()['token'])['account_id'],self.site_identity)
         finally:client.close()
 
     def test_public_origin_accepts_case_and_default_port(self):
-        r=self.client.post('/api/auth/wechat-web/start',headers={'X-Web-Login':'1','Origin':'https://IMAGE.MYIL.TOP:443'})
+        r=self.client.post('/api/auth/wechat-web/start',headers=self.browser_headers({'Origin':'https://IMAGE.MYIL.TOP:443'}))
         self.assertEqual(r.status_code,200,r.text);self.assertIn('Secure',r.headers['set-cookie'])
 
     def test_other_domains_ports_downgrade_and_malformed_rejected(self):
@@ -58,7 +60,7 @@ class OriginTests(PlatformTests):
 
     def test_explicit_custom_public_origin(self):
         with patch.dict(os.environ,{'WEB_PUBLIC_ORIGIN':'https://photos.example:8443/'}):
-            r=self.client.post('/api/auth/wechat-web/start',headers={'X-Web-Login':'1','Origin':'https://photos.example:8443'})
+            r=self.client.post('/api/auth/wechat-web/start',headers=self.browser_headers({'Origin':'https://photos.example:8443'}))
             self.assertEqual(r.status_code,200)
             r=self.client.post('/api/auth/wechat-web/start',headers={'X-Web-Login':'1','Origin':'https://image.myil.top'})
             self.assertEqual(r.status_code,403)
@@ -71,7 +73,7 @@ class OriginTests(PlatformTests):
     def test_direct_loopback_development_and_required_custom_header(self):
         client=TestClient(m.app,base_url='http://127.0.0.1:8000')
         try:
-            r=client.post('/api/auth/wechat-web/start',headers={'X-Web-Login':'1','Origin':'http://127.0.0.1:8000'})
+            r=client.post('/api/auth/wechat-web/start',headers=self.browser_headers({'Origin':'http://127.0.0.1:8000'}))
             self.assertEqual(r.status_code,200);self.assertNotIn('Secure',r.headers['set-cookie'])
             self.assertEqual(client.post('/api/auth/wechat-web/start',headers={'Origin':'http://127.0.0.1:8000'}).status_code,403)
         finally:client.close()

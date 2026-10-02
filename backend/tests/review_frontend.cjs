@@ -258,22 +258,11 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
   });
 
   await test('web_timeout_resets_processing_ui',async()=>{
-    const html=fs.readFileSync(path.join(ROOT,'backend/index.html'),'utf8');
-    const script=[...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)][0][1];
-    const elements={};
-    const el=id=>elements[id]||= {style:{},classList:{add(){},remove(){}},files:[],click(){}};
-    let nowCall=0;let alerts=[];
-    const sandbox={document:{getElementById:el,createElement:()=>el("login-modal"),body:{appendChild(){}}},window:{},console:silent,
-      localStorage:{getItem:()=> 'valid-token'},URL:{createObjectURL:()=> 'blob:fixture'},
-      FormData:class{append(){}},Date:{now:()=>nowCall++===0?0:180001},
-      setTimeout:fn=>queueMicrotask(fn),clearInterval(){},setInterval(){},alert:message=>alerts.push(message),
-      fetch:async url=>({ok:true,status:200,json:async()=>url==='/api/auth/web'?{token:'valid-token'}:
-        url==='/api/uploads'?{upload_id:'fixture',url:'https://cos.invalid/photo'}:url==='/api/rescue/by-upload'?{code:0,job_id:'abcdef123456'}:{status:'processing'}})};
-    vm.runInNewContext(script,sandbox);
-    el('fileInput').files=[{name:'fixture.jpg',size:700}];
-    el('fileInput').onchange();
-    await el('btnRescue').onclick();
-    return [el('processingMask').style.display==='none',{mask:el('processingMask').style.display,controls:el('readyControls').style.display,alerts}];
+    const {fixture,photo}=require('./test_web_creation_parity.cjs');let now=0;
+    const t=fixture({Date:{now:()=>now}}),session=t.session(),base=t.ctx.api;
+    session.delay=async ms=>{now+=ms;};t.ctx.api=async(url,options)=>url.startsWith('/api/jobs/')?{status:'processing'}:base(url,options);
+    const created=await session.submit(photo(),40);const result=await session.poll(created.job_id,()=>{});
+    return [result===null&&!session.busy&&!session.polling&&session.receipt().job_id===created.job_id,{busy:session.busy,polling:session.polling,acceptedJob:session.receipt().job_id,timeoutAtMs:now}];
   });
 
   await test('expired_token_upload_recovers_successfully',async()=>{
@@ -649,21 +638,24 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     return [payload.app_id==='wx_real_app'&&app.globalData.userId==='WX-0123456789ABCDEF',{app_id:payload.app_id,user_id:app.globalData.userId}];
   });
 
-  await test('web_bootstrap_refreshes_existing_wechat_token',async()=>{
-    const html=fs.readFileSync(path.join(ROOT,'backend/index.html'),'utf8');
-    const script=[...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)][0][1];
-    const elements={};const el=id=>elements[id]||= {style:{},classList:{add(){},remove(){}},files:[],click(){}};
-    let options;
-    const sandbox={document:{getElementById:el,createElement:()=>el("login-modal"),body:{appendChild(){}}},window:{},console:silent,
-      localStorage:{getItem:()=> 'old-valid-token',setItem(){}},URL:{createObjectURL:()=> 'blob:fixture'},
-      FormData:class{append(){}},Date,setTimeout,clearInterval(){},setInterval(){},
-      fetch:async(url,opts)=>{if(url==='/api/auth/web')options=opts;return {ok:true,status:200,json:async()=>({token:'renewed',balance:245})};}};
-    vm.runInNewContext(script,sandbox);await sandbox.ensureWebToken();
-    return [options.headers.Authorization==='Bearer old-valid-token'&&options.credentials==='same-origin',
-      {legacy_authorization:options.headers.Authorization,credentials:options.credentials}];
+  await test('web_bootstrap_restores_cookie_session_without_guest_creation',async()=>{
+    const {JSDOM}=require(process.env.WEB_DOM_MODULE||'jsdom');
+    const {pathToFileURL}=require('url');
+    const {createApplication}=await import(pathToFileURL(path.join(ROOT,'backend/static/web/app.js')).href);
+    const calls=[],response=(data,status=200)=>({ok:status>=200&&status<300,status,json:async()=>data});
+    const dom=new JSDOM('<div id="app"></div>',{url:'https://site.invalid'});
+    const mount=async()=>()=>{};
+    const app=createApplication({document:dom.window.document,disableHistory:true,mountCreation:mount,mountLibrary:mount,fetch:async(url,options)=>{
+      calls.push({url,options});return response(url==='/api/auth/site/session'?{auth_source:'site',manual_credit_only:true,user:{user_id:'WEB-0123456789ABCDEF',account_user_id:'WEB-0123456789ABCDEF',balance:245},balance:245,csrf_token:'fixture-proof'}:{prices:{light:40,fine:80},text_generation:{ready:false,price:40}});
+    }});
+    await app.start();const request=calls.find(c=>c.url==='/api/auth/site/session');const restored=app.state.user.balance===245&&request.options.credentials==='same-origin'&&request.options.method==='GET';app.destroy();dom.window.close();
+    const guestDom=new JSDOM('<div id="app"></div>',{url:'https://site.invalid'}),guestCalls=[];
+    const guest=createApplication({document:guestDom.window.document,disableHistory:true,mountCreation:mount,mountLibrary:mount,fetch:async(url,options)=>{guestCalls.push({url,options});return url==='/api/auth/site/session'?response({detail:'login required'},401):response({prices:{light:40,fine:80}});}});
+    await guest.start();const anonymous=guest.state.user===null&&!guestCalls.some(c=>c.options.method==='POST');guest.destroy();guestDom.window.close();
+    return [restored&&anonymous&&!calls.some(c=>c.url==='/api/auth/web'||c.url.endsWith('/register')),{cookieSessionRestored:restored,guestCreatesAccount:false,guestRequests:guestCalls.map(c=>c.url)}];
   });
 
-  await test('admin_users_default_wechat_filter_shows_fixed_id_and_counts',async()=>{
+  await test('admin_selected_wechat_filter_shows_registered_counts_not_visitors',async()=>{
     const html=fs.readFileSync(path.join(ROOT,'backend/admin.html'),'utf8');
     const start=html.indexOf('async function loadUsers() {');
     const end=html.indexOf('/* ---------- 用户操作',start);
@@ -671,10 +663,10 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     const elements={'users-source':{value:'wechat'},'users-summary':{},'users-table':{tBodies:[{rows:[],appendChild(row){this.rows.push(row);}}]}};
     let requested;
     const sandbox={$:id=>elements[id],console:silent,esc:v=>String(v),fmtTime:()=> 'time',document:{createElement:()=>({})},
-      api:async url=>{requested=url;return {stats:{wechat_users_total:1,web_users_total:8},items:[{openid:'o_real_wechat_user',user_id:'WX-0123456789ABCDEF',account_type:'wechat',app_id:'wx_test',total_jobs:2,blocked:0,balance:110}]};}};
+      api:async url=>{requested=url;return {stats:{wechat_users_total:1,web_users_total:98,web_registered_total:3},items:[{openid:'o_real_wechat_user',user_id:'WX-0123456789ABCDEF',account_type:'wechat',app_id:'wx_test',total_jobs:2,blocked:0,balance:110,username:'website_reader',web_registered:true,wechat_bound:true}]};}};
     vm.runInNewContext(script,sandbox);await sandbox.loadUsers();
     const row=elements['users-table'].tBodies[0].rows[0].innerHTML;
-    return [requested.includes('account_type=wechat')&&row.includes('WX-0123456789ABCDEF')&&elements['users-summary'].textContent.includes('网页访客 8'),
+    return [requested.includes('account_type=wechat')&&row.includes('WX-0123456789ABCDEF')&&row.includes('website_reader')&&row.includes('重置网页密码')&&elements['users-summary'].textContent.includes('网站注册 3')&&!elements['users-summary'].textContent.includes('98'),
       {request:requested,summary:elements['users-summary'].textContent,fixed_id_displayed:row.includes('WX-0123456789ABCDEF')}];
   });
 

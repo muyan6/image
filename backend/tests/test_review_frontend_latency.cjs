@@ -24,21 +24,19 @@ function page(name, apiMock={}, a=app(), extraWx={}, clock={}) {
       clearTimeout:clock.clearTimeout||clearTimeout,Date});
   p.data=JSON.parse(JSON.stringify(p.data));if(name==='text-generation')p.data.lightPoints=a.globalData.lightPoints||200;p.setData=d=>Object.assign(p.data,d);return p;
 }
-function web(fetchMock, clock={}) {
-  const elements={}, el=id=>elements[id]||= {style:{},classList:{add(){},remove(){}},files:[],click(){}};
-  const script=[...fs.readFileSync(path.join(root,'backend/index.html'),'utf8').matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)][0][1];
-  const alerts=[];
-  const context={document:{getElementById:el,createElement:()=>el('login-panel'),body:{appendChild(){}}},window:{},
-    console:silent,localStorage:{getItem:()=> 'session',setItem(){},removeItem(){}},
-    URL:{createObjectURL:()=> 'blob:fixture',revokeObjectURL(){}},fetch:(url,options)=>{
-      if(url==='/api/config')return Promise.resolve(response({prices:{light:40,fine:40},free_mode:false}));
-      if(url==='/api/me')return Promise.resolve(response({user_id:'fixture-user',balance:200}));
-      if(url.startsWith('/api/my/jobs?'))return Promise.resolve(response({jobs:[],total:0,processing_count:0,has_more:false,next_offset:0}));
-      return fetchMock(url,options);
-    },alert:s=>alerts.push(s),
-    setTimeout:clock.setTimeout||((fn,ms)=>{const timer=setTimeout(fn,ms);timer.unref();return timer;}),clearTimeout,clearInterval(){},setInterval(){},Date:clock.Date||Date};
-  vm.createContext(context);vm.runInContext(script,context);
-  return {elements,alerts,run:s=>vm.runInContext(s,context)};
+function web(fetchMock,clock={}) {
+  const {fixture,photo}=require('./test_web_creation_parity.cjs');
+  const t=fixture({Date:clock.Date});
+  t.ctx.api=async(url,options={})=>{
+    if(url==='/api/config')return t.config;
+    if(url==='/api/me')return {balance:t.ctx.state.user.balance};
+    const response=await fetchMock(url,{method:options.method||'GET',body:options.data?JSON.stringify(options.data):undefined});
+    if(!response)return {state:'pending'};
+    const data=await response.json();if(!response.ok)throw Object.assign(new Error(data.detail||'request rejected'),{status:response.status});return data;
+  };
+  t.ctx.creationOptions.fetch=async(url,options)=>await fetchMock(url,options)||{ok:true,status:200};
+  if(clock.setTimeout)t.ctx.creationOptions.delay=ms=>new Promise(r=>clock.setTimeout(r,ms));
+  return {...t,session:t.session(),picture:photo()};
 }
 const response=(data,status=200)=>({ok:status>=200&&status<300,status,json:async()=>data});
 async function test(name,fn) {
@@ -158,59 +156,48 @@ async function test(name,fn) {
   });
   await test('web_double_click_does_not_duplicate_billable_submission',async()=>{
     let uploads=0,accepted;const t=web(async(url)=>{
-      if(url==='/api/auth/web')return response({token:'session'});
       if(url==='/api/uploads'){uploads++;return response({url:'https://cos.invalid/upload',upload_id:'fixture'});}
       if(url==='/api/rescue/by-upload')return new Promise(r=>accepted=r);
-      if(url.startsWith('/api/jobs/'))return response({status:'succeeded',result_url:'https://cos.invalid/result'});
       return response({});});
-    await tick();t.run("handleFile({name:'fixture.jpg',size:4,type:'image/jpeg'})");
-    const first=t.elements.btnRescue.onclick();await tick();const second=t.elements.btnRescue.onclick();await tick();
-    const count=uploads;accepted(response({code:0,job_id:'fixture'}));
-    if(count===1)await Promise.all([first,second]);else await tick();
-    assert.equal(count,1);return {uploads:count};
+    const first=t.session.submit(t.picture,40);await tick();await assert.rejects(t.session.submit(t.picture,40),/提交正在进行/);
+    assert.equal(uploads,1);accepted(response({code:0,job_id:'fixture'}));await first;return {uploads};
   });
   await test('web_poll_timeout_retry_reuses_accepted_job_without_reupload',async()=>{
     let now=0,uploads=0,done=false;
     const t=web(async(url)=>{
-      if(url==='/api/auth/web')return response({token:'session'});
       if(url==='/api/uploads'){uploads++;return response({url:'https://cos.invalid/upload',upload_id:'fixture'});}
       if(url==='/api/rescue/by-upload')return response({code:0,job_id:'fixture'});
-      if(url.startsWith('/api/jobs/'))return response({status:done?'succeeded':'processing',result_url:done?'https://cos.invalid/result':''});
+      if(url.startsWith('/api/jobs/'))return response({status:done?'succeeded':'processing'});
       return response({});},{Date:{now:()=>now},setTimeout(fn,ms){now+=ms;queueMicrotask(fn);}});
-    await tick();t.run("handleFile({name:'fixture.jpg',size:4})");await t.elements.btnRescue.onclick();
-    done=true;await t.elements.btnRescue.onclick();assert.equal(uploads,1);return {uploads,firstTimeoutAtMs:180000};
+    const created=await t.session.submit(t.picture,40);assert.equal(await t.session.poll(created.job_id,()=>{}),null);
+    done=true;const reused=await t.session.submit(t.picture,40);assert.equal(reused.job_id,created.job_id);assert.equal((await t.session.poll(reused.job_id,()=>{})).status,'succeeded');
+    assert.equal(uploads,1);return {uploads,firstTimeoutAtMs:now};
   });
   await test('web_uncertain_submission_blocks_repeat_after_network_loss',async()=>{
-    let submissions=0;
-    const t=web(async(url)=>{
-      if(url==='/api/auth/web')return response({token:'session'});
+    let submissions=0;const t=web(async(url)=>{
       if(url==='/api/uploads')return response({url:'https://cos.invalid/upload',upload_id:'fixture'});
       if(url==='/api/rescue/by-upload'){submissions++;throw new Error('network timeout');}
+      if(url.startsWith('/api/me/submissions/'))return response({state:'pending'});
       return response({});});
-    await tick();t.run("handleFile({name:'fixture.jpg',size:4})");await t.elements.btnRescue.onclick();await t.elements.btnRescue.onclick();
-    assert.equal(submissions,1);return {submissions};
+    await assert.rejects(t.session.submit(t.picture,40),e=>e.code==='UNCERTAIN');await assert.rejects(t.session.submit(t.picture,40),e=>e.code==='UNCERTAIN');
+    assert.equal(submissions,1);return {submissions,persistentRequestId:t.session.receipt().client_request_id};
   });
   for(const stage of ['create','complete'])await test('web_'+stage+'_503_is_retryable_without_billable_uncertainty',async()=>{
-    let creates=0,submissions=0;
-    const t=web(async(url)=>{
-      if(url==='/api/auth/web')return response({token:'session'});
+    let creates=0,submissions=0;const t=web(async(url)=>{
       if(url==='/api/uploads'){creates++;return stage==='create'?response({detail:'temporary'},503):response({url:'https://cos.invalid/upload',upload_id:'fixture'});}
       if(url.endsWith('/complete'))return response({detail:'temporary'},503);
       if(url==='/api/rescue/by-upload'){submissions++;return response({code:0,job_id:'fixture'});}
       return response({});});
-    await tick();t.run("handleFile({name:'fixture.jpg',size:4})");await t.elements.btnRescue.onclick();await t.elements.btnRescue.onclick();
-    assert.equal(creates,2);assert.equal(submissions,0);return {retryCreates:creates,billableSubmissions:submissions};
+    await assert.rejects(t.session.submit(t.picture,40));await assert.rejects(t.session.submit(t.picture,40));assert.equal(creates,2);assert.equal(submissions,0);return {retryCreates:creates,billableSubmissions:submissions};
   });
-  await test('web_missing_job_clears_pending_id_before_explicit_retry',async()=>{
-    let creates=0,now=0;
-    const t=web(async(url)=>{
-      if(url==='/api/auth/web')return response({token:'session'});
+  await test('web_missing_job_preserves_receipt_until_explicit_new_creation',async()=>{
+    let creates=0;const t=web(async(url)=>{
       if(url==='/api/uploads'){creates++;return response({url:'https://cos.invalid/upload',upload_id:'fixture'});}
       if(url==='/api/rescue/by-upload')return response({code:0,job_id:'fixture'});
-      if(url.startsWith('/api/jobs/'))return creates===1?response({detail:'not found'},404):response({status:'succeeded',result_url:'https://cos.invalid/result'});
-      return response({});},{Date:{now:()=>now},setTimeout(fn,ms){now+=ms;queueMicrotask(fn);}});
-    await tick();t.run("handleFile({name:'fixture.jpg',size:4})");await t.elements.btnRescue.onclick();await t.elements.btnRescue.onclick();
-    assert.equal(creates,2);assert.equal(t.alerts.length,1);return {creates,queryErrors:t.alerts.length};
+      if(url.startsWith('/api/jobs/'))return response({detail:'not found'},404);
+      return response({});});
+    const created=await t.session.submit(t.picture,40);await assert.rejects(t.session.poll(created.job_id,()=>{}),e=>e.status===404);
+    assert.equal(t.session.receipt().job_id,'fixture');await t.session.newCreation();await t.session.submit(t.picture,40);assert.equal(creates,2);return {creates,explicitNewCreation:true};
   });
   await test('all_mini_program_scripts_and_wxml_handlers_parse',()=>{
     let files=0,bindings=0;const walk=d=>fs.readdirSync(d,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(d,e.name)):[path.join(d,e.name)]);

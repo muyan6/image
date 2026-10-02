@@ -3,6 +3,7 @@ import json
 import threading
 import time
 import uuid
+from account_links import init_links, canonical_unlocked, aliases_unlocked, marks, adjust_balance_unlocked
 
 PENDING_TTL = 7 * 86400
 _factory_lock = threading.Lock()
@@ -18,6 +19,7 @@ def store_for(users):
 class SubmissionStore:
     def __init__(self, users):
         self.users = users
+        init_links(users)
         self.flow_lock = threading.RLock()
         with users._lock, users._conn:
             users._conn.executescript('''
@@ -53,10 +55,11 @@ class SubmissionStore:
         with self.users._lock, self.users._conn:
             db = self.users._conn
             db.execute('BEGIN IMMEDIATE')
+            owners=aliases_unlocked(self.users,owner);owner=canonical_unlocked(self.users,owner)
             user = db.execute('SELECT banned FROM users WHERE openid=?', (owner,)).fetchone()
             if not user or user[0] or self.users._purging:
                 raise ValueError('当前账号暂不能投稿')
-            old = self._row('SELECT * FROM community_submissions WHERE owner=? AND job_id=?', (owner, job['id']))
+            old = self._row('SELECT * FROM community_submissions WHERE owner IN ('+marks(owners)+') AND job_id=?', (*owners, job['id']))
             if old and old['status'] in ('uploading', 'pending', 'published'):
                 if any(old['payload'].get(k) != content[k] for k in ('title','story','category','share_original')):
                     raise ValueError('该作品已投稿；修改公开内容前请先撤回原投稿')
@@ -65,8 +68,8 @@ class SubmissionStore:
                     db.execute('UPDATE community_submissions SET lease_until=? WHERE id=?', (now+180, old['id']))
                 return old, retry
             db.execute('DELETE FROM community_submission_events WHERE at<?', (now-86400,))
-            count = db.execute('SELECT COUNT(*) FROM community_submission_events WHERE owner=? AND at>?', (owner, now-3600)).fetchone()[0]
-            pending = db.execute("SELECT COUNT(*) FROM community_submissions WHERE owner=? AND status IN ('uploading','pending')", (owner,)).fetchone()[0]
+            count = db.execute('SELECT COUNT(*) FROM community_submission_events WHERE owner IN ('+marks(owners)+') AND at>?', (*owners, now-3600)).fetchone()[0]
+            pending = db.execute("SELECT COUNT(*) FROM community_submissions WHERE owner IN ("+marks(owners)+") AND status IN ('uploading','pending')", owners).fetchone()[0]
             if count >= 5 or pending >= 5:
                 raise ValueError('每小时最多投稿 5 次，待处理投稿最多 5 件')
             sid = old['id'] if old else 's_'+uuid.uuid4().hex
@@ -101,7 +104,8 @@ class SubmissionStore:
 
     def withdraw(self, sid, owner, revision):
         with self.users._lock, self.users._conn:
-            row = self._row('SELECT * FROM community_submissions WHERE id=? AND owner=?',(sid,owner))
+            owners=aliases_unlocked(self.users,owner)
+            row = self._row('SELECT * FROM community_submissions WHERE id=? AND owner IN ('+marks(owners)+')',(sid,*owners))
             if not row:raise KeyError('投稿不存在')
             if row['revision'] != revision:raise ValueError('投稿已更新，请刷新后操作')
             self.users._conn.execute("UPDATE community_submissions SET status='withdrawn',featured=0,updated=? WHERE id=?",(time.time(),sid))
@@ -114,7 +118,8 @@ class SubmissionStore:
             row=self._row('SELECT * FROM community_submissions WHERE id=?',(sid,))
             if not row:raise KeyError('投稿不存在')
             if row['revision']!=revision:raise ValueError('投稿版本已更新，请刷新后审核')
-            user=db.execute('SELECT banned FROM users WHERE openid=?',(row['owner'],)).fetchone()
+            recipient=canonical_unlocked(self.users,row['owner'])
+            user=db.execute('SELECT banned FROM users WHERE openid=?',(recipient,)).fetchone()
             if action=='approve':
                 if not user or user[0]:raise ValueError('作者账号异常，暂不发布')
                 if row['status']=='published':return row
@@ -133,7 +138,7 @@ class SubmissionStore:
                     if type(reward) is not int or reward<0:raise ValueError('精选奖励配置无效')
                     inserted=db.execute('INSERT OR IGNORE INTO community_rewards VALUES(?,?,?,?)',(sid,row['owner'],reward,now)).rowcount
                     if inserted:
-                        db.execute('UPDATE users SET balance=balance+? WHERE openid=?',(reward,row['owner']))
+                        adjust_balance_unlocked(self.users,recipient,reward)
                         db.execute('UPDATE community_submissions SET reward=? WHERE id=?',(reward,sid))
                         db.execute('INSERT INTO audit(ts,openid,action,detail) VALUES(?,?,?,?)',(now,row['owner'],'community_featured','post='+sid+' +='+str(reward)))
                 db.execute('UPDATE community_submissions SET featured=?,updated=? WHERE id=?',(int(action=='feature'),now,sid))
@@ -143,7 +148,9 @@ class SubmissionStore:
     def list(self, *, owner=None, status='all', offset=0, limit=50):
         if status not in ('all','uploading','pending','published','rejected','withdrawn'):raise ValueError('投稿状态无效')
         clauses=[];args=[]
-        if owner is not None:clauses.append('owner=?');args.append(owner)
+        if owner is not None:
+            with self.users._lock:owners=aliases_unlocked(self.users,owner)
+            clauses.append('owner IN ('+marks(owners)+')');args.extend(owners)
         if status!='all':clauses.append('status=?');args.append(status)
         where=' WHERE '+' AND '.join(clauses) if clauses else ''
         with self.users._lock:
@@ -161,13 +168,15 @@ class SubmissionStore:
         if not ids:return {}
         placeholders=','.join('?' for _ in ids)
         with self.users._lock:
-            rows=self.users._conn.execute('SELECT post_id,COUNT(*),MAX(CASE WHEN owner=? THEN 1 ELSE 0 END) FROM community_likes WHERE post_id IN ('+placeholders+') GROUP BY post_id',(viewer or '',*ids)).fetchall()
+            viewers=aliases_unlocked(self.users,viewer) or ('',)
+            rows=self.users._conn.execute('SELECT l.post_id,COUNT(DISTINCT COALESCE(a.canonical_openid,l.owner)),MAX(CASE WHEN l.owner IN ('+marks(viewers)+') THEN 1 ELSE 0 END) FROM community_likes l LEFT JOIN account_aliases a ON a.alias_openid=l.owner WHERE l.post_id IN ('+placeholders+') GROUP BY l.post_id',(*viewers,*ids)).fetchall()
         return {sid:(count,bool(liked)) for sid,count,liked in rows}
 
     def set_like(self, sid, owner, liked):
         with self.users._lock, self.users._conn:
+            owners=aliases_unlocked(self.users,owner);owner=canonical_unlocked(self.users,owner)
+            self.users._conn.execute('DELETE FROM community_likes WHERE post_id=? AND owner IN ('+marks(owners)+')',(sid,*owners))
             if liked:self.users._conn.execute('INSERT OR IGNORE INTO community_likes VALUES(?,?)',(sid,owner))
-            else:self.users._conn.execute('DELETE FROM community_likes WHERE post_id=? AND owner=?',(sid,owner))
 
     def maintenance(self):
         now=time.time()

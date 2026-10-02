@@ -149,7 +149,7 @@ class CloudPipeline:
                     orig_cos=('origins/'+prefix+source['ext']) if source else None,
                     result_cos='results/'+prefix+'.jpg',norm_cos=('norms/'+prefix+'.jpg') if source else None,
                     deadline=deadline,cloud_next_at=0,
-                    cloud_audit_mode=cfg.get('audit_mode','wechat_auto'))
+                    cloud_audit_mode='ci_sync' if openid.startswith('web-') else cfg.get('audit_mode','wechat_auto'))
                 m.users.confirm_job(jid,'云端异步生成 '+model)
             except Exception:
                 m.users.refund_job(openid,jid,cancel=True)

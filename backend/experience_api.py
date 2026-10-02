@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictBool
 from experience_store import store_for
+from account_links import owns
 
 
 class PreferenceBody(BaseModel):
@@ -24,7 +25,7 @@ def submission_view(m, openid, row):
     state = row['state']; job = m.jobs.get(row['job_id'])
     result = {'code': 0, 'client_request_id': row['request_id'], 'state': state,
               'submission_state': state, 'job_id': None, 'input_mode': row['input_mode']}
-    if job and job.get('openid') == openid:
+    if job and owns(m.users, job.get('openid'), openid):
         state = 'accepted'
         store_for(m.users).settle(openid, row['request_id'], state)
         result.update(state=state, submission_state=state, job_id=job['id'], status=job['status'],
@@ -61,7 +62,7 @@ def idempotent_submit(m, user, request_id, payload, input_mode, submit):
     except Exception as exc:
         job = m.jobs.get(row['job_id'])
         settlement = store.settlement(user['openid'], row['job_id'])
-        if job and job.get('openid') == user['openid']:
+        if job and owns(m.users, job.get('openid'), user['openid']):
             store.settle(user['openid'], request_id, 'accepted')
         elif isinstance(exc, HTTPException) and exc.status_code < 500 and settlement['charged_amount'] is None:
             store.settle(user['openid'], request_id, 'rejected', exc.detail, exc.status_code)
@@ -114,7 +115,10 @@ def make_experience_router(runtime):
     @router.get('/api/me/submissions/{request_id}')
     def find_submission(request_id: str, request: Request):
         m = runtime(); user = m._current_user(request)
-        row = store_for(m.users).submission(user['openid'], request_id)
+        try:
+            row = store_for(m.users).submission(user['openid'], request_id)
+        except ValueError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
         if not row:
             return JSONResponse(status_code=404, content={'detail': '提交登记不存在', 'state': 'not_found',
                                                          'submission_state': 'not_found', 'job_id': None})
@@ -124,7 +128,7 @@ def make_experience_router(runtime):
     @router.get('/api/jobs/{job_id}/recipe')
     def recipe(job_id: str, request: Request):
         m = runtime(); user = m._current_user(request); job = m.jobs.get(m._safe_job_id(job_id))
-        if not job or job.get('openid') != user['openid'] or job.get('deleted_at'):
+        if not job or not owns(m.users, job.get('openid'), user['openid']) or job.get('deleted_at'):
             raise HTTPException(404, detail='作品不存在')
         if job.get('status') != 'succeeded':
             raise HTTPException(409, detail='作品尚未完成')

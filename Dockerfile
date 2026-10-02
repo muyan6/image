@@ -23,6 +23,7 @@ RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r re
 
 # 复制后端代码
 COPY backend/*.py backend/*.html backend/logo.jpg ./
+COPY backend/static/web ./static/web
 
 VOLUME ["/app/data", "/app/uploads"]
 

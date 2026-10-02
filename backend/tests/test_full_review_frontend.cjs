@@ -14,21 +14,6 @@ async function test(name,fn){
  try{const observed=await fn();rows.push({case:name,passed:true,observed});console.log('PASS '+name+': '+JSON.stringify(observed||{}));}
  catch(e){rows.push({case:name,passed:false,error:String(e.stack)});console.log('FAIL '+name+': '+e.message);}
 }
-function qrFixture(){
- const els={},el=id=>els[id]||={style:{},classList:{add(){},remove(){}},files:[],click(){}};
- const intervals=new Map(),cleared=[];let sequence=0,starts=0,finishOldStatus;
- const response=(d,status=200)=>({ok:status>=200&&status<300,status,json:async()=>d,blob:async()=>({})});
- const sandbox={document:{getElementById:el,createElement:()=>el('login-panel'),body:{appendChild(){}}},window:{},console:quiet,
-  localStorage:{getItem:()=>'',setItem(){},removeItem(){}},URL:{createObjectURL:()=> 'blob:fixture',revokeObjectURL(){}},
-  setInterval:f=>{const id=++sequence;intervals.set(id,f);return id;},clearInterval:id=>{cleared.push(id);intervals.delete(id);},setTimeout,Date,alert(){},
-  fetch:async url=>{if(url==='/api/auth/web')return response({detail:'login needed'},401);
-   if(url==='/api/auth/wechat-web/start')return response({id:'qr_'+(++starts),qr_url:'/qr_'+starts});
-   if(url==='/qr_1'||url==='/qr_2')return response({});
-   if(url==='/api/auth/wechat-web/qr_1/status')return new Promise(r=>finishOldStatus=r);
-   return response({state:'pending'});}};
- vm.createContext(sandbox);const script=[...fs.readFileSync(path.join(root,'backend/index.html'),'utf8').matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)][0][1];vm.runInContext(script,sandbox);
- return {els,el,intervals,cleared,response,run:s=>vm.runInContext(s,sandbox),completeOld:(data,status)=>finishOldStatus(response(data,status))};
-}
 (async()=>{
  await test('adjust_return_during_accepted_upload_resumes_current_job',async()=>{
   let resolveSubmit,submits=0,polls=0,redirects=0;const a=app();
@@ -70,14 +55,7 @@ function qrFixture(){
   const mask=p.data.processing,locked=p._submissionPending;p.onHide();finishSecond({code:0,job_id:'second'});await second;
   assert(locked);assert(mask);return {submits,newUploadStayedLocked:locked,newMaskStayedVisible:mask};
  });
- for(const state of ['expired','denied','approved'])await test('stale_qr_'+state+'_does_not_change_new_login',async()=>{
-  const q=qrFixture();await tick();const oldTimer=[...q.intervals.keys()][0];const oldPolling=q.intervals.get(oldTimer)();await tick();
-  await q.run('openWechatLogin(true)');const newTimer=[...q.intervals.keys()][0];assert(newTimer&&newTimer!==oldTimer);
-  q.completeOld(state==='expired'?{detail:'old QR expired'}:state==='denied'?{state:'denied'}:{state:'approved',token:'old-account-token',balance:999},state==='expired'?410:200);await oldPolling;
-  assert(q.intervals.has(newTimer));assert.strictEqual(q.run('webToken'),'');assert.strictEqual(q.run('loginPanel.style.display'),'flex');
-  assert.strictEqual(q.el('wechatLoginMessage').textContent,'请用微信扫一扫，登录码 5 分钟内有效。');
-  return {oldTimer,newTimer,activePolling:q.intervals.size,token:q.run('webToken')};
- });
+ for(const [name,scenario] of [['late_cookie_session_does_not_replace_explicit_site_login','startup_late'],['pending_site_login_blocks_concurrent_identity_change','modal_pending_lock'],['older_site_summary_cannot_replace_newer_account_state','newer_summary']])await test(name,()=>require('./test_web_shell.cjs').runRaceScenario(scenario));
  await test('comment_publish_queues_refresh_after_older_snapshot',async()=>{
   let finishOldList,reads=0,posts=0;const p=page('community-detail',{request:async(url,o)=>{if(o?.method==='POST'){posts++;return {ok:true};}
    reads++;return reads===1?new Promise(r=>finishOldList=r):{items:[{id:'new_comment',created_at:1,content:'new comment'}],total:1,next_offset:1};}});

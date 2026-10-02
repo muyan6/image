@@ -43,6 +43,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, Response, Uploa
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
 from admin_api import ensure_admin_password, make_admin_router
@@ -65,9 +66,12 @@ from settings_store import AnnouncementStore, SettingsStore
 from templates_store import TemplateStore, covers_dir
 from text_overlay import apply as apply_text_overlay, collect_values
 from tencent_cs import ModerationError, moderate_image_bytes, moderate_text
-from user_store import AdmissionError, UserStore, business_midnight
+from user_store import AdmissionError, UserStore, business_midnight, public_user_id
 from experience_store import store_for as experience_for
 from experience_api import idempotent_submit, photo_recipe, make_experience_router
+from account_links import canonical, aliases, owns, register_verified
+from web_accounts import (store_for as site_accounts_for, request_token as site_request_token,
+                          site_request, verify_csrf, account_view as site_account_view, make_site_router)
 from reward_verifier import verify_video
 import wechat_sec
 from wechat_sec import WechatSecError
@@ -217,6 +221,10 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
+# Windows registry can override .js to text/plain. Module scripts require the
+# explicit JavaScript media type in both StaticFiles and FileResponse paths.
+mimetypes.add_type('text/javascript','.js')
+app.mount('/web-assets', StaticFiles(directory=os.path.join(BASE_DIR,'static','web'),check_dir=False), name='web-assets')
 
 app.add_middleware(
     CORSMiddleware,
@@ -344,20 +352,33 @@ def _current_user(request) -> Dict[str, Any]:
     已注册用户走纯读（轮询接口每 1.5s 打一次，不能每次都写库）。
     """
     token = bearer_of({k.lower(): v for k, v in request.headers.items()})
-    openid = verify_user_token(token) if token else None
+    browser_token = token if token and token.startswith('site_') else getattr(request,'cookies',{}).get('site_session','')
+    site_session = site_accounts_for(users).session(browser_token) if browser_token else None
+    if site_session:
+        if request.method not in ('GET','HEAD','OPTIONS'):
+            site_request(request,settings);verify_csrf(request,site_session)
+        openid=site_session['account_id'];source='site'
+    else:
+        openid = verify_user_token(token) if token and not token.startswith('site_') else None
+        source='mini'
     if not openid:
         raise HTTPException(status_code=401, detail="请先登录")
+    if source!='site' and openid.startswith('web-'):
+        raise HTTPException(status_code=401,detail='网站账户需要真实注册会话，请重新登录')
     user = users.get_user(openid)
     if not user:
         raise HTTPException(status_code=401, detail="账号记录不存在，请重新登录")
-    if user.get('account_type')!='wechat':
+    if source!='site' and user.get('account_type')!='wechat':
         raise HTTPException(status_code=401,detail='请使用微信登录，网页访客账户已停止使用')
     active_app_id = settings.wechat().get("app_id") or ""
-    if user.get("account_type") == "wechat" and user.get("app_id") and active_app_id \
+    if source=='mini' and user.get("account_type") == "wechat" and user.get("app_id") and active_app_id \
             and user["app_id"] != active_app_id:
         raise HTTPException(status_code=401, detail="小程序配置已变更，请重新登录")
     if user.get("admin_hidden") or user["last_seen"] < time.time() - 300:
         users.touch_user(openid)
+    user['auth_source']=source;user['auth_identity']=openid
+    user['manual_credit_only']=source=='site'
+    if site_session:user['username']=site_session['username']
     return user
 
 
@@ -428,7 +449,7 @@ def _moderate_or_reject(image_bytes: bytes, job_ctx: str, openid: str) -> Option
         return None
 
     suggestion = label = score = None
-    if wechat_sec.wechat_sec_ready(settings) \
+    if not openid.startswith('web-') and wechat_sec.wechat_sec_ready(settings) \
             and len(image_bytes) <= wechat_sec.MAX_WECHAT_CHECK_BYTES:
         try:
             suggestion, label, score = wechat_sec.check_image(
@@ -920,9 +941,10 @@ class JobStore:
         return float(job.get("completed_at") or job.get("created_at") or 0) + self._ttl
 
     def delete_for_openid(self, job_id: str, openid: str) -> Optional[Dict[str, Any]]:
+        owners=aliases(users,openid)
         with self._lock:
             job = self._data.get(job_id)
-            if job is None or job.get("openid") != openid:
+            if job is None or job.get("openid") not in owners:
                 return None
             updated = {**job, "deleted_at": job.get("deleted_at") or time.time(), "updated_at": time.time()}
             if job.get("status") == "processing":
@@ -1005,10 +1027,11 @@ class JobStore:
     def list_for_openid(self, openid: str, offset: int = 0, limit: int = 50,
                         status: str = 'all') -> List[Dict[str, Any]]:
         """按 openid 筛选当前用户的任务列表：按创建时间倒序。"""
+        owners=aliases(users,openid)
         with self._lock:
             matched = [
                 dict(j) for j in self._data.values()
-                if j.get("openid") == openid and not j.get("deleted_at")
+                if j.get("openid") in owners and not j.get("deleted_at")
                 and (status == 'all' or j.get('status') == status)
             ]
             matched.sort(key=lambda j: j.get("created_at", 0), reverse=True)
@@ -1016,9 +1039,10 @@ class JobStore:
 
     def counts_for_openid(self, openid: str) -> Dict[str, int]:
         """Authoritative totals; the mini-program only needs one thumbnail page."""
+        owners=aliases(users,openid)
         with self._lock:
             matched = [job for job in self._data.values()
-                       if job.get("openid") == openid and not job.get("deleted_at")]
+                       if job.get("openid") in owners and not job.get("deleted_at")]
             counts = {status: sum(job.get('status') == status for job in matched)
                       for status in ('processing', 'succeeded', 'failed')}
             return {"total": len(matched), "processing_count": counts['processing'],
@@ -1987,10 +2011,11 @@ class _ProfileBody(BaseModel):
     nickname: str = ""
 
 
-def _login_response(openid: str, account_type: str = "wechat", app_id: str = "") -> Dict[str, Any]:
+def _login_response(openid: str, account_type: str = "wechat", app_id: str = "",
+                    welcome_balance: Optional[int] = None) -> Dict[str, Any]:
     try:
         user = users.ensure_user(openid, account_type=account_type, app_id=app_id,
-                                 welcome_balance=settings.snapshot()['commerce']['welcome_points'])
+                                 welcome_balance=(settings.snapshot()['commerce']['welcome_points'] if welcome_balance is None else welcome_balance))
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     users.audit(openid, "login", "source=%s app_id=%s" % (account_type, app_id))
@@ -2028,7 +2053,20 @@ def wechat_login(body: _LoginBody):
                             detail=str(exc)) from exc
     if app_id != str(settings.wechat().get("app_id") or ""):
         raise HTTPException(status_code=409, detail="登录期间配置发生变化，请重新登录")
-    return _login_response(openid, account_type="wechat", app_id=app_id)
+    from wechat_auth import consume_session_proof
+    proof=consume_session_proof(openid,app_id)
+    from web_wechat import pending_site_for_unionid
+    existing_site=pending_site_for_unionid(users,proof['unionid']) if proof and proof.get('unionid') else None
+    if proof and proof.get('unionid'):
+        try:register_verified(users,app_id,openid,proof['unionid'],'mini')
+        except ValueError as exc:raise HTTPException(409,detail=str(exc)) from exc
+    result=_login_response(openid, account_type="wechat", app_id=app_id,welcome_balance=0 if existing_site else None)
+    if proof and proof.get('unionid'):
+        from web_wechat import complete_pending_link
+        complete_pending_link(users,openid,proof['unionid'],app_id)
+        refreshed=users.get_user(openid)
+        result.update(balance=refreshed['balance'],user_id=refreshed['user_id'])
+    return result
 
 
 @app.post("/api/auth/web")
@@ -2036,6 +2074,8 @@ def web_login(request: Request, response: Response):
     """Refresh an existing WeChat session; never create a browser guest."""
     user=_current_user(request)
     response.headers['Cache-Control']='no-store'
+    if user.get('auth_source')=='site':
+        return site_account_view(sys.modules[__name__],user['auth_identity'],site_request_token(request))
     return _login_response(user['openid'],account_type='wechat',app_id=user.get('app_id') or '')
 
 
@@ -2048,6 +2088,12 @@ def get_me(request: Request):
         "openid_masked": openid[:6] + "***",
         "user_id": user["user_id"],
         "account_type": user["account_type"],
+        "auth_source": user.get('auth_source','mini'),
+        "manual_credit_only": user.get('manual_credit_only',False),
+        "username": user.get('username',''),
+        "site_username": user.get('username',''),
+        "account_user_id": public_user_id(user['auth_identity'],'web') if user.get('auth_source')=='site' else user['user_id'],
+        "wechat_bound": user.get('auth_source')=='site' and user['auth_identity']!=openid,
         "balance": user["balance"],
         "total_jobs": user["total_jobs"],
         "credit_record_count": experience_for(users).credit_records(openid, limit=1)['total'],
@@ -2094,6 +2140,7 @@ def earn_points(body: _EarnBody, request: Request):
     """
     user = _current_user(request)
     kind = (body.kind or "").strip()
+    if user.get('auth_source')=='site':raise HTTPException(403,detail='网站光子仅由后台手动发放，签到和视频奖励不适用于网站会话')
     conf = EARN_DEFS.get(kind)
     if conf is None:
         raise HTTPException(status_code=400, detail="未知的奖励类型")
@@ -2132,6 +2179,7 @@ def bind_invite(body: _InviteBody, request: Request):
     user = _current_user(request)
     openid = user["openid"]
     code = (body.code or "").strip().upper()
+    if user.get('auth_source')=='site':raise HTTPException(403,detail='网站光子仅由后台手动发放，网站会话不发放邀请奖励')
     if not re.fullmatch(r"INV-[0-9A-F]{8}", code):
         raise HTTPException(status_code=400, detail="邀请码格式不对")
     inviter = users.get_by_invite_code(code)
@@ -2197,7 +2245,7 @@ def complete_upload(upload_id: str, request: Request):
         raise HTTPException(status_code=503, detail="对象存储未配置")
     with _uploads_lock:
         rec = _uploads.get(upload_id)
-    if rec is None or rec["openid"] != user["openid"] or time.time() - rec["created_at"] > 3600:
+    if rec is None or not owns(users,rec["openid"],user["openid"]) or time.time() - rec["created_at"] > 3600:
         raise HTTPException(status_code=404, detail="上传登记不存在")
     from cos_store import object_metadata
     try:meta=object_metadata(settings,rec['key'])
@@ -2343,7 +2391,7 @@ def _create_rescue_by_upload(payload: _RescueByUploadBody, request: Request, job
 
     with _uploads_lock:
         rec = _uploads.get(upload_id)
-        if rec is None or rec["openid"] != user["openid"] or time.time() - rec["created_at"] > 3600:
+        if rec is None or not owns(users,rec["openid"],user["openid"]) or time.time() - rec["created_at"] > 3600:
             raise HTTPException(status_code=404, detail="上传登记不存在或已过期")
         rec=_uploads.pop(upload_id,None)
         if rec is None:raise HTTPException(404,detail='上传登记已经使用')
@@ -2410,7 +2458,7 @@ def query_job_status(job_id: str, request: Request):
     user = _current_user(request)
     job_id = _safe_job_id(job_id)
     job = jobs.get(job_id)
-    if job is None or job.get("deleted_at") or job.get("openid") != user["openid"]:
+    if job is None or job.get("deleted_at") or not owns(users,job.get("openid"),user["openid"]):
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
     return {
         "id": job["id"],
@@ -2464,7 +2512,7 @@ def refresh_job_media(job_id: str, request: Request, kind: str = "result"):
         raise HTTPException(status_code=400, detail="图片类型错误")
     with _media_repair_lock:
         job = jobs.get(job_id)
-        if not job or job.get("deleted_at") or job.get("openid") != user["openid"]:
+        if not job or job.get("deleted_at") or not owns(users,job.get("openid"),user["openid"]):
             raise HTTPException(status_code=404, detail="作品不存在")
         if job.get("status") != "succeeded":
             raise HTTPException(status_code=409, detail="作品尚未完成")
@@ -2586,9 +2634,9 @@ def get_image(filename: str, request: Request) -> FileResponse:
     expires=_media_expires_at(job,kind)
     if time.time() >= expires or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="图片已过期或不存在")
-    token = bearer_of({k.lower(): v for k, v in request.headers.items()})
-    owner = verify_user_token(token) if token else None
-    if owner != job["openid"]:
+    try:owner=_current_user(request)['openid']
+    except HTTPException:owner=None
+    if not owns(users,job['openid'],owner):
         try:
             expiry = int(request.query_params.get("expires", "0"))
             valid = time.time() < expiry <= time.time() + MEDIA_URL_TTL_SECONDS + 5
@@ -2616,6 +2664,9 @@ app.include_router(make_payment_router(lambda:sys.modules[__name__]))
 from community_api import make_community_router
 app.include_router(make_community_router(lambda:sys.modules[__name__]))
 app.include_router(make_experience_router(lambda:sys.modules[__name__]))
+app.include_router(make_site_router(lambda:sys.modules[__name__]))
+from web_wechat import make_web_wechat_router
+app.include_router(make_web_wechat_router(lambda:sys.modules[__name__]))
 
 if __name__ == "__main__":
     import uvicorn

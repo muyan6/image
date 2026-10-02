@@ -108,6 +108,12 @@ if not args.legacy:
         ('test_experience_creation.cjs', 'creation_results.json'),
         ('test_experience_retention.cjs', 'experience_retention_results.json'),
         ('test_experience_web.cjs', 'experience_web_results.json'),
+        ('test_site_accounts.py', 'site_accounts_results.json'),
+        ('test_account_sync.py', 'account_sync_results.json'),
+        ('test_site_community_sync.py', 'site_community_sync_results.json'),
+        ('test_web_creation_parity.cjs', 'web_creation_results.json'),
+        ('test_web_library_parity.cjs', 'web_library_parity_results.json'),
+        ('test_web_shell.cjs', 'web_shell_results.json'),
     ):
         path = Path(__file__).with_name(script)
         if path.is_file():

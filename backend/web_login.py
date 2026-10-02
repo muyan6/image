@@ -68,16 +68,19 @@ class BrowserLogin:
             id TEXT PRIMARY KEY, secret TEXT, app_id TEXT, ip TEXT, created REAL,
             expires REAL, state TEXT, openid TEXT, qr BLOB, token TEXT)''')
         self.db.execute('CREATE INDEX IF NOT EXISTS browser_login_ip ON browser_login(ip,created)')
+        columns={r[1] for r in self.db.execute('PRAGMA table_info(browser_login)')}
+        for name in ('site_account','site_session_hash'):
+            if name not in columns:self.db.execute('ALTER TABLE browser_login ADD COLUMN '+name+" TEXT NOT NULL DEFAULT ''")
         self.db.commit()
 
-    def create(self,app_id,ip):
+    def create(self,app_id,ip,site_account='',site_session_hash=''):
         now=time.time();sid=secrets.token_hex(16);secret=secrets.token_hex(32)
         with self.lock,self.db:
             self.db.execute('DELETE FROM browser_login WHERE expires<?',(now-TTL,))
             count=self.db.execute('SELECT COUNT(*) FROM browser_login WHERE ip=? AND created>?',(ip,now-60)).fetchone()[0]
             if count>=5:raise HTTPException(429,detail='登录码请求过于频繁，请稍后再试')
-            self.db.execute('INSERT INTO browser_login VALUES(?,?,?,?,?,?,?,?,?,?)',
-                            (sid,hashlib.sha256(secret.encode()).hexdigest(),app_id,ip,now,now+TTL,'pending',None,None,None))
+            self.db.execute('INSERT INTO browser_login(id,secret,app_id,ip,created,expires,state,openid,qr,token,site_account,site_session_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                            (sid,hashlib.sha256(secret.encode()).hexdigest(),app_id,ip,now,now+TTL,'pending',None,None,None,site_account,site_session_hash))
         return sid,secret
 
     def browser(self,sid,secret):
@@ -112,15 +115,23 @@ def make_web_login_router(runtime):
 
     def owned(request,sid):
         row=store().browser(sid,request.cookies.get(COOKIE,''))
+        from web_accounts import store_for,request_token
+        session=store_for(runtime().users).session(request_token(request))
+        if (not session or not row.get('site_account') or row['site_account']!=session['account_id']
+                or row.get('site_session_hash')!=session['token_hash']):
+            raise HTTPException(401,detail='请先登录发起绑定的网站账户')
         if row['app_id']!=runtime().settings.wechat().get('app_id'):
             raise HTTPException(410,detail='微信配置已变更，请刷新登录码')
         return row
 
     @router.post(PREFIX+'/start')
     def start(request:Request,response:Response):
-        external=browser_request(request);conf=runtime().settings.wechat()
+        external=browser_request(request);m=runtime();user=m._current_user(request)
+        if user.get('auth_source')!='site':raise HTTPException(401,detail='请先注册并登录网站账户，再绑定微信')
+        from web_accounts import store_for,request_token
+        session=store_for(m.users).session(request_token(request));conf=m.settings.wechat()
         if not conf.get('app_id') or not conf.get('app_secret'):raise HTTPException(503,detail='微信登录尚未配置')
-        sid,secret=store().create(conf['app_id'],request.client.host if request.client else 'unknown')
+        sid,secret=store().create(conf['app_id'],request.client.host if request.client else 'unknown',session['account_id'],session['token_hash'])
         response.set_cookie(COOKIE,secret,max_age=TTL,httponly=True,secure=bool(external and external[0]=='https'),samesite='strict',path=PREFIX)
         response.headers['Cache-Control']='no-store'
         return {'id':sid,'expires_in':TTL,'qr_url':PREFIX+'/'+sid+'/qr'}
@@ -154,17 +165,20 @@ def make_web_login_router(runtime):
         if row['state']!='approved':return {'state':'pending'}
         m=runtime();user=m.users.get_user(row['openid'])
         if not user or user.get('account_type')!='wechat':raise HTTPException(403,detail='微信账户已失效')
-        with store().lock,store().db:
-            current=store().db.execute('SELECT token FROM browser_login WHERE id=?',(sid,)).fetchone()[0]
-            if not current:
-                current=m.user_token(row['openid'])
-                store().db.execute('UPDATE browser_login SET token=? WHERE id=?',(current,sid))
-                m.users.audit(row['openid'],'web_login_approved')
-        return {'state':'approved','token':current,'balance':m.users.get_balance(row['openid'])}
+        from account_links import bind_verified
+        with m.users._lock:
+            proof=m.users._conn.execute("SELECT unionid FROM verified_wechat_identities WHERE app_id=? AND openid=? AND kind='mini'",
+                                        (row['app_id'],row['openid'])).fetchone()
+        if not proof:raise HTTPException(409,detail='小程序尚未返回可核验的 UnionID，请先完成真实微信登录')
+        try:bind_verified(m.users,row['site_account'],row['openid'],proof[0],row['app_id'],mini_app_id=row['app_id'])
+        except ValueError as exc:raise HTTPException(409,detail=str(exc)) from exc
+        from web_accounts import account_view,request_token
+        return {'state':'approved',**account_view(m,row['site_account'],request_token(request))}
 
     @router.post(PREFIX+'/approve')
     def approve(payload:Approval,request:Request):
         m=runtime();user=m._current_user(request)
+        if user.get('auth_source')!='mini':raise HTTPException(403,detail='请在小程序确认微信绑定')
         if payload.action not in ('approve','deny'):raise HTTPException(400,detail='登录操作无效')
         store().approve(payload.id,user['openid'],m.settings.wechat().get('app_id') or '',payload.action)
         return {'ok':True}

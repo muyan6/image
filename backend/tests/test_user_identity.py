@@ -93,6 +93,8 @@ class IdentityTests(unittest.TestCase):
         self.assertEqual(stats.get('wechat_users_total'), 1)
         self.assertEqual(stats.get('web_users_total'), 2)
         self.assertEqual(stats.get('accounts_total'), 3)
+        self.assertEqual(stats.get('web_registered_total'),0)
+        self.assertEqual(stats.get('legacy_web_visitors_total'),2)
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]['openid'], 'o-wechat-user')
 
@@ -152,6 +154,9 @@ class IdentityTests(unittest.TestCase):
 
     def test_admin_default_list_and_source_filter_are_consistent(self):
         m.users.ensure_user('o-wechat-user');m.users.ensure_user('web-abcdef123456')
+        from web_accounts import store_for
+        registered,_,_=store_for(m.users).register('registered_fixture','fixture-password-01','fixture-ip')
+        m.users.set_balance('web-abcdef123456',147)
         app = FastAPI()
         app.include_router(admin_api.make_admin_router(settings=m.settings, announcements=m.announcements,
                 templates=m.templates, jobs=m.jobs, users=m.users, health_fn=m.health, stats_fn=m._admin_stats))
@@ -162,8 +167,11 @@ class IdentityTests(unittest.TestCase):
             web=admin.get('/admin/api/users?account_type=web',headers=headers).json()
             invalid=admin.get('/admin/api/users?account_type=invalid',headers=headers)
         self.log({'default_ids':[r['openid'] for r in default['items']],'web_ids':[r['openid'] for r in web['items']],'invalid_http':invalid.status_code})
-        self.assertEqual([r['openid'] for r in default['items']],['o-wechat-user'])
-        self.assertEqual([r['openid'] for r in web['items']],['web-abcdef123456'])
+        self.assertEqual({r['openid'] for r in default['items']},{'o-wechat-user',registered})
+        self.assertEqual([r['openid'] for r in web['items']],[registered])
+        self.assertEqual(web['items'][0]['username'],'registered_fixture')
+        self.assertEqual(m.users.get_balance('web-abcdef123456'),147)
+        self.assertEqual(m.users.get_balance(registered),0)
         self.assertEqual(invalid.status_code,400)
 
     def test_forged_cookie_cannot_select_someone_elses_identity(self):

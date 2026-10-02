@@ -19,6 +19,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 
 COPY *.py *.html logo.jpg ./
+COPY static/web ./static/web
 
 VOLUME ["/app/data", "/app/uploads"]
 

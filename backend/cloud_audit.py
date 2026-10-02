@@ -67,7 +67,7 @@ class CloudAudit:
             return True
         row = self.row(job['id'], stage)
         if row is None:
-            engine = 'wechat' if size <= wx.MAX_WECHAT_CHECK_BYTES and wx.wechat_sec_ready(m.settings) else 'cos'
+            engine = 'wechat' if not job['openid'].startswith('web-') and size <= wx.MAX_WECHAT_CHECK_BYTES and wx.wechat_sec_ready(m.settings) else 'cos'
             now = time.time()
             with self.lock:
                 self.db.execute('INSERT INTO audits(id,jid,stage,source,size,engine,state,deadline,created) VALUES(?,?,?,?,?,?,?,?,?)',

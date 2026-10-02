@@ -8,6 +8,8 @@ from community_store import CommunityStore, CATEGORIES
 from community_submissions import store_for, PENDING_TTL
 from community_interactions import interactions_for, REPORT_REASONS
 import wechat_sec
+from account_links import owns, aliases_unlocked, marks
+from tencent_cs import moderate_text, ModerationError
 
 
 class SubmissionBody(BaseModel):
@@ -37,7 +39,7 @@ class ReportBody(BaseModel):
 
 
 def viewer_id(m, request):
-    if request.headers.get('authorization'):
+    if request.headers.get('authorization') or getattr(request,'cookies',{}).get('site_session'):
         try:return m._current_user(request)['openid']
         except HTTPException:pass
     return None
@@ -141,7 +143,7 @@ def make_community_router(runtime):
         title=body.title.strip();story=body.story.strip()
         if not title or body.category not in CATEGORIES:raise HTTPException(400,detail='请填写标题并选择有效分类')
         job=m.jobs.get(m._safe_job_id(body.job_id))
-        if not job or job.get('openid')!=user['openid'] or job.get('deleted_at'):
+        if not job or not owns(m.users,job.get('openid'),user['openid']) or job.get('deleted_at'):
             raise HTTPException(404,detail='作品不存在')
         if job.get('status')!='succeeded' or time.time()>=m._media_expires_at(job,'result'):
             raise HTTPException(409,detail='只能投稿已完成且未过期的作品')
@@ -205,7 +207,7 @@ def make_community_router(runtime):
         try:
             with s.flow_lock:
                 row=s.get(sid)
-                if not row or row['owner']!=u['openid']:raise KeyError('投稿不存在')
+                if not row or not owns(m.users,row['owner'],u['openid']):raise KeyError('投稿不存在')
                 # Persist removal first. Failed physical deletion remains queued and invisible.
                 s.withdraw(sid,u['openid'],body.revision);enqueue_removal(m,row)
             m.cleanup.delete_cos_now(m.settings,keys(row))
@@ -247,7 +249,9 @@ def make_community_router(runtime):
         m=runtime();u=community_user(m,request);s=store_for(m.users);i=interactions_for(m.users)
         content=body.content.strip()
         if not content:raise HTTPException(400,detail='请写下留言')
-        if u['openid'].startswith('web-') or not wechat_sec.wechat_text_ready(m.settings):
+        native_wechat=not u['openid'].startswith('web-') and wechat_sec.wechat_text_ready(m.settings)
+        site_tencent=u.get('auth_source')=='site' and m.settings.moderation().get('enabled') and all(m.settings.tencent().get(k) for k in ('secret_id','secret_key'))
+        if not native_wechat and not site_tencent:
             raise HTTPException(503,detail='微信评论审核尚未就绪，请稍后再试')
         if m.settings.maintenance().get('enabled'):raise HTTPException(503,detail='服务维护中，请稍后再试')
         try:
@@ -256,19 +260,20 @@ def make_community_router(runtime):
             if not needed:return {'ok':True,'id':row['id'],'duplicate':True}
         except ValueError as exc:raise HTTPException(429,detail=str(exc)) from exc
         try:
-            suggestion,label,_=wechat_sec.check_text(m.settings,content,u['openid'],scene=2)
-        except wechat_sec.WechatSecError as exc:
+            if native_wechat:suggestion,label,_=wechat_sec.check_text(m.settings,content,u['openid'],scene=2)
+            else:suggestion,label,_=moderate_text(content,m.settings)
+        except (wechat_sec.WechatSecError,ModerationError) as exc:
             i.finish_comment(row['id'],'failed',exc.code)
-            raise HTTPException(503,detail='微信审核暂未完成，评论尚未发布，请重试') from exc
+            raise HTTPException(503,detail='文字审核暂未完成，评论尚未发布，请重试') from exc
         if suggestion.lower()!='pass':
             i.finish_comment(row['id'],'rejected',suggestion+':'+label)
-            raise HTTPException(400,detail='评论未通过微信审核，请调整内容')
+            raise HTTPException(400,detail='评论未通过内容审核，请调整内容')
         with s.flow_lock:
             try:
                 visible_post(m,sid);community_user(m,request)
             except HTTPException:
                 i.finish_comment(row['id'],'deleted','post_unavailable');raise
-            final=i.finish_comment(row['id'],'published','wechat:pass:'+label)
+            final=i.finish_comment(row['id'],'published',('wechat' if native_wechat else 'tencent')+':pass:'+label)
             if final['status']!='published':raise HTTPException(409,detail='评论已删除，停止发布')
         return {'ok':True,'id':row['id'],'duplicate':False}
 
@@ -303,7 +308,7 @@ def make_community_router(runtime):
 def public_feed(m,request,offset=0,limit=200,liked_only=False,category='all'):
     if category not in CATEGORIES:raise HTTPException(400,detail='社区分类无效')
     viewer=None
-    if request.headers.get('authorization'):
+    if request.headers.get('authorization') or getattr(request,'cookies',{}).get('site_session'):
         try:viewer=m._current_user(request)['openid']
         except HTTPException:pass  # Viewing is public; writes still require a valid session.
     if liked_only:
@@ -311,7 +316,8 @@ def public_feed(m,request,offset=0,limit=200,liked_only=False,category='all'):
     s=store_for(m.users);items=[];liked_ids=None
     if liked_only:
         with m.users._lock:
-            liked_ids={r[0] for r in m.users._conn.execute('SELECT post_id FROM community_likes WHERE owner=?',(viewer,))}
+            viewers=aliases_unlocked(m.users,viewer)
+            liked_ids={r[0] for r in m.users._conn.execute('SELECT post_id FROM community_likes WHERE owner IN ('+marks(viewers)+')',viewers)}
     for p in CommunityStore(m.settings).list(status='published',limit=200)['items']:
         if liked_ids is not None and p['id'] not in liked_ids:continue
         if category!='all' and p.get('category','all')!=category:continue

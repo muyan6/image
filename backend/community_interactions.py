@@ -2,6 +2,7 @@
 import threading
 import time
 import uuid
+from account_links import init_links, canonical_unlocked, aliases_unlocked, marks
 
 _factory_lock = threading.Lock()
 REPORT_REASONS = {'spam': '广告引流', 'abuse': '辱骂攻击', 'inappropriate': '不适宜内容',
@@ -18,6 +19,7 @@ def interactions_for(users):
 class InteractionStore:
     def __init__(self, users):
         self.users = users
+        init_links(users)
         with users._lock, users._conn:
             users._conn.executescript('''
                 CREATE TABLE IF NOT EXISTS community_comments(
@@ -50,8 +52,9 @@ class InteractionStore:
     def _rate(self, owner, kind, per_minute, per_hour):
         db = self.users._conn; now = time.time()
         db.execute('DELETE FROM community_interaction_events WHERE at<?', (now-3600,))
-        minute, hour = db.execute('SELECT COALESCE(SUM(at>?),0),COUNT(*) FROM community_interaction_events WHERE owner=? AND kind=?',
-                                  (now-60, owner, kind)).fetchone()
+        owners=aliases_unlocked(self.users,owner);owner=canonical_unlocked(self.users,owner)
+        minute, hour = db.execute('SELECT COALESCE(SUM(at>?),0),COUNT(*) FROM community_interaction_events WHERE owner IN ('+marks(owners)+') AND kind=?',
+                                  (now-60, *owners, kind)).fetchone()
         if minute >= per_minute or hour >= per_hour:
             raise ValueError('操作较频繁，请稍后再试')
         db.execute('INSERT INTO community_interaction_events VALUES(?,?,?)', (owner,kind,now))
@@ -60,8 +63,11 @@ class InteractionStore:
         now = time.time()
         with self.users._lock, self.users._conn:
             db = self.users._conn; db.execute('BEGIN IMMEDIATE')
+            owners=aliases_unlocked(self.users,owner);owner=canonical_unlocked(self.users,owner)
             db.execute("UPDATE community_comments SET status='failed',content='' WHERE status='reviewing' AND updated<?",(now-120,))
-            old = db.execute('SELECT id FROM community_comments WHERE owner=? AND request_id=?', (owner,request_id)).fetchone()
+            matches = db.execute('SELECT id FROM community_comments WHERE owner IN ('+marks(owners)+') AND request_id=?', (*owners,request_id)).fetchall()
+            if len(matches)>1:raise ValueError('绑定账户的留言标识存在冲突，请使用新的提交标识')
+            old=matches[0] if matches else None
             if old:
                 row = self._get(old[0])
                 if row['post_id'] != post_id or (row['content'] and row['content'] != content):
@@ -91,7 +97,7 @@ class InteractionStore:
     def delete_comment(self, cid, owner=None):
         with self.users._lock, self.users._conn:
             row = self._get(cid)
-            if not row or (owner is not None and row['owner'] != owner): raise KeyError('评论不存在')
+            if not row or (owner is not None and canonical_unlocked(self.users,row['owner']) != canonical_unlocked(self.users,owner)): raise KeyError('评论不存在')
             self.users._conn.execute("UPDATE community_comments SET status='deleted',content='',updated=? WHERE id=?",(time.time(),cid))
             self.users._conn.execute('DELETE FROM community_comment_likes WHERE comment_id=?',(cid,))
 
@@ -99,40 +105,43 @@ class InteractionStore:
         where = " WHERE c.status='published'" if admin else " WHERE c.status='published' AND u.banned=0"
         args = []
         if post_id is not None: where += ' AND c.post_id=?'; args.append(post_id)
-        join = ' FROM community_comments c LEFT JOIN users u ON u.openid=c.owner'
+        join = ' FROM community_comments c LEFT JOIN account_aliases a ON a.alias_openid=c.owner LEFT JOIN users u ON u.openid=COALESCE(a.canonical_openid,c.owner)'
         offset=max(0,offset);limit=max(1,min(50,limit))
         with self.users._lock:
+            viewers=aliases_unlocked(self.users,viewer) or ('',)
             total=self.users._conn.execute('SELECT COUNT(*)'+join+where,args).fetchone()[0]
             rows=self.users._conn.execute('SELECT c.id,c.post_id,c.content,c.created,u.nickname,c.owner'+join+where+
                                          ' ORDER BY c.created DESC,c.id LIMIT ? OFFSET ?',(*args,limit,offset)).fetchall()
             ids=[r[0] for r in rows]; likes={}
             if ids:
-                like_rows=self.users._conn.execute('SELECT comment_id,COUNT(*),MAX(owner=?) FROM community_comment_likes WHERE comment_id IN ('+','.join('?' for _ in ids)+') GROUP BY comment_id',(viewer or '',*ids)).fetchall()
+                like_rows=self.users._conn.execute('SELECT l.comment_id,COUNT(DISTINCT COALESCE(a.canonical_openid,l.owner)),MAX(l.owner IN ('+marks(viewers)+')) FROM community_comment_likes l LEFT JOIN account_aliases a ON a.alias_openid=l.owner WHERE l.comment_id IN ('+','.join('?' for _ in ids)+') GROUP BY l.comment_id',(*viewers,*ids)).fetchall()
                 likes={r[0]:(r[1],bool(r[2])) for r in like_rows}
         items=[{'id':r[0],'post_id':r[1],'content':r[2],'created_at':r[3],
-                'author_name':r[4] or '新生创作者','mine':r[5]==viewer,
+                'author_name':r[4] or '新生创作者','mine':r[5] in viewers,
                 'likes':likes.get(r[0],(0,False))[0],'liked':likes.get(r[0],(0,False))[1]} for r in rows]
         return {'items':items,'total':total,'next_offset':offset+len(items),'has_more':offset+len(items)<total}
 
     def counts(self, ids):
         if not ids:return {}
         with self.users._lock:
-            rows=self.users._conn.execute("SELECT c.post_id,COUNT(*) FROM community_comments c JOIN users u ON u.openid=c.owner WHERE c.status='published' AND u.banned=0 AND c.post_id IN ("+','.join('?' for _ in ids)+') GROUP BY c.post_id',ids).fetchall()
+            rows=self.users._conn.execute("SELECT c.post_id,COUNT(*) FROM community_comments c LEFT JOIN account_aliases a ON a.alias_openid=c.owner JOIN users u ON u.openid=COALESCE(a.canonical_openid,c.owner) WHERE c.status='published' AND u.banned=0 AND c.post_id IN ("+','.join('?' for _ in ids)+') GROUP BY c.post_id',ids).fetchall()
         return dict(rows)
 
     def like(self, cid, owner, liked):
         with self.users._lock, self.users._conn:
             row=self._get(cid)
             if not row or row['status']!='published':raise KeyError('评论不存在')
+            owners=aliases_unlocked(self.users,owner);owner=canonical_unlocked(self.users,owner)
+            self.users._conn.execute('DELETE FROM community_comment_likes WHERE comment_id=? AND owner IN ('+marks(owners)+')',(cid,*owners))
             if liked:self.users._conn.execute('INSERT OR IGNORE INTO community_comment_likes VALUES(?,?)',(cid,owner))
-            else:self.users._conn.execute('DELETE FROM community_comment_likes WHERE comment_id=? AND owner=?',(cid,owner))
-            count,state=self.users._conn.execute('SELECT COUNT(*),COALESCE(MAX(owner=?),0) FROM community_comment_likes WHERE comment_id=?',(owner,cid)).fetchone()
+            count,state=self.users._conn.execute('SELECT COUNT(DISTINCT COALESCE(a.canonical_openid,l.owner)),COALESCE(MAX(l.owner IN ('+marks(owners)+')),0) FROM community_comment_likes l LEFT JOIN account_aliases a ON a.alias_openid=l.owner WHERE l.comment_id=?',(*owners,cid)).fetchone()
             return {'id':cid,'likes':count,'liked':bool(state)}
 
     def report(self, target_type, target_id, post_id, owner, reason, snapshot):
         with self.users._lock, self.users._conn:
             db=self.users._conn;db.execute('BEGIN IMMEDIATE')
-            old=db.execute('SELECT id FROM community_reports WHERE target_type=? AND target_id=? AND owner=?',(target_type,target_id,owner)).fetchone()
+            owners=aliases_unlocked(self.users,owner);owner=canonical_unlocked(self.users,owner)
+            old=db.execute('SELECT id FROM community_reports WHERE target_type=? AND target_id=? AND owner IN ('+marks(owners)+')',(target_type,target_id,*owners)).fetchone()
             if old:return {'ok':True,'id':old[0],'duplicate':True}
             self._rate(owner,'report',3,20)
             rid='r_'+uuid.uuid4().hex

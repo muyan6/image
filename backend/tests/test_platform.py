@@ -1,4 +1,4 @@
-"""Offline WeChat-only web auth, retention, deletion and scheduler regressions."""
+"""Offline registered-site compatibility binding, retention and scheduler regressions."""
 import json,time,unittest
 from pathlib import Path
 from unittest.mock import patch,Mock
@@ -11,9 +11,17 @@ class PlatformTests(CloudTests):
     def setUp(self):
         super().setUp()
         m.settings.update({'wechat':{'app_id':'fixture-app','app_secret':'fixture-secret'}})
+        from web_accounts import store_for
+        from account_links import register_verified
+        self.site_identity,self.site_token,_=store_for(m.users).register('platform_fixture','fixture-password-01','platform-ip')
+        register_verified(m.users,'fixture-app','sample_user','fixture-union','mini')
+
+    def browser_headers(self,extra=None):
+        return {'X-Web-Login':'1','X-Site-Request':'1','Sec-Fetch-Site':'same-origin',
+                'Authorization':'Bearer '+self.site_token,**(extra or {})}
 
     def start(self,client=None):
-        r=(client or self.client).post('/api/auth/wechat-web/start',headers={'X-Web-Login':'1'})
+        r=(client or self.client).post('/api/auth/wechat-web/start',headers=self.browser_headers())
         self.assertEqual(r.status_code,200,r.text);return r.json()
 
     def tearDown(self):
@@ -24,7 +32,7 @@ class PlatformTests(CloudTests):
         return self.client.post('/api/auth/wechat-web/approve',headers=headers or self.headers,json={'id':sid,'action':action})
 
     def status(self,sid,client=None):
-        return (client or self.client).get('/api/auth/wechat-web/'+sid+'/status',headers={'X-Web-Login':'1'})
+        return (client or self.client).get('/api/auth/wechat-web/'+sid+'/status',headers=self.browser_headers())
 
     def test_web_guest_disabled_and_wechat_balance_shared(self):
         self.assertEqual(self.client.post('/api/auth/web').status_code,401)
@@ -34,7 +42,9 @@ class PlatformTests(CloudTests):
         d=self.start();self.assertEqual(self.status(d['id']).json()['state'],'pending')
         self.assertEqual(self.approve(d['id']).status_code,200)
         r=self.status(d['id']);self.assertEqual(r.status_code,200)
-        token=r.json()['token'];self.assertEqual(m.verify_user_token(token),'sample_user')
+        token=r.json()['token'];self.assertIsNone(m.verify_user_token(token))
+        from web_accounts import store_for
+        self.assertEqual(store_for(m.users).session(token)['account_id'],self.site_identity)
         m.users.set_balance('sample_user',177)
         self.assertEqual(self.client.get('/api/me',headers={'Authorization':'Bearer '+token}).json()['balance'],177)
         self.assertEqual(self.status(d['id']).json()['balance'],177)
@@ -59,22 +69,23 @@ class PlatformTests(CloudTests):
         self.assertEqual(self.client.post('/api/auth/wechat-web/start').status_code,403)
         self.assertEqual(self.client.post('/api/auth/wechat-web/start',headers={'X-Web-Login':'1','Origin':'https://evil.invalid'}).status_code,403)
         for _ in range(5):self.start()
-        self.assertEqual(self.client.post('/api/auth/wechat-web/start',headers={'X-Web-Login':'1'}).status_code,429)
+        self.assertEqual(self.client.post('/api/auth/wechat-web/start',headers=self.browser_headers()).status_code,429)
 
     def test_qr_cached_and_scene_points_to_confirmation_page(self):
         d=self.start();r=Mock();r.content=b'\x89PNG\r\n\x1a\nfixture';r.raise_for_status.return_value=None
         with patch.object(web_login.wechat_sec,'get_access_token',return_value='fixture-token'),patch.object(web_login.requests,'post',return_value=r) as submit:
-            self.assertEqual(self.client.get(d['qr_url']).status_code,200)
-            self.assertEqual(self.client.get(d['qr_url']).status_code,200)
+            self.assertEqual(self.client.get(d['qr_url'],headers=self.browser_headers()).status_code,200)
+            self.assertEqual(self.client.get(d['qr_url'],headers=self.browser_headers()).status_code,200)
         submit.assert_called_once();self.assertEqual(submit.call_args.kwargs['json']['scene'],d['id'])
         self.assertEqual(submit.call_args.kwargs['json']['page'],'pages/web-login/web-login')
         self.assertEqual(len(d['id']),32)
 
     def test_approval_requires_authentication_and_does_not_create_users(self):
         d=self.start()
+        before=m.users._conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
         self.assertEqual(self.client.post('/api/auth/wechat-web/approve',json={'id':d['id']}).status_code,401)
         self.assertEqual(self.approve(d['id'],'arbitrary').status_code,400)
-        self.assertEqual(m.users._conn.execute('SELECT COUNT(*) FROM users').fetchone()[0],2)
+        self.assertEqual(m.users._conn.execute('SELECT COUNT(*) FROM users').fetchone()[0],before)
 
     def test_original_and_result_30_days_from_completion(self):
         jid=self.job(age=29*86400,original_age=30*86400)

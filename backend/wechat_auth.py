@@ -63,11 +63,25 @@ def exchange_session(code: str, settings: SettingsStore) -> Dict[str,str]:
     openid = data.get("openid")
     if not openid:
         raise WechatAuthError("微信接口未返回 openid", code="BAD_RESPONSE")
-    return {'openid':str(openid),'session_key':str(data.get('session_key') or '')}
+    return {'openid':str(openid),'session_key':str(data.get('session_key') or ''),
+            'unionid':str(data.get('unionid') or '')}
 
 
 def code2session(code: str, settings: SettingsStore) -> str:
-    return exchange_session(code,settings)['openid']
+    session=exchange_session(code,settings)
+    # Preserve this public function's string return for existing integrations;
+    # the trusted UnionID proof remains server-side for the immediate caller.
+    _proof.session={'app_id':settings.wechat().get('app_id') or '',**session}
+    return session['openid']
+
+
+import threading
+_proof=threading.local()
+
+
+def consume_session_proof(openid,app_id):
+    proof=getattr(_proof,'session',None);_proof.session=None
+    return proof if proof and proof.get('openid')==openid and proof.get('app_id')==app_id else None
 
 
 # --------------------------------------------------------------------------- #
