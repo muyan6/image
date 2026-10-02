@@ -12,13 +12,14 @@
     FastAPI + 线程池
         |
         +-- 归一化（长边 1536，对齐原站行为）
-        +-- AI 增强：fal.ai  ->  baidu  ->  本地 engine.py
+        +-- AI 增强：按已冻结优先级调用配置的生成网关
 
 密钥全部走环境变量，代码里不出现任何 AK/SK。
 见 backend/.env.example。
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import hmac
 import glob
@@ -62,7 +63,7 @@ from cos_store import (CosError, get_object as cos_get,
                        head_exists as cos_head, presign as cos_presign,
                        put_object as cos_put)
 from engine import ImageRescueEngine
-from gateway_ai import OpenAIImagesEnhance
+from gateway_ai import GatewayError, OpenAIImagesEnhance
 from settings_store import AnnouncementStore, SettingsStore
 from templates_store import TemplateStore, covers_dir
 from text_overlay import apply as apply_text_overlay, collect_values
@@ -79,12 +80,8 @@ from wechat_sec import WechatSecError
 from wechat_auth import (WechatAuthError, bearer_of, code2session,
                          make_token as user_token, verify_token as verify_user_token,
                          make_web_identity, verify_web_identity, WEB_IDENTITY_TTL)
-from fal_ai import FalImageEnhance
-
-try:
-    from baidu_ai import BaiduImageEnhance
-except Exception:  # pragma: no cover
-    BaiduImageEnhance = None  # type: ignore
+from gateway_runtime import gateway_snapshots, resolve_gateway, explicitly_rejected
+from gateway_costs import init_cost_ledger, record_cost, gateway_statistics
 
 # --------------------------------------------------------------------------- #
 # 日志
@@ -195,11 +192,11 @@ async def lifespan(_app: FastAPI):
     log.info("降级链: %s", " -> ".join(settings.chain()))
     h = health()
     log.info(
-        "AI 供应商: 中转网关=%s fal.ai=%s 百度=%s（密钥与开关在 /admin 后台管理）",
-        h["gateway"], h["fal"], h["baidu"],
+        "AI 供应商: 启用中转网关=%s（连接与优先级在 /admin 后台管理）",
+        h["gateway"],
     )
     if not h["configured"]:
-        log.warning("没有任何 AI 后端，全部走本地 engine.py")
+        log.warning("没有可用生成网关，生成请求将明确返回未就绪")
     _sweeper_stop.clear()
     jobs.sweep()
     _startup_file_gc()
@@ -256,15 +253,6 @@ DATA_DIR = os.environ.get("DATA_DIR") or os.path.join(BASE_DIR, "data")
 
 def _migrate_env_keys(doc: Dict[str, Any]) -> None:
     """首次初始化 settings.json 时，把 .env 里的密钥迁移进去；此后以后台为准。"""
-    fal_key = os.environ.get("FAL_KEY", "").strip()
-    if fal_key and not doc["providers"]["fal"].get("api_key"):
-        doc["providers"]["fal"]["api_key"] = fal_key
-    bd_ak = os.environ.get("BAIDU_API_KEY", "").strip()
-    bd_sk = os.environ.get("BAIDU_SECRET_KEY", "").strip()
-    if bd_ak and not doc["providers"]["baidu"].get("api_key"):
-        doc["providers"]["baidu"]["api_key"] = bd_ak
-    if bd_sk and not doc["providers"]["baidu"].get("secret_key"):
-        doc["providers"]["baidu"]["secret_key"] = bd_sk
     wx_appid = os.environ.get("WX_APPID", "").strip()
     if wx_appid and not doc["wechat"].get("app_id"):
         doc["wechat"]["app_id"] = wx_appid
@@ -304,23 +292,7 @@ def _fingerprint(conf: Dict[str, Any]) -> int:
 
 
 def _build_client(name: str, conf: Dict[str, Any]):
-    if name == "worldcodes":
-        return OpenAIImagesEnhance(conf)
-    if name == "fal":
-        key = str(conf.get("api_key") or "").strip()
-        if not key and not os.environ.get("FAL_KEY", "").strip():
-            return None
-        return FalImageEnhance(api_key=key or None)
-    if name == "baidu":
-        ak = str(conf.get("api_key") or "").strip()
-        sk = str(conf.get("secret_key") or "").strip()
-        if not ak or not sk:
-            return None
-        try:
-            return BaiduImageEnhance(api_key=ak, secret_key=sk)
-        except ValueError:
-            return None
-    return None
+    return OpenAIImagesEnhance(conf) if conf.get('gateway_id') == name else None
 
 
 def _get_client(name: str, quality: str = 'light'):
@@ -329,16 +301,30 @@ def _get_client(name: str, quality: str = 'light'):
     构建动作很轻（只是 new 一个 HTTP 客户端对象），直接在锁内完成，
     避免两个线程同时构建互相覆盖。
     """
-    conf = settings.gateway_for(quality) if name=='worldcodes' else settings.provider(name)
+    conf = settings.gateway_for(quality,gateway_id=name)
+    registry=set(settings.chain())
     fp = _fingerprint(conf)
     with _clients_lock:
-        cache_key = (name, quality if name=='worldcodes' else '', threading.get_ident())
+        for key in list(_clients):
+            if (key[0] if isinstance(key,tuple) else key) not in registry:_clients.pop(key,None)
+        if not conf:return None
+        cache_key = (name, quality, threading.get_ident())
         cached = _clients.get(cache_key)
         if cached is not None and cached[0] == fp:
             return cached[1]
         client = _build_client(name, conf)
         _clients[cache_key] = (fp, client)
         return client
+
+def _checked_gateway_client(snapshot,quality):
+    resolve_gateway(settings,quality,snapshot)
+    client=_get_client(snapshot['gateway_id'],quality)
+    if isinstance(client,OpenAIImagesEnhance):
+        from gateway_runtime import snapshot_gateway
+        actual=snapshot_gateway(client._config,quality)
+        for key in ('gateway_id','base','endpoint','model','key_fingerprint','request_mode','async_endpoint'):
+            if actual.get(key)!=snapshot.get(key):raise ValueError('原生成网关配置已变更，本次未提交生成')
+    return client
 
 
 pool = BoundedExecutor(WORKERS,MAX_QUEUED_JOBS)
@@ -593,10 +579,8 @@ def _register_job(openid: str, quality: str, style: str,
     if template:
         template=select_template_quality(template,quality)
         aspect_ratio = ""
-    if (custom_prompt and not template) or (template or {}).get("requires_prompt"):
-        prompt_client = _get_client("worldcodes", quality)
-        if not settings.provider_enabled("worldcodes") or prompt_client is None or not prompt_client.configured:
-            raise HTTPException(status_code=503, detail="指定成品形式或补充要求的生成引擎当前不可用，请稍后重试")
+    frozen_gateways = gateway_snapshots(settings,quality)
+    if not frozen_gateways:raise HTTPException(status_code=503,detail='没有启用且配置有效的生成网关，请稍后重试')
     price = _effective_price(quality, template)
     job_id = job_id or uuid.uuid4().hex[:12]
     free = settings.free_mode()
@@ -667,6 +651,7 @@ def _register_job(openid: str, quality: str, style: str,
             result_url="/api/images/%s" % result_file,
             orig_cos=orig_cos,
             result_cos=result_cos,
+            gateway_snapshots=frozen_gateways,
             **reward_args,
         )
         users.confirm_job(job_id, "job=%s quality=%s tpl=%s ar=%s price=%d charged=%d"
@@ -802,6 +787,7 @@ class JobStore:
                             "style": "TEXT", "extra_json": "TEXT"}.items():
             if field not in columns:
                 self._conn.execute("ALTER TABLE jobs ADD COLUMN %s %s" % (field, kind))
+        init_cost_ledger(self._conn)
         self._conn.commit()
         self._reload()
 
@@ -866,8 +852,9 @@ class JobStore:
             self._conn.execute(
                 "INSERT OR REPLACE INTO jobs(%s) VALUES(%s)"
                 % (", ".join(self._COLUMNS), placeholders), values)
+            record_cost(self._conn,job)
             self._conn.commit()
-        except sqlite3.Error:
+        except Exception:
             self._conn.rollback()
             raise
 
@@ -956,6 +943,73 @@ class JobStore:
             self._publish_locked(updated)
             return True
 
+    def advance_rejected_gateway(self, job_id, rejected_id, packet, status):
+        """Only a durably known rejection permits a new frozen gateway POST."""
+        with self._lock:
+            job=self._data.get(job_id)
+            if not job or job.get('deleted_at') or job['status']!='processing' or job.get('cloud_phase')!='submitting' or job.get('vendor_task_id'):
+                return False
+            current=job.get('cloud_request') or {}
+            if current.get('gateway_id','worldcodes')!=rejected_id:return False
+            rejected=list(job.get('gateway_rejections') or [])
+            rejected.append({'gateway_id':rejected_id,'http_status':status,'at':time.time()})
+            updated={**job,'cloud_request':packet,'cloud_phase':'submit','submitted_at':None,
+                     'gateway_rejections':rejected,'cloud_next_at':0,'updated_at':time.time()}
+            self._persist(updated);self._publish_locked(updated);return True
+
+    def clear_cloud_rejection(self, job_id, gateway_id, status):
+        """A late definitive refusal releases cancellation's no-refund marker too."""
+        from gateway_runtime import CLEAR_REJECTION_STATUSES
+        if status not in CLEAR_REJECTION_STATUSES:return None
+        with self._lock:
+            job=self._data.get(job_id)
+            if (not job or job.get('vendor_task_id') or job.get('cloud_phase')!='submitting'
+                    or (job.get('cloud_request') or {}).get('gateway_id','worldcodes')!=gateway_id):return None
+            updated={**job,'submitted_at':None,'updated_at':time.time()}
+            if job.get('deleted_at'):updated['cancel_without_refund']=False
+            self._persist(updated);self._publish_locked(updated);return dict(updated)
+
+    def begin_sync_submission(self, job_id, gateway_id, attempt_token):
+        """Mark each real synchronous HTTP POST under the same lock as deletion."""
+        with self._lock:
+            job=self._data.get(job_id)
+            if (not job or job.get('deleted_at') or job['status']!='processing'
+                    or job.get('cloud_pipeline') or job.get('submitted_at')):
+                return False
+            now=time.time()
+            updated={**job,'submitted_at':now,'sync_gateway_id':gateway_id,
+                     'sync_attempt_token':attempt_token,'updated_at':now}
+            self._persist(updated);self._publish_locked(updated);return True
+
+    def clear_sync_rejection(self, job_id, gateway_id, attempt_token, status):
+        """Only this POST's definitive refusal releases its paid-submit marker."""
+        from gateway_runtime import CLEAR_REJECTION_STATUSES
+        if status not in CLEAR_REJECTION_STATUSES:return None
+        with self._lock:
+            job=self._data.get(job_id)
+            if (not job or job.get('sync_gateway_id')!=gateway_id
+                    or job.get('sync_attempt_token')!=attempt_token):return None
+            if not job.get('submitted_at'):return dict(job)
+            rejected=list(job.get('sync_gateway_rejections') or [])
+            rejected.append({'gateway_id':gateway_id,'http_status':status,'at':time.time()})
+            updated={**job,'submitted_at':None,'sync_gateway_rejections':rejected,
+                     'updated_at':time.time()}
+            if job.get('deleted_at'):updated['cancel_without_refund']=False
+            self._persist(updated);self._publish_locked(updated);return dict(updated)
+
+    def handoff_gateway_mode(self,job_id,to_cloud,packet,**fields):
+        """One same-job transition; paid/unknown/accepted submit markers cannot be cleared."""
+        with self._lock:
+            job=self._data.get(job_id)
+            if not job or job.get('deleted_at') or job['status']!='processing' or job.get('vendor_task_id'):
+                return False
+            if bool(job.get('cloud_pipeline'))==bool(to_cloud):return False
+            if not to_cloud and (job.get('cloud_phase')!='submit' or job.get('submitted_at')):return False
+            if to_cloud and job.get('submitted_at'):return False
+            updated={**job,**fields,'cloud_pipeline':bool(to_cloud),'cloud_request':packet,
+                     'cloud_phase':'submit' if to_cloud else 'sync_queued','updated_at':time.time()}
+            self._persist(updated);self._publish_locked(updated);return True
+
     def fail_cloud_job(self, job_id: str, **fields: Any) -> bool:
         """Only a live job can claim the failure/refund transition."""
         with self._lock:
@@ -979,7 +1033,7 @@ class JobStore:
             updated = {**job, "deleted_at": job.get("deleted_at") or time.time(), "updated_at": time.time()}
             if job.get("status") == "processing":
                 updated.update(status="failed", error="作品已删除，任务已取消")
-                updated['cancel_without_refund'] = bool(job.get('cloud_pipeline') and job.get('submitted_at'))
+                updated['cancel_without_refund'] = bool(job.get('submitted_at'))
             self._persist(updated)
             self._publish_locked(updated)
             return dict(updated)
@@ -1326,20 +1380,69 @@ def _media_type(path: str) -> str:
 # --------------------------------------------------------------------------- #
 # 处理管线
 # --------------------------------------------------------------------------- #
+def _queue_sync_gateway_job(job_id,packet):
+    """Same reservation, bounded worker: cloud normalization/audit may precede sync POST."""
+    job=jobs.get(job_id)
+    if not job or job.get('deleted_at') or job.get('status')!='processing':return False
+    candidates=packet.get('gateway_candidates') or [packet]
+    index=int(packet.get('gateway_index',0))
+    if not jobs.handoff_gateway_mode(job_id,False,packet,
+            gateway_snapshots=candidates[index:],orig_file='orig_'+job_id+'.jpg',result_file='result_'+job_id+'.jpg',
+            processing_mode='sync_gateway',stage='queued',provider=packet['gateway_id'],provider_name=packet['gateway_name']):return False
+    try:pool.submit(_run_sync_gateway_job,job_id)
+    except Exception:
+        cloud.fail(jobs.get(job_id),'同步网关队列已满或未就绪，本次光子退回')
+        raise
+    return True
+
+def _run_sync_gateway_job(job_id):
+    job=jobs.get(job_id)
+    if not job or job.get('deleted_at') or job.get('status')!='processing' or job.get('cloud_pipeline'):return
+    source=os.path.join(UPLOAD_DIR,job['orig_file'])
+    try:
+        if time.time()>job['deadline']:raise RuntimeError('任务排队超时，本次光子退回')
+        # The cloud prepare phase already froze and audited this private original.
+        data=cos_get(settings,job['orig_cos'],max_bytes=MAX_UPLOAD_BYTES)
+        current=jobs.get(job_id)
+        if not current or current.get('deleted_at') or current.get('status')!='processing':return
+        with open(source,'wb') as file:file.write(data)
+        _validate_image(source)
+        packet=job['cloud_request']
+        _run_pipeline(job_id,job['quality'],job.get('style',''),template=packet.get('template'),
+                      text_values=packet.get('text_values'),aspect_ratio=job.get('aspect_ratio',''),
+                      frozen_prompt=packet.get('prompt'))
+    except Exception as exc:
+        current=jobs.get(job_id)
+        if current and current.get('status')=='processing' and not current.get('deleted_at'):
+            cloud.fail(current,str(exc)[:300])
+
+def _handoff_sync_to_cloud(job_id,snapshot,candidates,prompt,template,text_values,norm):
+    from gateway_runtime import selected_gateway_packet
+    resolve_gateway(settings,(jobs.get(job_id) or {})['quality'],snapshot)
+    if not settings.cos_ready() or not cloud.origin_ready():raise RuntimeError('异步网关 COS 回源通道未就绪，本次光子退回')
+    job=jobs.get(job_id)
+    if not job or not job.get('norm_cos'):raise RuntimeError('异步网关输入尚未保存到 COS')
+    width,height=_validate_output(norm)
+    packet={'prompt':prompt,'size':'','template':copy_template(template) or {},'text_values':dict(text_values or {}),
+            'source':{'key':job.get('orig_cos'),'ext':'.jpg','openid':job['openid']},
+            'normalize_long_side':settings.normalize_long_side(),'gateway_candidates':copy.deepcopy(candidates)}
+    packet=selected_gateway_packet(packet,snapshot,candidates.index(snapshot))
+    if jobs.handoff_gateway_mode(job_id,True,packet,deadline=job.get('deadline') or time.time()+cloud.config()['timeout_seconds'],
+            cloud_next_at=0,cloud_input_frozen=True,input_mode='photo',source_width=width,source_height=height,
+            cloud_audit_mode=job.get('cloud_audit_mode') or cloud.config().get('audit_mode','wechat_auto'),
+            provider=snapshot['gateway_id'],provider_name=snapshot['gateway_name']):cloud.wake_event.set()
+
 def _run_pipeline(job_id: str, quality: str, style: str,
                   template: Optional[Dict[str, Any]] = None,
                   text_values: Optional[Dict[str, str]] = None,
-                  aspect_ratio: str = "", custom_prompt: str = "") -> None:
-    """后台执行：归一化 -> 按 settings.chain 依次尝试 -> 本地兜底
-    -> 模板输出尺寸 -> 模板文字排版。
+                  aspect_ratio: str = "", custom_prompt: str = "", frozen_prompt=None) -> None:
+    """归一化 -> 冻结网关优先级 -> 模板输出与排版；不本地生成。
 
-    链路顺序、供应商开关、密钥、提示词全部来自运行时设置（/admin 可热改），
-    每一档任务执行时现读；模板参数用提交那一刻的快照；
-    某一级失败自动落到下一级，本地引擎永远兜底 ——
-    就算它被关掉，全链失败时也会强制跑一次。
+    仅明确未受理的拒绝可接力；已标记且状态不明的 POST 不重发。
     """
     job = jobs.get(job_id)
-    if job is None or job.get("deleted_at") or job.get("status") != "processing":
+    if (job is None or job.get("deleted_at") or job.get("status") != "processing"
+            or job.get('submitted_at')):
         return
     clock_started=time.monotonic()
     timings={"queue_ms":max(0,round((time.time()-float(job.get("created_at") or time.time()))*1000))}
@@ -1407,50 +1510,65 @@ def _run_pipeline(job_id: str, quality: str, style: str,
         stage = "enhance"
         enhanced = False
         # 模板提示词优先；无模板按档位取全局提示词
-        tier_prompt = str(template.get("prompt") or "").strip() \
-            or settings.prompt_for(quality)
-        if custom_prompt and not template:
+        tier_prompt = (str(frozen_prompt) if frozen_prompt is not None else
+                       str(template.get("prompt") or "").strip() or settings.prompt_for(quality))
+        if custom_prompt and not template and frozen_prompt is None:
             tier_prompt += "\n用户修复需求：" + custom_prompt
 
         # 自定义要求必须由支持提示词的编辑引擎处理，不能静默退化为忽略要求的超分/本地引擎。
-        requires_prompt = bool((custom_prompt and not template) or template.get("requires_prompt"))
-        chain = ["worldcodes"] if requires_prompt else settings.chain()
+        frozen_gateways=job.get('gateway_snapshots')
+        if frozen_gateways is None:
+            # Legacy synchronous jobs may resume only against their original
+            # legacy ID, not a newly inserted first-priority connection.
+            legacy=settings.gateway_for(quality,gateway_id='worldcodes')
+            from gateway_runtime import snapshot_gateway
+            frozen_gateways=[snapshot_gateway(legacy,quality)] if legacy else []
+        if not frozen_gateways:raise RuntimeError('没有可用生成网关，本次光子退回')
         phase=time.monotonic()
-        for name in chain:
+        for snapshot in frozen_gateways:
+            name=snapshot['gateway_id']
             if enhanced:
                 break
-            if name == "local":
-                continue  # 本地引擎是最后兜底，见链尾
-            if not settings.provider_enabled(name):
-                log.info("[%s] %s 已在后台停用，跳过", job_id, name)
-                continue
-            client = _get_client(name, quality)
+            current=jobs.get(job_id)
+            if not current or current.get('deleted_at') or current.get('status')!='processing':return
+            if snapshot.get('request_mode')=='async':
+                _handoff_sync_to_cloud(job_id,snapshot,frozen_gateways,tier_prompt,template,text_values,norm)
+                return
+            client = _checked_gateway_client(snapshot,quality)
             if client is None or not client.configured:
                 log.info("[%s] %s 未配置，跳过", job_id, name)
                 continue
             provider_returned = False
+            attempt_token=uuid.uuid4().hex
+            def before_submit(rejected_status=None, *, rejection_only=False):
+                if rejected_status is not None:
+                    refused=jobs.clear_sync_rejection(job_id,name,attempt_token,rejected_status)
+                    if refused is None:
+                        raise GatewayError('任务提交状态已变更，停止再次提交',code='SUBMIT_STOPPED')
+                    if refused.get('deleted_at'):
+                        _refund_charged(refused['openid'],job_id,int(refused.get('price') or 0))
+                        raise GatewayError('作品已删除，停止再次提交',code='SUBMIT_STOPPED')
+                    if rejection_only:return
+                current=jobs.get(job_id)
+                if not current or current.get('deleted_at') or current.get('status')!='processing':
+                    raise GatewayError('作品已取消，停止提交',code='SUBMIT_STOPPED')
+                resolve_gateway(settings,quality,snapshot)
+                if not jobs.begin_sync_submission(job_id,name,attempt_token):
+                    raise GatewayError('任务已提交或取消，停止再次提交',code='SUBMIT_STOPPED')
             try:
-                if name == "worldcodes":
-                    # 网关是提示词驱动的编辑模型，提示词从后台设置现读；
-                    # 模板可覆盖模型（原生 2K/4K）与尺寸参数；
-                    # 有 COS 直链时走 URL 直连（网关自己拉图），失败自动回退 multipart
-                    client.enhance(norm, tmp, quality=quality, style=style,
-                                   prompt=tier_prompt,
-                                   size=str(template.get("gateway_size") or ""),
-                                   model=str(template.get("model_override") or ""),
-                                   image_url=gateway_url)
-                else:
-                    client.enhance(norm, tmp, quality=quality, style=style)
+                extra={'before_submit':before_submit} if isinstance(client,OpenAIImagesEnhance) else {}
+                if not extra:before_submit()  # Offline/test clients share the same paid boundary.
+                client.enhance(norm, tmp, quality=quality, style=style,
+                               prompt=tier_prompt,size=str(template.get("gateway_size") or ""),
+                               model=snapshot['model'],image_url=gateway_url,**extra)
                 provider_returned = True
-                cost_cny = getattr(client, "last_cost_cny", None)
+                cost_cny = snapshot.get('estimated_cost_cny')
                 cost_usd = getattr(client, "last_cost_usd", None)
                 scale = getattr(client, "last_scale", None)
-                jobs.update(job_id, provider=name, cost_cny=cost_cny,
+                jobs.update(job_id, provider=name, provider_name=snapshot['gateway_name'],cost_cny=cost_cny,
                             cost_usd=cost_usd, scale=scale,
-                            cost_estimated=bool((name=='worldcodes' and cost_cny is not None) or
-                                                (name=='fal' and cost_usd is not None)),
-                            cost_source=('configured_reference' if name=='worldcodes' and cost_cny is not None
-                                         else 'provider_model_estimate' if name=='fal' and cost_usd is not None else ''))
+                            cost_estimated=cost_cny is not None or cost_usd is not None,
+                            cost_source='configured_reference' if cost_cny is not None or cost_usd is not None else '')
                 # Keep the completed generation's reference expense even when
                 # validation or later delivery fails; it is separate from refunds.
                 _validate_output(tmp)
@@ -1467,21 +1585,25 @@ def _run_pipeline(job_id: str, quality: str, style: str,
                 )
             except Exception as exc:  # noqa: BLE001
                 code = getattr(exc, "code", exc.__class__.__name__)
-                log.warning("[%s] %s 失败(%s)：%s", job_id, name, code, exc)
-                if provider_returned or getattr(exc, "uncertain", False):
+                if code=='SUBMIT_STOPPED':return
+                from gateway_async import failure_diagnostic
+                message=failure_diagnostic({'message':str(exc)},getattr(client,'api_key',''))['message'] or '生成网关请求未完成'
+                log.warning("[%s] %s 失败(%s)：%s", job_id, name, code, message)
+                if getattr(client,'last_cost_cny',None) is not None:
+                    jobs.update(job_id,provider=name,provider_name=snapshot['gateway_name'],
+                                cost_cny=snapshot.get('estimated_cost_cny'),cost_estimated=True,cost_source='configured_reference')
+                if provider_returned or not explicitly_rejected(exc):
                     # A paid request may already have been accepted. Switching
                     # providers here would charge for a second generation.
-                    raise
+                    raise RuntimeError(message) from exc
+                refused=jobs.clear_sync_rejection(job_id,name,attempt_token,exc.status)
+                if refused is None:return
+                if refused.get('deleted_at'):
+                    _refund_charged(refused['openid'],job_id,int(refused.get('price') or 0))
+                    return
 
-        # --- 3. 本地兜底：链路全挂（或全部被停用）时强制跑一次 ---
         if not enhanced:
-            if requires_prompt:
-                raise RuntimeError("指定成品形式或补充要求的生成引擎本次未完成，请重试；本次光子将退回")
-            log.info("[%s] 外部链路全部失败，走本地引擎（quality=%s, style=%s）",
-                     job_id, quality, style)
-            # 前面已经归一化过，这里关掉 2K 上采样，避免把 1536 插值回 2000
-            with IMAGE_LOCK:engine.process(norm,tmp,quality=quality,upscale_2k=False,style=style)
-            provider_used = "local"
+            raise RuntimeError('全部生成网关明确拒绝或不可用，本次光子退回')
 
         timings['provider_ms']=round((time.monotonic()-phase)*1000)
         phase=time.monotonic()
@@ -1601,8 +1723,10 @@ def _run_pipeline(job_id: str, quality: str, style: str,
             timings['processing_ms']=round((time.monotonic()-clock_started)*1000)
             jobs.update(job_id, status="failed", error=str(exc)[:500], stage=stage,timings=timings)
         finally:
-            _refund_charged(job.get("openid", ""), job_id,
-                            int(job.get("price") or 0))
+            failed=jobs.get(job_id) or {}
+            if not (failed.get('deleted_at') and failed.get('cancel_without_refund')):
+                _refund_charged(job.get("openid", ""), job_id,
+                                int(job.get("price") or 0))
             _safe_remove(out)
             if job.get("result_cos"):
                 cleanup.schedule("cos", job["result_cos"], time.time())
@@ -1690,17 +1814,7 @@ def _admin_stats() -> Dict[str, Any]:
     """后台仪表盘统计：按本地自然日聚合。"""
     now = time.time()
     midnight = business_midnight(now)
-    items, total = jobs.list_recent(0, 10 ** 6)
-    today = [j for j in items if j.get("created_at", 0) >= midnight]
-    out = {
-        "today_total": len(today),
-        "today_succeeded": sum(1 for j in today if j.get("status") == "succeeded"),
-        "today_failed": sum(1 for j in today if j.get("status") == "failed"),
-        "running": sum(1 for j in items if j.get("status") == "processing"),
-        "today_cost_cny": sum(float(j.get("cost_cny") or 0) for j in today),
-        "today_cost_usd": sum(float(j.get("cost_usd") or 0) for j in today),
-        "total": total,
-    }
+    out = gateway_statistics(jobs,midnight)
     try:
         out.update(users.stats())
     except Exception:  # noqa: BLE001
@@ -1710,12 +1824,15 @@ def _admin_stats() -> Dict[str, Any]:
 
 @app.get("/api/health")
 def health() -> Dict[str, Any]:
-    """健康检查。configured=false 说明所有 AI 后端都没配，只剩本地引擎。"""
-    gateway_ok = any(bool(settings.gateway_for(q).get('base_url') and settings.gateway_for(q).get('api_key')) for q in ('light','fine'))
-    fal_conf = bool(settings.provider("fal").get("api_key")) \
-        or bool(os.environ.get("FAL_KEY", "").strip())
-    bd = settings.provider("baidu")
-    baidu_conf = bool(bd.get("api_key") and bd.get("secret_key"))
+    """Health returns redacted dynamic gateway readiness, never credential DTOs."""
+    available={q:{c['gateway_id'] for c in settings.gateway_candidates(q)} for q in ('light','fine')}
+    gateway_ok=any(available.values())
+    gateways=[]
+    for gid in settings.chain():
+        conf=settings.gateway_for('light',gateway_id=gid)
+        gateways.append({'id':gid,'name':conf.get('gateway_name',gid),
+                         'enabled':bool(settings.provider_enabled(gid)),
+                         'light':gid in available['light'],'fine':gid in available['fine']})
     cos_info = None
     if settings.cos_ready():
         try:
@@ -1732,10 +1849,8 @@ def health() -> Dict[str, Any]:
         "generation_queue": pool.snapshot(),
         "cloud_pipeline": cloud.snapshot(),
         "gateway": gateway_ok,
-        "fal": fal_conf,
-        "baidu": baidu_conf,
-        "local": True,
-        "configured": gateway_ok or fal_conf or baidu_conf,
+        "gateways": gateways,
+        "configured": gateway_ok,
         "cos_network": cos_info,
         "moderation": {
             "enabled": bool(mod.get("enabled")),
@@ -2547,6 +2662,7 @@ def query_job_status(job_id: str, request: Request):
         "completed_at":job.get("completed_at"),
         "price": job.get("price"),
         "provider": job.get("provider"),
+        "provider_name": job.get("provider_name"),
         "width": job.get("width"),
         "height": job.get("height"),
         "balance": users.get_balance(user["openid"]),
@@ -2640,6 +2756,7 @@ def get_my_jobs(request: Request, limit: int = 30, offset: int = 0, status: str 
             "quality": job.get("quality"),
             "input_mode":job.get('input_mode','photo'),
             "provider": job.get("provider"),
+            "provider_name": job.get("provider_name"),
             "width": job.get("width"),
             "height": job.get("height"),
             "aspect_ratio": job.get("aspect_ratio", ""),

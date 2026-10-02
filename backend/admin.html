@@ -155,6 +155,16 @@
   .line-item b { flex: 1; min-width: 90px; }
   .line-item input[type=text] { max-width: 180px; }
   .line-item input[type=number] { max-width: 74px; }
+  .gateway-row { padding:10px 8px; }
+  .gateway-selected { background:var(--brand-weak); }
+  .gateway-select { flex:1;min-width:100px;min-height:44px;padding:8px;text-align:left;border:0;background:transparent;color:var(--ink);font-family:inherit;font-size:14px;font-weight:600;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer; }
+  .gateway-id { max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  .gateway-actions { display:flex;gap:6px;flex:0 0 auto; }
+  .gateway-key-field { display:flex;align-items:center;gap:8px; }
+  .gateway-key-field input { flex:1;min-width:0;height:44px; }
+  .gateway-key-field button { flex:0 0 auto;min-height:44px; }
+  .gateway-tier-enable { display:flex;align-items:center;gap:6px;font-size:13px; }
+  @media (max-width:600px) { .gateway-id { order:3;flex:1 0 100%;max-width:100%; } .gateway-select { min-width:84px; } }
 
   .modal-mask { position: fixed; inset: 0; background: rgba(52,45,36,.44); z-index: 100;
     display: flex; justify-content: center; align-items: flex-start; padding: 32px 16px; overflow-y: auto; }
@@ -304,7 +314,7 @@
       <div class="nav-item" data-page="prov" onclick="showPage('prov')">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
           <path d="M9 1.5L3.5 9H7l-1 5.5L11.5 7H8l1-5.5z"/>
-        </svg>供应商与提示词</div>
+        </svg>中转网关与提示词</div>
       <div class="nav-item" data-page="conf" onclick="showPage('conf')">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
           <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
@@ -347,12 +357,13 @@
         <div class="card">
           <div class="card-head"><h2>今日概览</h2><span class="muted" id="chain-line"></span></div>
           <div class="stats" id="stats"></div>
+          <p class="muted" style="margin-bottom:0">仅汇总已记录的网关参考费用，不是实际账单。累计记录不随作品到期或删除减少；历史 USD 独立显示，不与人民币相加。</p>
         </div>
         <div class="grid-2">
           <div class="card">
-            <div class="card-head"><h2>供应商状态</h2></div>
+            <div class="card-head"><h2>中转网关状态</h2></div>
             <div id="prov-chips" style="display:flex;flex-wrap:wrap;gap:8px"></div>
-            <p class="muted" style="margin-bottom:0">打勾 = 密钥齐备可参与修复；顺序与开关在「供应商与提示词」里调</p>
+            <p class="muted" style="margin-bottom:0">名称、启停与优先顺序在「中转网关与提示词」统一保存；参考成本不是实际账单，历史美元不与人民币相加。</p>
           </div>
           <div class="card">
             <div class="card-head"><h2>维护模式</h2></div>
@@ -445,57 +456,58 @@
         </div>
       </section>
 
-      <!-- 供应商与提示词 -->
+      <!-- 中转网关与提示词 -->
       <section id="page-prov" hidden>
         <div class="card">
-          <div class="card-head"><h2>传统模式降级链<small>开启云端模式后只走对应档位的异步网关；下列开关和顺序修改后需统一保存</small></h2></div>
+          <div class="card-head"><h2>中转网关优先顺序<small>自定义名称；可配置 1–20 个网关。启停、排序与删除统一保存，只影响新的任务。</small></h2><button class="btn-primary btn-small" type="button" id="gateway-add" onclick="addGateway()">＋ 新增网关</button></div>
           <div id="chain-list"></div>
+          <p class="muted">新任务按优先顺序选择已启用网关；每档可分别选择云端异步或后台 OpenAI 兼容方式。切换前保留两档输入，停用不打断已接收任务。至少保留一个网关，也可以全部停用。</p>
+        </div>
+        <div class="card" id="gateway-editor">
+          <div class="card-head"><h2>当前中转网关<small id="gateway-current-id"></small></h2></div>
+          <div class="field"><label>网关名称<small>仅用于辨认，历史任务保留提交时名称</small></label><input id="gateway-name" maxlength="40" placeholder="例如：主网关、备用网关"></div>
         </div>
         <div class="card">
-          <div class="card-head"><h2>轻量生成 · 独立网关配置<small>URL、密钥、接口和模型单独保存；清空密钥只停用本档网关</small></h2></div>
+          <div class="card-head"><h2>轻量生成 · 独立连接<small>配置当前选中的中转网关；打码密钥保持不变，清空只影响本档。</small></h2><label class="gateway-tier-enable"><input type="checkbox" id="wc-light-enabled">启用轻量档</label></div>
           <div class="form-grid">
-            <div class="field"><label>Base URL</label><input type="url" id="wc-light-base" placeholder="https://你的供应商域名"></div>
-            <div class="field"><label>API Key<small>打码表示保持原密钥</small></label><input type="password" id="wc-light-key" autocomplete="new-password" placeholder="API Key"></div>
-            <div class="field"><label>图像编辑接口路径</label><input id="wc-light-endpoint" placeholder="/v1/images/edits"><small>云端模式会使用对应的异步接口；不要填写完整 URL。</small></div>
-            <div class="field"><label>模型名</label><input id="wc-light-model"></div>
-            <div class="field"><label>同步请求超时（秒）</label><input type="number" id="wc-light-timeout" min="10" max="600"></div>
-            <div class="field"><label>供应商成本（¥/张）<small>不影响光子扣费</small></label><input type="number" id="wc-light-price" step="0.01" min="0" max="1000"></div>
+            <div class="field"><label>请求方式</label><select id="wc-light-mode"><option value="sync">OpenAI 兼容</option><option value="async">云端异步</option></select><small>直接返回图片选兼容；返回任务 ID 选异步。</small></div>
+            <div class="field"><label>Base URL</label><input type="url" id="wc-light-base" maxlength="500" placeholder="https://你的中转网关域名"></div>
+            <div class="field"><label>API Key<small>打码表示保持原密钥；空值明确清空</small></label><div class="gateway-key-field"><input type="password" id="wc-light-key" maxlength="8192" autocomplete="new-password" placeholder="API Key"><button type="button" class="btn-ghost btn-small" onclick="clearGatewayKey('light')">清空本档</button></div></div>
+            <div class="field"><label>OpenAI 图像编辑 POST 路径</label><input id="wc-light-endpoint" maxlength="200" placeholder="/v1/images/edits"><small>本档独立路径，不填完整 URL。</small></div>
+            <div class="field"><label>异步 POST 路径（可选）</label><input id="wc-light-async" maxlength="200" placeholder="为空时使用上面的路径 + /async"><small>选异步时有效；路径已含 /async 不重复追加。</small></div>
+            <div class="field"><label>模型名</label><input id="wc-light-model" maxlength="200"></div>
+            <div class="field"><label>网关请求超时（秒）</label><input type="number" id="wc-light-timeout" min="10" max="600"></div>
+            <div class="field"><label>参考成本（¥/张）<small>不是实际账单，不影响光子扣费</small></label><input type="number" id="wc-light-price" step="0.01" min="0" max="1000"></div>
           </div>
-          <p class="muted">同步模式兼容 OpenAI Images 接口；云端模式需要供应商支持异步任务协议，结果地址仍须匹配已配置的 COS 回源域名。</p>
+          <p class="muted">云端异步按既有结果导入规则保存；OpenAI 兼容方式在有界后台处理中接收成品并存入 COS。客户端只读取 COS 成品直链。</p>
         </div>
         <div class="card">
-          <div class="card-head"><h2>精细生成 · 独立网关配置<small>URL、密钥、接口和模型单独保存；清空密钥只停用本档网关</small></h2></div>
+          <div class="card-head"><h2>精细生成 · 独立连接<small>与轻量档分别保存 Base、密钥、接口、模型和参考成本。</small></h2><label class="gateway-tier-enable"><input type="checkbox" id="wc-fine-enabled">启用精细档</label></div>
           <div class="form-grid">
-            <div class="field"><label>Base URL</label><input type="url" id="wc-fine-base" placeholder="https://你的供应商域名"></div>
-            <div class="field"><label>API Key<small>打码表示保持原密钥</small></label><input type="password" id="wc-fine-key" autocomplete="new-password" placeholder="API Key"></div>
-            <div class="field"><label>图像编辑接口路径</label><input id="wc-fine-endpoint" placeholder="/v1/images/edits"><small>云端模式会使用对应的异步接口；不要填写完整 URL。</small></div>
-            <div class="field"><label>模型名</label><input id="wc-fine-model"></div>
-            <div class="field"><label>同步请求超时（秒）</label><input type="number" id="wc-fine-timeout" min="10" max="600"></div>
-            <div class="field"><label>供应商成本（¥/张）<small>不影响光子扣费</small></label><input type="number" id="wc-fine-price" step="0.01" min="0" max="1000"></div>
+            <div class="field"><label>请求方式</label><select id="wc-fine-mode"><option value="sync">OpenAI 兼容</option><option value="async">云端异步</option></select><small>直接返回图片选兼容；返回任务 ID 选异步。</small></div>
+            <div class="field"><label>Base URL</label><input type="url" id="wc-fine-base" maxlength="500" placeholder="https://你的中转网关域名"></div>
+            <div class="field"><label>API Key<small>打码表示保持原密钥；空值明确清空</small></label><div class="gateway-key-field"><input type="password" id="wc-fine-key" maxlength="8192" autocomplete="new-password" placeholder="API Key"><button type="button" class="btn-ghost btn-small" onclick="clearGatewayKey('fine')">清空本档</button></div></div>
+            <div class="field"><label>OpenAI 图像编辑 POST 路径</label><input id="wc-fine-endpoint" maxlength="200" placeholder="/v1/images/edits"><small>本档独立路径，不填完整 URL。</small></div>
+            <div class="field"><label>异步 POST 路径（可选）</label><input id="wc-fine-async" maxlength="200" placeholder="为空时使用上面的路径 + /async"><small>选异步时有效；路径已含 /async 不重复追加。</small></div>
+            <div class="field"><label>模型名</label><input id="wc-fine-model" maxlength="200"></div>
+            <div class="field"><label>网关请求超时（秒）</label><input type="number" id="wc-fine-timeout" min="10" max="600"></div>
+            <div class="field"><label>参考成本（¥/张）<small>不是实际账单，不影响光子扣费</small></label><input type="number" id="wc-fine-price" step="0.01" min="0" max="1000"></div>
           </div>
-          <p class="muted">同步模式兼容 OpenAI Images 接口；云端模式需要供应商支持异步任务协议，结果地址仍须匹配已配置的 COS 回源域名。</p>
+          <p class="muted">切换网关不会覆盖另一个网关的轻量或精细配置；文生图保持下面的独立连接。</p>
         </div>
         <div class="card" id="text-gateway-card">
           <div class="card-head"><h2>文生图 · 独立网关配置<small>URL、密钥、接口与模型独立；修改轻量或精细档不会影响文生图</small></h2></div>
           <div class="form-grid">
-            <div class="field"><label>Base URL</label><input type="url" id="tg-base" placeholder="https://你的供应商域名"></div>
+            <div class="field"><label>Base URL</label><input type="url" id="tg-base" placeholder="https://你的中转网关域名"></div>
             <div class="field"><label>API Key<small>打码表示保持原密钥</small></label><input type="password" id="tg-key" autocomplete="new-password" placeholder="文生图独立 API Key"></div>
             <div class="field"><label>文生图接口路径</label><input id="tg-endpoint" placeholder="/v1/images/generations"><small>填写路径，不填完整 URL；云端模式使用对应的异步接口。</small></div>
             <div class="field"><label>文生图模型名</label><input id="tg-model" placeholder="填写文生图模型名"></div>
             <div class="field"><label>网关请求超时（秒）</label><input type="number" id="tg-timeout" min="10" max="600"><small>提交与查询接口的单次响应超时，不是任务总时限。</small></div>
-            <div class="field"><label>供应商参考成本（¥/张）<small>不是实际账单，不影响光子扣费</small></label><input type="number" id="tg-cost" step="0.01" min="0" max="1000"></div>
+            <div class="field"><label>中转网关参考成本（¥/张）<small>不是实际账单，不影响光子扣费</small></label><input type="number" id="tg-cost" step="0.01" min="0" max="1000"></div>
             <div class="field"><label>文生图光子价格</label><input type="number" id="tg-price" min="0" max="9999"></div>
             <div class="field"><label><input type="checkbox" id="tg-enabled">启用文生图</label><small>清空本模块密钥只停用文生图，不借用轻量档密钥。</small></div>
           </div>
-          <p class="muted">供应商需支持现有异步任务协议，成品地址须匹配已配置的 COS 回源域名。旧配置首次升级会复制原来使用的轻量连接，之后独立保存。</p>
-        </div>
-        <div class="card">
-          <div class="card-head"><h2>其它供应商密钥</h2></div>
-          <div class="form-grid">
-            <div class="field"><label>fal.ai Key <small>格式 key_id:key_secret</small></label><input type="text" id="fal-key" placeholder="••••"></div>
-            <div class="field"><label>百度 API Key</label><input type="text" id="bd-key"></div>
-            <div class="field"><label>百度 Secret Key</label><input type="text" id="bd-sk"></div>
-          </div>
+          <p class="muted">文生图不跟随上面的图片编辑网关列表，不借用其它档位密钥；需支持现有异步任务协议，成品地址须匹配已配置的 COS 回源域名。</p>
         </div>
         <div class="card">
           <div class="card-head"><h2>网关修图提示词<small>基础档位兜底用；模板有自己的提示词</small></h2></div>
@@ -514,8 +526,8 @@
             <div class="field"><label>轻量档价格（光子/张）</label><input type="number" id="price-light" min="0" max="9999"></div>
             <div class="field"><label>精细档价格（光子/张）</label><input type="number" id="price-fine" min="0" max="9999"></div>
             <div class="field"><label>归一化长边<small>0 = 关闭缩放；改小可省网关费用</small></label><input type="number" id="normalize" min="0" max="8192"></div>
-            <div class="field"><label>固定云端流程</label><small>COS 直传 → 微信原图审核 → CI 处理 → 供应商生成 → CI 成品处理 → 微信成品审核。大图或微信故障转腾讯云专用目录；自动审核只匹配 audit-tencent/input/、audit-tencent/output/，完整回调至 /api/callbacks/cos-audit。</small></div>
-            <div class="field"><label>供应商生成并发</label><input id="cloud-concurrency" type="number" min="1" max="64"><small>默认 16；独立于 4 个元数据工作线程。供应商实际额度仍需核对。</small></div>
+            <div class="field"><label>审核与处理流程</label><small>COS 直传 → 微信原图审核 → 图片归一化 / CI 处理 → 按所选网关的调用方式生成 → 排版 / CI 成品处理 → 成品审核与 COS 保存。大图或微信故障转腾讯云专用目录；自动审核只匹配 audit-tencent/input/、audit-tencent/output/，完整回调至 /api/callbacks/cos-audit。</small></div>
+            <div class="field"><label>中转网关生成并发</label><input id="cloud-concurrency" type="number" min="1" max="64"><small>默认 16；独立于 4 个元数据工作线程。实际网关额度仍需核对。</small></div>
             <div class="field"><label>等待队列上限</label><input id="cloud-queued" type="number" min="0" max="1000"></div>
           </div>
         </div>
@@ -745,7 +757,10 @@ function updateSaveBar() {
 }
 function markPageDirty(){PAGE_DIRTY=true;updateSaveBar();}
 document.addEventListener('input',event=>{
-  if(event.target.closest?.('section[id^="page-"]')&&['prov','conf','sec','commerce'].includes(CURRENT_PAGE))markPageDirty();
+  if(event.target.closest?.('section[id^="page-"]')&&['prov','conf','sec','commerce'].includes(CURRENT_PAGE)){
+    markPageDirty();
+    if(CURRENT_PAGE==='prov'&&event.target.id==='gateway-name'&&PROVIDER_DRAFT){stashGatewayForm();renderChain();}
+  }
 });
 document.addEventListener('change',event=>{
   if(event.target.closest?.('section[id^="page-"]')&&['prov','conf','sec','commerce'].includes(CURRENT_PAGE))markPageDirty();
@@ -811,7 +826,7 @@ const PAGES = {
   tshare: { title: "用户模板审核", load: () => { renderTemplateSharingSettings();loadTemplateShares(true); } },
   community: { title: "社区管理", load: () => Promise.all([loadCommunityPosts(true),loadSubmissions(true),loadCommunityInteractions(true)]) },
   ann:   { title: "公告管理",      load: loadAnnouncements },
-  prov:  { title: "供应商与提示词", load: () => { renderProviderForm(); renderChain(); } },
+  prov:  { title: "中转网关与提示词", load: () => { renderProviderForm(); renderChain(); } },
   conf:  { title: "通用设置",      load: renderConf },
   commerce: { title: "光子与活动", load: renderCommerce },
   sec:   { title: "平台与安全",    load: renderSec },
@@ -820,6 +835,7 @@ const PAGES = {
 };
 function showPage(name) {
   if(SAVING){toast('正在保存，请稍候');return;}
+  if(name==='prov'&&CURRENT_PAGE==='prov'&&PAGE_DIRTY){stashGatewayForm();renderChain();return;}
   if(name!==CURRENT_PAGE&&PAGE_DIRTY&&!confirm('本页有未保存修改，确定放弃并切换页面？'))return;
   CURRENT_PAGE=name;PAGE_DIRTY=false;
   document.querySelectorAll("section[id^='page-']").forEach((s) => {
@@ -847,13 +863,14 @@ async function loadOverview() {
     $("stats").innerHTML =
       stat(s.today_total, "今日任务") + stat(s.today_succeeded, "今日成功") +
       stat(s.today_failed, "今日失败") + stat(s.running, "进行中") +
-      stat("≈¥" + (s.today_cost_cny ?? 0).toFixed(2), "今日网关参考成本") +
-      stat("≈$" + (s.today_cost_usd ?? 0).toFixed(3), "今日 fal 参考成本") +
+      stat(referenceMoney(s.today_cost_cny,'¥',2), "今日中转网关参考成本") +
+      stat(referenceMoney(s.total_cost_cny,'¥',2), "累计中转网关参考成本") +
+      (typeof s.total_cost_usd==='number'&&s.total_cost_usd>0 ? stat(referenceMoney(s.total_cost_usd,'$',3), "历史USD参考成本（独立）") : '') +
       stat(s.wechat_users_total ?? s.users_total ?? 0, "微信小程序账号") +
       stat(s.web_registered_total ?? s.web_users_total ?? 0, "网站注册账号（不含访客）");
-    $("chain-line").textContent = "降级链：" + o.chain.join(" → ") +
+    const gateways=o.providers||{};
+    $("chain-line").textContent = "中转网关顺序：" + (o.chain||[]).filter(isGatewayId).map(id=>gateways[id]?.name||gatewayName(id)).join(" → ") +
       (o.free_mode ? "　【调试模式】" : "");
-    const NAMES = { worldcodes: "中转网关", fal: "fal.ai", baidu: "百度 AI", local: "本地引擎" };
     const mod = o.moderation_detail || {};
     let modBadge = '<span class="badge">机审关闭</span>';
     if (mod.enabled) {
@@ -865,8 +882,12 @@ async function loadOverview() {
         modBadge = '<span class="badge red">⚠ 机审未就绪(缺密钥)</span>';
       }
     }
-    $("prov-chips").innerHTML = Object.entries(o.configured).map(([k, v]) =>
-      `<span class="badge ${v ? "green" : "red"}">${v ? "✓" : "✗"} ${NAMES[k] || k}</span>`).join("") +
+    const statuses=Object.keys(gateways).length?gateways:Object.fromEntries(Object.entries(o.configured||{}).filter(([id])=>isGatewayId(id)).map(([id,configured])=>[id,{name:gatewayName(id),enabled:SETTINGS?.providers?.[id]?.enabled!==false,configured}]));
+    $("prov-chips").innerHTML = Object.entries(statuses).filter(([id])=>isGatewayId(id)).map(([id,v])=>{
+      const ready=v.configured===true,enabled=v.enabled!==false;
+      const tiers=typeof v.light_ready==='boolean'&&typeof v.fine_ready==='boolean'?` · 轻量${v.light_ready?'就绪':'未就绪'} / 精细${v.fine_ready?'就绪':'未就绪'}`:'';
+      return `<span class="badge ${!enabled?'':ready?'green':'red'}">${esc(v.name||gatewayName(id))} · ${enabled?(ready?'已启用':'配置未就绪'):'已停用'}${tiers}</span>`;
+    }).join("") +
       (o.cos_ready ? `<span class="badge indigo">COS 直传就绪</span>` : `<span class="badge">COS 未配置</span>`) +
       modBadge;
     $("mt-quick").checked = o.maintenance.enabled;
@@ -882,6 +903,7 @@ async function loadOverview() {
   } catch (e) { console.error(e); }
 }
 const stat = (v, label) => `<div class="stat"><b>${esc(v)}</b><span>${esc(label)}</span></div>`;
+const referenceMoney=(value,currency,digits)=>typeof value==='number'&&Number.isFinite(value)?'≈'+currency+value.toFixed(digits):'—';
 
 async function quickMaintenance(box) {
   try {
@@ -892,73 +914,133 @@ async function quickMaintenance(box) {
   } catch (e) { box.checked = !box.checked; toast(e.message, "bad"); }
 }
 
-/* ---------- 供应商与提示词 ---------- */
-const PROV_NAMES = { worldcodes: "中转网关", fal: "fal.ai", baidu: "百度 AI", local: "本地引擎" };
+/* ---------- 中转网关与提示词 ---------- */
+const GATEWAY_FIELDS={base:'base_url',key:'api_key',endpoint:'endpoint',async:'async_endpoint',mode:'request_mode',timeout:'timeout',model:'model',price:'price_cny'};
+const isGatewayId=id=>typeof id==='string'&&/^(worldcodes|gw_[0-9a-f]{32})$/.test(id);
+function gatewayName(id){return SETTINGS?.providers?.[id]?.name||(id==='worldcodes'?'主网关':id);}
+function tierDraft(conf,quality,defaultMode){
+  const tier=conf.tiers?.[quality]||{},legacy={base_url:conf.base_url,api_key:conf.api_key,endpoint:conf.endpoint,
+    timeout:conf.timeout,model:conf['model_'+quality],price_cny:conf['price_'+quality+'_cny'],request_mode:conf.request_mode,async_endpoint:conf.async_endpoint};
+  const defaults={base_url:'',api_key:'',endpoint:'/v1/images/edits',timeout:180,model:'',price_cny:0,request_mode:defaultMode,async_endpoint:''};
+  return {enabled:tier.enabled!==false,...Object.fromEntries(Object.keys(defaults).map(key=>[key,tier[key]??legacy[key]??defaults[key]]))};
+}
+function normalizeGateway(id,conf={}){
+  return {...conf,name:conf.name||(id==='worldcodes'?'主网关':'中转网关'),enabled:conf.enabled!==false,
+    tiers:{light:tierDraft(conf,'light',id==='worldcodes'?'async':'sync'),fine:tierDraft(conf,'fine',id==='worldcodes'?'async':'sync')}};
+}
+function gatewayNode(tag,props={}){return Object.assign(document.createElement(tag),props);}
+function gatewayButton(text,action,disabled=false){
+  const b=gatewayNode('button',{type:'button',className:'btn-ghost btn-small',textContent:text,disabled});
+  b.addEventListener('click',action);return b;
+}
 
 function renderChain() {
   const box = $("chain-list"); box.innerHTML = "";
   PROVIDER_DRAFT.chain.forEach((name, i) => {
     const conf = PROVIDER_DRAFT.providers[name] || {};
-    const row = document.createElement("div"); row.className = "line-item";
-    row.innerHTML =
-      `<label class="switch"><input type="checkbox" ${conf.enabled ? "checked" : ""}
-         onchange="toggleProv('${name}', this)"><span class="knob"></span></label>
-       <b>${PROV_NAMES[name] || name} <code>${name}</code></b>
-       <button class="btn-ghost btn-small" ${i === 0 ? "disabled" : ""}
-         onclick="moveProv(${i}, -1)">↑</button>
-       <button class="btn-ghost btn-small" ${i === PROVIDER_DRAFT.chain.length - 1 ? "disabled" : ""}
-         onclick="moveProv(${i}, 1)">↓</button>`;
+    const row=gatewayNode('div',{className:'line-item gateway-row'+(name===PROVIDER_DRAFT.active?' gateway-selected':'')});
+    row.dataset.gatewayId=name;
+    const label=gatewayNode('label',{className:'switch'}),input=gatewayNode('input',{type:'checkbox',checked:!!conf.enabled});
+    input.setAttribute('aria-label','启用 '+conf.name);input.addEventListener('change',()=>window.toggleProv(name,input));
+    label.appendChild(input);label.appendChild(gatewayNode('span',{className:'knob'}));row.appendChild(label);
+    const select=gatewayNode('button',{type:'button',className:'gateway-select',textContent:conf.name||name,title:conf.name||name});
+    select.setAttribute('aria-label','编辑 '+(conf.name||name));
+    select.addEventListener('click',()=>window.selectGateway(name));row.appendChild(select);
+    const id=gatewayNode('code',{className:'gateway-id',textContent:name});row.appendChild(id);
+    const actions=gatewayNode('div',{className:'gateway-actions'});
+    actions.appendChild(gatewayButton('↑',()=>window.moveProv(i,-1),i===0));
+    actions.appendChild(gatewayButton('↓',()=>window.moveProv(i,1),i===PROVIDER_DRAFT.chain.length-1));
+    actions.appendChild(gatewayButton('删除',()=>window.deleteGateway(name),PROVIDER_DRAFT.chain.length<=1));row.appendChild(actions);
     box.appendChild(row);
   });
+  $('gateway-add').disabled=PROVIDER_DRAFT.chain.length>=20;
 }
 window.toggleProv = (name,box)=>{
+  if(SAVING||!isGatewayId(name)||!PROVIDER_DRAFT.providers[name])return;
+  stashGatewayForm();
   PROVIDER_DRAFT.providers[name].enabled=box.checked;markPageDirty();renderChain();
 };
 window.moveProv = (i,dir)=>{
+  if(SAVING)return;stashGatewayForm();
   const chain=PROVIDER_DRAFT.chain;
   if(i+dir<0||i+dir>=chain.length)return;
   [chain[i],chain[i+dir]]=[chain[i+dir],chain[i]];markPageDirty();renderChain();
 };
+function stashGatewayForm(){
+  const conf=PROVIDER_DRAFT?.providers?.[PROVIDER_DRAFT.active];if(!conf)return;
+  conf.name=$('gateway-name').value;
+  for(const quality of ['light','fine']){
+    const tier=conf.tiers[quality];tier.enabled=$('wc-'+quality+'-enabled').checked;
+    for(const [suffix,key] of Object.entries(GATEWAY_FIELDS))tier[key]=$('wc-'+quality+'-'+suffix).value;
+  }
+}
+function renderGatewayFields(){
+  const conf=PROVIDER_DRAFT.providers[PROVIDER_DRAFT.active];
+  $('gateway-name').value=conf.name;$('gateway-current-id').textContent=PROVIDER_DRAFT.active;
+  for(const quality of ['light','fine']){
+    $('wc-'+quality+'-enabled').checked=conf.tiers[quality].enabled!==false;
+    for(const [suffix,key] of Object.entries(GATEWAY_FIELDS))$('wc-'+quality+'-'+suffix).value=conf.tiers[quality][key];
+  }
+}
+window.selectGateway=id=>{
+  if(SAVING||!isGatewayId(id)||!PROVIDER_DRAFT.providers[id])return;
+  stashGatewayForm();PROVIDER_DRAFT.active=id;renderGatewayFields();renderChain();
+};
+window.addGateway=()=>{
+  if(SAVING||PROVIDER_DRAFT.chain.length>=20)return;
+  stashGatewayForm();const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
+  const id='gw_'+Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  if(PROVIDER_DRAFT.providers[id])return;
+  PROVIDER_DRAFT.providers[id]=normalizeGateway(id,{name:'中转网关 '+(PROVIDER_DRAFT.chain.length+1),enabled:false});
+  PROVIDER_DRAFT.chain.push(id);PROVIDER_DRAFT.active=id;markPageDirty();renderGatewayFields();renderChain();
+};
+window.deleteGateway=id=>{
+  if(SAVING||PROVIDER_DRAFT.chain.length<=1||!PROVIDER_DRAFT.providers[id])return;
+  if(!confirm('删除中转网关「'+PROVIDER_DRAFT.providers[id].name+'」？保存后停止新的选择，已接收任务不受影响。'))return;
+  stashGatewayForm();delete PROVIDER_DRAFT.providers[id];
+  PROVIDER_DRAFT.chain=PROVIDER_DRAFT.chain.filter(x=>x!==id);
+  if(Object.prototype.hasOwnProperty.call(SETTINGS.providers||{},id))PROVIDER_DRAFT.deleted[id]=null;
+  if(PROVIDER_DRAFT.active===id)PROVIDER_DRAFT.active=PROVIDER_DRAFT.chain[0];
+  markPageDirty();renderGatewayFields();renderChain();
+};
+window.clearGatewayKey=quality=>{
+  if(SAVING||!['light','fine'].includes(quality))return;
+  $('wc-'+quality+'-key').value='';stashGatewayForm();markPageDirty();
+};
 
-function renderProviderForm() {
-  PROVIDER_DRAFT={chain:[...SETTINGS.chain],providers:JSON.parse(JSON.stringify(SETTINGS.providers))};
+function renderProviderForm(preferredId='') {
+  const raw=SETTINGS.providers||{},ids=[...(SETTINGS.chain||[]).filter(id=>isGatewayId(id)&&raw[id]),...Object.keys(raw).filter(id=>isGatewayId(id)&&!(SETTINGS.chain||[]).includes(id))];
+  const chain=[...new Set(ids)];if(!chain.length)chain.push('worldcodes');
+  PROVIDER_DRAFT={chain,providers:Object.fromEntries(chain.map(id=>[id,normalizeGateway(id,JSON.parse(JSON.stringify(raw[id]||{enabled:false})))])),deleted:{},active:chain.includes(preferredId)?preferredId:chain[0]};
   const tg=SETTINGS.text_generation||{};
   $('tg-enabled').checked=!!tg.enabled;$('tg-model').value=tg.model||'';
   $('tg-endpoint').value=tg.endpoint||'/v1/images/generations';$('tg-price').value=tg.price??40;
   $('tg-base').value=tg.base_url||'';$('tg-key').value=tg.api_key||'';
   $('tg-timeout').value=tg.timeout??30;$('tg-cost').value=tg.price_cny??0;
-  const wc = SETTINGS.providers.worldcodes || {};
-  for(const quality of ['light','fine']){
-    const tier=wc.tiers?.[quality]||{};
-    const legacy={base_url:wc.base_url,api_key:wc.api_key,endpoint:wc.endpoint,timeout:wc.timeout,
-      model:wc['model_'+quality],price_cny:wc['price_'+quality+'_cny']};
-    for(const [suffix,key] of Object.entries({base:'base_url',key:'api_key',endpoint:'endpoint',timeout:'timeout',model:'model',price:'price_cny'})){
-      $('wc-'+quality+'-'+suffix).value=tier[key]??legacy[key]??'';
-    }
-  }
-  $("fal-key").value = SETTINGS.providers.fal?.api_key || "";
-  $("bd-key").value = SETTINGS.providers.baidu?.api_key || "";
-  $("bd-sk").value = SETTINGS.providers.baidu?.secret_key || "";
+  renderGatewayFields();
   $("prompt-light").value = SETTINGS.prompts?.light || "";
   $("prompt-fine").value = SETTINGS.prompts?.fine || "";
 }
 window.saveProviders = async () => {
-  const tiers={};
-  for(const quality of ['light','fine']){
-    const get=suffix=>$('wc-'+quality+'-'+suffix).value.trim();
-    tiers[quality]={base_url:get('base'),api_key:get('key'),endpoint:get('endpoint'),model:get('model'),
-      timeout:Number(get('timeout')),price_cny:Number(get('price'))};
+  stashGatewayForm();const preferredId=PROVIDER_DRAFT.active,providers={...PROVIDER_DRAFT.deleted};
+  for(const id of PROVIDER_DRAFT.chain){
+    const conf=PROVIDER_DRAFT.providers[id],name=conf.name.trim();
+    if(!name||name.length>40)throw new Error('中转网关名称须为 1–40 字');
+    const tiers={};
+    for(const quality of ['light','fine']){
+      const t=conf.tiers[quality],timeout=Number(t.timeout),price_cny=Number(t.price_cny);
+      if(String(t.timeout).trim()===''||!Number.isInteger(timeout)||timeout<10||timeout>600)throw new Error(name+'：网关超时须为 10–600 的整数');
+      if(String(t.price_cny).trim()===''||!Number.isFinite(price_cny)||price_cny<0||price_cny>1000)throw new Error(name+'：参考成本须为 0–1000 的数值');
+      if(!['sync','async'].includes(t.request_mode))throw new Error(name+'：请选择正确请求方式');
+      tiers[quality]={enabled:t.enabled!==false,base_url:String(t.base_url).trim(),api_key:String(t.api_key).trim(),endpoint:String(t.endpoint).trim(),async_endpoint:String(t.async_endpoint).trim(),request_mode:t.request_mode,model:String(t.model).trim(),timeout,price_cny};
+    }
+    providers[id]={name,enabled:conf.enabled,tiers};
   }
-  const providers={};
-  for(const name of Object.keys(PROVIDER_DRAFT.providers))providers[name]={enabled:PROVIDER_DRAFT.providers[name].enabled};
-  providers.worldcodes.tiers=tiers;
-  providers.fal.api_key=$('fal-key').value.trim();
-  providers.baidu.api_key=$('bd-key').value.trim();providers.baidu.secret_key=$('bd-sk').value.trim();
   return saveSettingsPatch({chain:[...PROVIDER_DRAFT.chain],providers,
     prompts:{light:$('prompt-light').value,fine:$('prompt-fine').value},
     text_generation:{enabled:$('tg-enabled').checked,model:$('tg-model').value.trim(),
       base_url:$('tg-base').value.trim(),api_key:$('tg-key').value.trim(),timeout:Number($('tg-timeout').value),price_cny:Number($('tg-cost').value),
-      endpoint:$('tg-endpoint').value.trim(),price:Number($('tg-price').value)}},()=>{renderProviderForm();renderChain();});
+      endpoint:$('tg-endpoint').value.trim(),price:Number($('tg-price').value)}},()=>{renderProviderForm(preferredId);renderChain();});
 };
 
 /* ---------- 通用设置 ---------- */
@@ -982,7 +1064,7 @@ function renderConf() {
   updateProcessingHint();
 }
 function updateProcessingHint(){
-  $('processing-mode-summary').textContent='当前固定使用云端异步生成 · '+(SETTINGS.moderation?.enabled?'微信链接审核优先，大图与服务故障转腾讯云自动审核':'内容审核关闭')+' · 原图与成品保存 30 天；主动删除立即清理。';
+  $('processing-mode-summary').textContent='按所选中转网关调用方式使用云端异步或后台 OpenAI 兼容处理 · '+(SETTINGS.moderation?.enabled?'微信链接审核优先，大图与服务故障转腾讯云自动审核':'内容审核关闭')+' · 保留图片归一化、排版与 COS 成品保存；原图与成品保存 30 天，主动删除立即清理。';
 }
 window.saveConf = async () => saveSettingsPatch({
       prices: { light: parseInt($("price-light").value, 10) || 0,
@@ -1430,7 +1512,7 @@ function openTplModal(id) {
         <div class="field"><label>历史价格<small>仅保留；实际与通用设置的两档价格同步</small></label><input type="number" id="m-tpl-price" disabled value="${t ? t.price : 0}"></div>
         <div class="field"><label>历史输出长边<small>不再强制放大，保留模型原生输出</small></label><input type="number" id="m-tpl-outsize" disabled value="${t ? t.output_size : 0}"></div>
         <div class="field"><label>历史 size 参数<small>不再覆盖所选档位</small></label><input type="text" id="m-tpl-gsize" disabled value="${esc(t?.gateway_size || "")}"></div>
-        <div class="field"><label>历史模型覆盖<small>实际使用供应商设置的轻量/精细模型</small></label><input type="text" id="m-tpl-model" disabled value="${esc(t?.model_override || "")}"></div>
+        <div class="field"><label>历史模型覆盖<small>实际使用中转网关设置的轻量/精细模型</small></label><input type="text" id="m-tpl-model" disabled value="${esc(t?.model_override || "")}"></div>
       </div>
 
       <div class="modal-section">文字排版
@@ -1594,8 +1676,8 @@ window.importTpls = async () => {
 
 /* ---------- 任务记录 ---------- */
 function jobPhaseText(j){
-  const labels={queued:'排队',prepare:'原图处理',submit:'提交供应商',submitting:'提交供应商',
-    generating:'AI 生成',unknown:'确认供应商受理状态',import:'成品导入 COS',store_cos:'成品导入 COS',
+  const labels={queued:'排队',prepare:'原图处理',submit:'提交中转网关',submitting:'提交中转网关',
+    generating:'AI 生成',unknown:'确认中转网关受理状态',import:'成品导入 COS',store_cos:'成品导入 COS',
     finalize:'成品处理',done:'完成',audit_input:'原图审核',audit_output:'成品审核'};
   let phase=j.status==='failed'?(j.failed_phase||j.failed_stage):(j.cloud_phase||j.stage);
   if(phase==='wait_audit')phase=j.audit_stage==='output'?'audit_output':'audit_input';
@@ -1627,7 +1709,7 @@ async function loadJobs() {
   try {
     const data = await api("/jobs?offset=" + JOBS_OFFSET + "&limit=50");
     const t = $("jobs-table");
-    t.innerHTML = tableColumns([120,140,70,170,115,85,155,230,85,270]) + "<thead><tr><th>时间</th><th>ID</th><th>档位</th><th>模板</th><th>供应商</th>" +
+    t.innerHTML = tableColumns([120,140,70,170,115,85,155,230,85,270]) + "<thead><tr><th>时间</th><th>ID</th><th>档位</th><th>模板</th><th>中转网关</th>" +
                   "<th>状态</th><th>当前／失败阶段</th><th>阶段耗时</th><th title='≈ 表示提交时网关参考价估算；— 表示历史成本未记录。'>成本</th><th>错误</th></tr></thead><tbody></tbody>";
     const tbody = t.tBodies[0];
     data.items.forEach((j) => {
@@ -1639,7 +1721,7 @@ async function loadJobs() {
       tr.innerHTML =
         `<td>${fmtTime(j.created_at)}</td><td><code>${esc(j.id)}</code></td>` +
         `<td>${esc(j.quality)}</td><td>${textCell(j.template_name || "—")}</td>` +
-        `<td>${esc(j.provider || (j.vendor_task_id?'worldcodes':'—'))}</td><td>${badge}</td>` +
+        `<td>${esc(j.provider_name || gatewayName(j.provider || (j.vendor_task_id?'worldcodes':'—')))}</td><td>${badge}</td>` +
         `<td>${textCell(jobPhaseText(j))}</td><td class="muted">${textCell(jobTimingText(j))}</td>` +
         `<td>${cost}</td><td class="muted">${textCell(j.error || (j.status==='processing' ? (j.import_last_error ? "等待存图，正在重试：" + j.import_last_error : j.last_phase_error || "") : ""))}</td>`;
       tbody.appendChild(tr);

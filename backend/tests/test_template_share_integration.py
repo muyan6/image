@@ -138,6 +138,7 @@ class TemplateShareIntegrationTests(TemplateShareTests):
         self.assertEqual(json.loads(cur.fetchone()[0])['share_reward_policy']['reward_mode'], 'first_user')
 
     def test_integration_reviewed_catalog_local_registration_and_real_success_hook(self):
+        m.settings.update({'providers':{'worldcodes':{'request_mode':'sync'}}})
         row, template = self.approve_actual()
         source = self.d / 'local-input.jpg'; source.write_bytes(self.image())
         image = self.image()

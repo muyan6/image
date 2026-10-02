@@ -5,20 +5,26 @@ import copy
 def gateway_profile(shared, quality='light'):
     if quality not in ('light','fine'):raise ValueError('生成档位无效')
     conf=copy.deepcopy(shared or {})
+    if not conf:return {}
     profiles=conf.pop('tiers',{}) or {}
     tier=profiles.get(quality,{})
     # Missing values inherit for old configurations; explicit empty credentials do not.
-    for key in ('base_url','api_key','endpoint','timeout'):
+    for key in ('base_url','api_key','endpoint','timeout','request_mode','async_endpoint'):
         if key in tier:conf[key]=tier[key]
     if 'model' in tier:conf['model_'+quality]=tier['model']
     if 'price_cny' in tier:conf['price_'+quality+'_cny']=tier['price_cny']
+    conf['enabled']=bool(conf.get('enabled',True) and tier.get('enabled',True))
+    conf['request_timeout']=conf.get('timeout',180)
+    conf.setdefault('request_mode','async')
+    conf.setdefault('async_endpoint','')
     return conf
 
 
 def tier_fields(shared, quality):
     conf=gateway_profile(shared,quality)
-    return {**{key:conf.get(key,'') for key in ('base_url','api_key','endpoint','timeout')},
-            'model':conf.get('model_'+quality,''),'price_cny':conf.get('price_'+quality+'_cny',0)}
+    return {**{key:conf.get(key,'') for key in ('base_url','api_key','endpoint','timeout','request_mode','async_endpoint')},
+            'model':conf.get('model_'+quality,''),'price_cny':conf.get('price_'+quality+'_cny',0),
+            'enabled':bool((shared.get('tiers',{}) or {}).get(quality,{}).get('enabled',True))}
 
 
 def text_gateway(settings, text=None):

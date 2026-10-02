@@ -33,6 +33,9 @@ class WorkflowTests(unittest.TestCase):
         def fixture_defaults(doc):
             doc['processing']['ci_enabled']=False
             doc['cloud_pipeline']['enabled']=False
+            # Provision an isolated compatible gateway so unrelated ownership,
+            # framing and credit tests do not depend on retired local fallback.
+            doc['providers']['worldcodes'].update(base_url='https://fixture.invalid',api_key='fixture',request_mode='sync')
         m.settings=SettingsStore(str(self.d),mutate_default=fixture_defaults);m.users=UserStore(str(self.d))
         m.jobs=m.JobStore(2592000,5000,db_path=str(self.d/'jobs.db'))
         m.cleanup=CleanupStore(str(self.d),m.UPLOAD_DIR)
@@ -234,7 +237,8 @@ class WorkflowTests(unittest.TestCase):
     def test_cos_upload_failure_is_failed_and_refunded_not_fake_success(self):
         jid=self.job(result_cos='results/fixture.jpg');m.jobs.update(jid,status='processing')
         m.users.reserve_job('sample_user',jid,3,{});m.users.confirm_job(jid,'job='+jid)
-        with patch.object(m.settings,'cos_ready',return_value=True),patch.object(m.settings,'chain',return_value=[]),\
+        provider=type('FixtureGateway',(),{'configured':True,'enhance':lambda obj,src,out,**kw:Path(out).write_bytes(self.image())})()
+        with patch.object(m.settings,'cos_ready',return_value=True),patch.object(m,'_get_client',return_value=provider),\
              patch.object(m,'cos_put',side_effect=m.CosError('fixture failure')) as put,patch.object(m,'cos_head',return_value=False),\
              patch.object(m,'_moderate_or_reject',return_value=None):
             m._run_pipeline(jid,'light','')
@@ -332,7 +336,7 @@ class WorkflowTests(unittest.TestCase):
     def test_custom_prompt_never_silently_uses_non_prompt_engine(self):
         with patch.object(m, '_moderate_or_reject', return_value=None), \
              patch.object(m, '_moderate_text_or_reject', return_value=None), \
-             patch.object(m.settings, 'provider_enabled', return_value=False):
+             patch.object(m.settings, 'gateway_candidates', return_value=[]):
             before = m.users.get_balance('sample_user')
             result = self.client.post('/api/rescue', headers=self.headers,
                 files={'image': ('photo.jpg', self.image(), 'image/jpeg')},

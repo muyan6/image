@@ -88,12 +88,26 @@ valid_png = cv2.imencode('.png', np.full((64, 96, 3), 120, dtype=np.uint8))[1].t
 case_dirs = []
 
 
+class FixtureGateway:
+    """Isolated successful OpenAI response; no real HTTP or local AI fallback."""
+    configured = True
+    last_cost_cny = .04
+    last_cost_usd = None
+    last_scale = None
+    last_notice = None
+    def enhance(self, source, target, **kwargs):
+        shutil.copyfile(source, target)
+
+
+m._get_client = lambda *args, **kwargs: FixtureGateway()
+
+
 def reset(name):
     d = sandbox / name
     d.mkdir()
     case_dirs.append(d)
-    # Archived local-pipeline smoke fixtures are explicit; production defaults
-    # now use only the cloud route, covered by cloud/platform suites.
+    # The offline smoke response comes from an explicit mock gateway; retired
+    # local generation is not a production fallback or a test precondition.
     m.settings = SettingsStore(str(d),mutate_default=lambda doc:doc['cloud_pipeline'].update(enabled=False))
     m.users = UserStore(str(d))
     m.jobs = m.JobStore(2592000, 5000, db_path=str(d / 'jobs.db'))
@@ -104,7 +118,9 @@ def reset(name):
     m.users.set_balance('sample_inviter', 90)
     m._uploads.clear()
     m.cleanup = CleanupStore(str(d), m.UPLOAD_DIR)
-    m.settings.update({'normalize_long_side': 96, 'chain': ['local'],
+    m.settings.update({'normalize_long_side': 96, 'chain': ['worldcodes'],
+                       'providers': {'worldcodes': {'enabled':True,'request_mode':'sync',
+                           'base_url':'https://fixture.invalid','api_key':'fixture-gateway'}},
                        'prices': {'light': 1, 'fine': 3},
                        'rewards': {'invite': 30}})
     return d
@@ -146,7 +162,7 @@ def smoke():
     return r.status_code == 200 and job['status'] == 'succeeded' and image is not None, {'http': r.status_code, 'status': job['status'], 'balance': m.users.get_balance('sample_user'), 'shape': list(image.shape) if image is not None else None}
 
 
-case('local_pipeline_smoke', smoke)
+case('configured_gateway_pipeline_smoke', smoke)
 
 
 def job_owner():
@@ -508,7 +524,7 @@ def delete_running():
         m._run_pipeline(r['job_id'],'fine','clear')
     job=m.jobs.get(r['job_id'])
     exists=(Path(m.UPLOAD_DIR)/job['result_file']).exists()
-    return job['status']=='failed' and not exists and m.users.get_balance('sample_user')==90, {'status':job['status'],'result_exists':exists,'balance':m.users.get_balance('sample_user')}
+    return job['status']=='failed' and not exists and job.get('cancel_without_refund') and bool(job.get('submitted_at')) and m.users.get_balance('sample_user')==87, {'status':job['status'],'result_exists':exists,'balance':m.users.get_balance('sample_user'),'cancel_after_submit':bool(job.get('cancel_without_refund'))}
 
 
 case('running_worker_cannot_resurrect_deleted_job',delete_running)

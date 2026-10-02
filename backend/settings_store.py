@@ -23,19 +23,16 @@ import time
 import uuid
 from urllib.parse import urlsplit
 from gateway_profiles import gateway_profile, materialize_text_gateway
+from gateway_registry import (GATEWAY_ID, RETIRED_PROVIDERS, gateway_defaults, validate_registry, profile_ready)
 from credit_packages import default_commerce, validate_commerce
 from template_share_rewards import DEFAULT_TEMPLATE_SHARING, validate_policy as validate_template_sharing
 from typing import Any, Callable, Dict, List, Optional
 
 log = logging.getLogger("rescue.settings")
 
-PROVIDER_IDS = ("worldcodes", "fal", "baidu", "local")
-SECRET_FIELDS = {
-    "worldcodes": ("api_key",),
-    "fal": ("api_key",),
-    "baidu": ("api_key", "secret_key"),
-    "local": (),
-}
+PROVIDER_IDS = ('worldcodes',)  # Legacy identity; the live registry is dynamic.
+SECRET_FIELDS = {'worldcodes': ('api_key',)}
+
 
 DEFAULT_LIGHT_PROMPT = (
     "对这张照片做克制、自然的优化：只修复明显的缺陷（模糊、噪点、曝光不准、偏色），"
@@ -55,10 +52,12 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "maintenance": {"enabled": False, "message": "服务维护中，稍后再来喵。"},
     "providers": {
         "worldcodes": {
+            "name": "主网关",
             "enabled": True,
             "base_url": "https://worldcodes.online",
             "api_key": "",
             "endpoint": "/v1/images/edits",
+            "request_mode": "async", "async_endpoint": "",
             "model_light": "gpt-image-2.5",
             "model_fine": "gemini-3.1-flash-image-preview",
             "price_light_cny": 0.04,
@@ -66,11 +65,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
             "timeout": 180,
             "tiers": {"light": {}, "fine": {}},
         },
-        "fal": {"enabled": True, "api_key": ""},
-        "baidu": {"enabled": True, "api_key": "", "secret_key": ""},
-        "local": {"enabled": True},
     },
-    "chain": ["worldcodes", "fal", "baidu", "local"],
+    "chain": ["worldcodes"],
+    "gateway_registry_revision": 1,
     "prompts": {"light": DEFAULT_LIGHT_PROMPT, "fine": DEFAULT_FINE_PROMPT},
     "prices": {"light": 40, "fine": 40},
     "rewards": {"invite": 40, "checkin": 10, "checkin_seventh_bonus": 30,
@@ -136,73 +133,32 @@ def _rebase_defaults(candidate: Dict[str, Any]) -> None:
     """patch 里 value 为 None 会删掉整段配置（如 providers.baidu），
     这里在校验前把缺的关键节点从默认值补回来，保证服务永远可跑。"""
     for key in _DICT_SECTIONS:
+        if key == 'providers':continue
         default_val = copy.deepcopy(DEFAULT_SETTINGS.get(key, {}))
         current = candidate.get(key)
         if not isinstance(current, dict):
             candidate[key] = default_val
         else:
             candidate[key] = _deep_merge(default_val, current)
-    if not (isinstance(candidate.get("chain"), list) and candidate["chain"]):
-        candidate["chain"] = list(DEFAULT_SETTINGS["chain"])
+    _normalize_gateway_defaults(candidate)
     if not (isinstance(candidate.get("styles"), list) and candidate["styles"]):
         candidate["styles"] = copy.deepcopy(DEFAULT_SETTINGS["styles"])
+
+
+def _normalize_gateway_defaults(candidate):
+    providers = candidate.get('providers')
+    if isinstance(providers,dict):
+        for gateway_id, conf in list(providers.items()):
+            if not isinstance(conf,dict):continue
+            defaults = DEFAULT_SETTINGS['providers']['worldcodes'] if gateway_id == 'worldcodes' else gateway_defaults(gateway_id)
+            providers[gateway_id] = _deep_merge(defaults,conf)
 
 
 def _validate(doc: Dict[str, Any]) -> None:
     """整档校验,不合法直接抛 ValueError,调用方放弃本次写入。"""
     validate_commerce(doc.get('commerce'))
     validate_template_sharing(doc.get('template_sharing'))
-    chain = doc.get("chain")
-    if not isinstance(chain, list) or not chain:
-        raise ValueError("chain 不能为空")
-    seen = set()
-    for name in chain:
-        if name not in PROVIDER_IDS:
-            raise ValueError("chain 里有未知供应商: %r" % name)
-        if name in seen:
-            raise ValueError("chain 里 %s 重复" % name)
-        seen.add(name)
-
-    providers = doc.get("providers")
-    if not isinstance(providers, dict):
-        raise ValueError("providers 必须是对象")
-    wc = providers.get("worldcodes", {})
-    base_url = str(wc.get("base_url", "")).strip()
-    if base_url and not re.match(r"^https?://[^\s]+$", base_url):
-        raise ValueError("worldcodes.base_url 必须是 http(s):// 开头的完整地址")
-    endpoint = str(wc.get("endpoint", "")).strip()
-    if endpoint and not endpoint.startswith("/"):
-        raise ValueError("worldcodes.endpoint 必须以 / 开头")
-    for field in ("price_light_cny", "price_fine_cny"):
-        value = wc.get(field, 0)
-        if not isinstance(value, (int, float)) or value < 0 or value > 1000:
-            raise ValueError("worldcodes.%s 必须是 0~1000 的数字" % field)
-    timeout = wc.get("timeout", 180)
-    if not isinstance(timeout, int) or not 10 <= timeout <= 600:
-        raise ValueError("worldcodes.timeout 必须是 10~600 的整数(秒)")
-
-    tiers=wc.get('tiers',{})
-    if not isinstance(tiers,dict) or any(k not in ('light','fine') for k in tiers):
-        raise ValueError('worldcodes.tiers 只支持轻量和精细两个配置')
-    for quality,tier in tiers.items():
-        if not isinstance(tier,dict):raise ValueError('档位配置必须是对象')
-        for field in ('base_url','api_key','endpoint','model'):
-            if field in tier and not isinstance(tier[field],str):raise ValueError('档位 '+field+' 必须是字符串')
-        url=tier.get('base_url','')
-        if url:
-            try:
-                parsed=urlsplit(url);port=parsed.port
-                if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or any(ch.isspace() for ch in url):raise ValueError()
-            except ValueError:raise ValueError('档位 Base URL 必须是有效的 http(s) 地址，不能包含密钥或查询参数')
-        endpoint=tier.get('endpoint','')
-        if endpoint and (not endpoint.startswith('/') or endpoint.startswith('//') or '?' in endpoint or '#' in endpoint):
-            raise ValueError('档位接口路径必须以单个 / 开头，不含查询参数')
-        if 'timeout' in tier and (type(tier['timeout']) is not int or not 10<=tier['timeout']<=600):
-            raise ValueError('档位超时必须是 10~600 秒')
-        if 'price_cny' in tier and (type(tier['price_cny']) not in (int,float) or not 0<=tier['price_cny']<=1000):
-            raise ValueError('档位供应商单价必须是 0~1000')
-        if len(tier.get('model',''))>200 or len(tier.get('base_url',''))>500 or len(endpoint)>200:
-            raise ValueError('档位配置字段过长')
+    validate_registry(doc.get('providers'),doc.get('chain'))
 
     prices = doc.get("prices", {})
     payment=doc.get('payment',{})
@@ -390,8 +346,9 @@ class SettingsStore:
     # ------------------------------------------------------------------ #
     def _load_or_init(self, defaults: Dict[str, Any]) -> None:
         try:
-            with open(self._path, "r", encoding="utf-8") as fh:
-                loaded = json.load(fh)
+            with open(self._path, "rb") as fh:
+                original = fh.read()
+            loaded = json.loads(original.decode('utf-8'))
             if not isinstance(loaded, dict):
                 raise ValueError("根节点不是对象")
         except FileNotFoundError:
@@ -408,24 +365,53 @@ class SettingsStore:
                 log.error("设置文件损坏(%s),已备份到 %s 并回退默认值", exc, backup)
             except OSError:
                 log.error("设置文件损坏(%s),备份失败,直接回退默认值", exc)
+            self._save_locked(defaults)
             self._data = copy.deepcopy(defaults)
-            self._save_locked(self._data)
             return
         # 深合并:文件里缺的新字段用默认补齐,未知字段保留
-        self._data = _deep_merge(defaults, loaded)
-        validate_commerce(self._data['commerce'])
-        validate_template_sharing(self._data['template_sharing'])
-        if materialize_text_gateway(self._data,loaded.get('text_generation',{})):
-            self._save_locked(self._data)
+        candidate = _deep_merge(defaults, loaded)
+        if isinstance(loaded.get('providers'),dict):
+            candidate['providers'] = {}
+            for gateway_id,conf in loaded['providers'].items():
+                if isinstance(conf,dict):
+                    provider_defaults = defaults['providers']['worldcodes'] if gateway_id == 'worldcodes' else (
+                        gateway_defaults(gateway_id) if isinstance(gateway_id,str) and GATEWAY_ID.fullmatch(gateway_id) else {})
+                    candidate['providers'][gateway_id] = _deep_merge(provider_defaults,conf)
+                else:candidate['providers'][gateway_id] = copy.deepcopy(conf)
+        validate_commerce(candidate['commerce'])
+        validate_template_sharing(candidate['template_sharing'])
+        # Materialize independent text credentials from the old worldcodes
+        # snapshot BEFORE deleting retired runtime providers or changing order.
+        changed = materialize_text_gateway(candidate,loaded.get('text_generation',{}))
         if not loaded.get('cloud_mode_revision'):
-            self._data['cloud_pipeline'].update(enabled=True,audit_mode='wechat_auto')
-            self._data['cloud_mode_revision']=1
-            self._save_locked(self._data)
+            candidate['cloud_pipeline'].update(enabled=True,audit_mode='wechat_auto')
+            candidate['cloud_mode_revision']=1;changed=True
         if int(loaded.get("pricing_revision") or 0) < 2:
             # 一次性将旧站 1/3 光子档位统一切到 40，保留其他运行设置。
-            self._data["prices"] = {"light": 40, "fine": 40}
-            self._data["pricing_revision"] = 2
-            self._save_locked(self._data)
+            candidate["prices"] = {"light": 40, "fine": 40}
+            candidate["pricing_revision"] = 2;changed=True
+        legacy = loaded.get('gateway_registry_revision') != 1
+        if legacy:
+            providers = candidate.get('providers',{})
+            candidate['providers'] = {key:value for key,value in providers.items() if key not in RETIRED_PROVIDERS}
+            if not candidate['providers']:candidate['providers']={'worldcodes':gateway_defaults('worldcodes')}
+            chain = loaded.get('chain',[])
+            chain = chain if isinstance(chain,list) else []
+            ordered = list(dict.fromkeys(key for key in chain if isinstance(key,str) and key in candidate['providers']))
+            candidate['chain'] = ordered + [key for key in candidate['providers'] if key not in ordered]
+            candidate['gateway_registry_revision']=1;changed=True
+        _normalize_gateway_defaults(candidate)
+        validate_registry(candidate.get('providers'),candidate.get('chain'))
+        if changed:
+            if legacy:
+                # Keep exact prior bytes locally, including retired credentials.
+                # Failure to create this backup stops the migration before writes.
+                backup = self._path + '.gateway-registry-backup-' + str(time.time_ns())
+                with open(backup,'xb') as fh:fh.write(original)
+                try:os.chmod(backup,0o600)
+                except OSError:pass
+            self._save_locked(candidate)
+        self._data = candidate
         log.info("设置已加载: %s", self._path)
 
     def _save_locked(self, doc: Dict[str, Any]) -> None:
@@ -507,11 +493,29 @@ class SettingsStore:
             return copy.deepcopy(self._data["providers"].get(name, {}))
 
     def provider_enabled(self, name: str) -> bool:
+        if name in RETIRED_PROVIDERS:return False
         conf = self.provider(name)
-        return bool(conf.get("enabled", name == "local"))
+        return bool(conf.get("enabled",False))
 
-    def gateway_for(self,quality: str='light') -> Dict[str,Any]:
-        return gateway_profile(self.provider('worldcodes'),quality)
+    def _gateway_profile_unlocked(self, quality, gateway_id):
+        source = self._data['providers'].get(gateway_id)
+        if not source:return {}
+        conf = gateway_profile(source,quality)
+        conf.update(gateway_id=gateway_id,gateway_name=source['name'])
+        return conf
+
+    def gateway_candidates(self,quality: str='light') -> List[Dict[str,Any]]:
+        if quality not in ('light','fine'):raise ValueError('生成档位无效')
+        with self._lock:
+            return [conf for gateway_id in self._data['chain']
+                    if profile_ready(conf:=self._gateway_profile_unlocked(quality,gateway_id),quality)]
+
+    def gateway_for(self,quality: str='light',gateway_id=None) -> Dict[str,Any]:
+        if quality not in ('light','fine'):raise ValueError('生成档位无效')
+        with self._lock:
+            if gateway_id is not None:return self._gateway_profile_unlocked(quality,gateway_id)
+            candidates=self.gateway_candidates(quality)
+            return candidates[0] if candidates else self._gateway_profile_unlocked(quality,self._data['chain'][0])
 
     def prompt_for(self, quality: str) -> str:
         prompts = self._section("prompts")

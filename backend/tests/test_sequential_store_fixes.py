@@ -20,7 +20,7 @@ OUTPUT.mkdir(parents=True, exist_ok=True)
 fixture = tempfile.TemporaryDirectory(prefix='store_source_', dir=OUTPUT)
 SOURCE = Path(fixture.name) / 'backend'
 SOURCE.mkdir()
-for name in ('settings_store.py', 'templates_store.py', 'gateway_profiles.py', 'credit_packages.py',
+for name in ('settings_store.py', 'templates_store.py', 'gateway_profiles.py', 'gateway_registry.py', 'credit_packages.py',
              'template_share_rewards.py', 'account_links.py'):
     dependency = ROOT / 'backend' / name
     # Reward policy validation is now a real settings dependency. Historical

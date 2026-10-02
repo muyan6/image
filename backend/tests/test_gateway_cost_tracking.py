@@ -38,7 +38,7 @@ class CostTrackingTests(CloudTests):
         job=m.jobs.get(jid)
         self.assertEqual(job.get('cost_cny'),amount)
         self.assertIs(job.get('cost_estimated'),True)
-        self.assertEqual(job['provider'],'worldcodes')
+        self.assertEqual(job['provider'],'text_generation' if job.get('input_mode')=='text' else 'worldcodes')
 
     def test_photo_and_template_snapshot_selected_tier_cost_not_photon_price(self):
         m.settings.update({'free_mode':True})
@@ -160,7 +160,7 @@ class CostTrackingTests(CloudTests):
 
     def local_photo(self, invalid=False):
         from types import SimpleNamespace
-        m.settings.update({'cloud_pipeline':{'enabled':False},'chain':['worldcodes']})
+        m.settings.update({'cloud_pipeline':{'enabled':False},'chain':['worldcodes'],'providers':{'worldcodes':{'request_mode':'sync'}}})
         source=self.d/'input.jpg';source.write_bytes(self.image())
         client=SimpleNamespace(configured=True,last_cost_cny=.07,last_cost_usd=None,last_scale=None,
             enhance=lambda src,dst,**kwargs:Path(dst).write_bytes(self.image()))

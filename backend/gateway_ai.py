@@ -105,7 +105,8 @@ class OpenAIImagesEnhance:
                 prompt: Optional[str] = None,
                 size: Optional[str] = None,
                 model: Optional[str] = None,
-                image_url: Optional[str] = None) -> str:
+                image_url: Optional[str] = None,
+                before_submit=None) -> str:
         """把 input_path 的图交给网关模型处理,结果写到 output_path。
 
         prompt 由调用方(main.py)从运行时设置里取,后台改完立即生效;
@@ -129,6 +130,16 @@ class OpenAIImagesEnhance:
         text = (prompt or "").strip() or (
             "修复并增强这张照片，提升清晰度与质感，保持画面内容与构图不变。")
         image_bytes = None
+        # Per-call closure, never retained on a cached client. Each compatibility
+        # POST must release only a known rejection and recheck the job boundary.
+        def post_image(*args, **kwargs):
+            if before_submit is not None:before_submit()
+            response = self._session.post(*args, **kwargs)
+            if before_submit is not None and response.status_code in (400,401,403,404,405,415,422,429):
+                # Release on the observed refusal, before compression/encoding
+                # for a compatibility retry can fail or race a user deletion.
+                before_submit(response.status_code, rejection_only=True)
+            return response
         def upload_bytes():
             nonlocal image_bytes
             if image_bytes is None:image_bytes = self._maybe_compress(input_path)
@@ -137,18 +148,18 @@ class OpenAIImagesEnhance:
         try:
             if image_url:
                 try:
-                    payload = self._request_image_by_url(model, text, image_url, size=use_size)
+                    payload = self._request_image_by_url(model, text, image_url, size=use_size, _post=post_image)
                 except GatewayError as url_error:
                     if url_error.uncertain or url_error.status not in (400, 404, 415, 422):raise
                     self.last_notice = "网关不支持 URL 输入，已切换文件上传"
-                    payload = self._request_image(model, text, upload_bytes(), size=use_size)
-            else:payload = self._request_image(model, text, upload_bytes(), size=use_size)
+                    payload = self._request_image(model, text, upload_bytes(), size=use_size, _post=post_image)
+            else:payload = self._request_image(model, text, upload_bytes(), size=use_size, _post=post_image)
         except GatewayError as exc:
             # Only an explicit validation rejection is eligible for compatibility fallback.
             # A timeout, 5xx or failed result download must never create another paid image.
             if not exc.uncertain and use_size and exc.status in (400, 404, 415, 422):
                 self.last_notice = "网关不支持 size=%s，已按默认尺寸生成" % use_size
-                payload = self._request_image(model, text, upload_bytes(), size=None)
+                payload = self._request_image(model, text, upload_bytes(), size=None, _post=post_image)
             else:raise
 
         self.last_model = model
@@ -198,7 +209,7 @@ class OpenAIImagesEnhance:
                 code="IMAGE_TOO_LARGE")
 
     def _request_image_by_url(self, model: str, prompt: str, image_url: str,
-                              size: Optional[str] = None) -> bytes:
+                              size: Optional[str] = None, _post=None) -> bytes:
         """URL 直连:网关服务端自己拉取图片(如 COS 签名直链)。
 
         本服务器不出公网流量。网关侧格式为 images[].image_url;
@@ -210,7 +221,7 @@ class OpenAIImagesEnhance:
         if size:
             body["size"] = size
         try:
-            resp = self._session.post(url,
+            resp = (_post or self._session.post)(url,
                 headers={"Authorization": "Bearer %s" % self.api_key,
                          "Content-Type": "application/json"},
                 json=body, timeout=(15, self.timeout), allow_redirects=False)
@@ -224,7 +235,7 @@ class OpenAIImagesEnhance:
         return self._extract_image(resp)
 
     def _request_image(self, model: str, prompt: str, image_bytes: bytes,
-                       size: Optional[str] = None) -> bytes:
+                       size: Optional[str] = None, _post=None) -> bytes:
         """先 multipart,404/415/422 时退 JSON+dataURI。返回图片原始字节。"""
         url = self.base_url + self.endpoint
         headers = {"Authorization": "Bearer %s" % self.api_key}
@@ -232,7 +243,7 @@ class OpenAIImagesEnhance:
         extra = {"size": size} if size else {}
 
         try:
-            resp = self._session.post(
+            resp = (_post or self._session.post)(
                 url, headers=headers,
                 files={"image": ("image.jpg", image_bytes, mime)},
                 data={"model": model, "prompt": prompt, "n": "1", **extra},
@@ -246,14 +257,14 @@ class OpenAIImagesEnhance:
 
         if resp.status_code in (404, 405, 415, 422):
             return self._request_image_json(
-                url, headers, model, prompt, image_bytes, mime, size)
+                url, headers, model, prompt, image_bytes, mime, size, _post=_post)
         self._raise_for_status(resp)
         return self._extract_image(resp)
 
     def _request_image_json(self, url: str, headers: Dict[str, str],
                             model: str, prompt: str,
                             image_bytes: bytes, mime: str,
-                            size: Optional[str] = None) -> bytes:
+                            size: Optional[str] = None, _post=None) -> bytes:
         data_uri = "data:%s;base64,%s" % (
             mime, base64.b64encode(image_bytes).decode("ascii"))
         body: Dict[str, Any] = {"model": model, "prompt": prompt, "n": 1,
@@ -261,7 +272,7 @@ class OpenAIImagesEnhance:
         if size:
             body["size"] = size
         try:
-            resp = self._session.post(
+            resp = (_post or self._session.post)(
                 url, headers={**headers, "Content-Type": "application/json"},
                 json=body,
                 timeout=(15, self.timeout), allow_redirects=False)

@@ -12,7 +12,10 @@ def import_result(pipeline,job):
     m=pipeline.runtime();jid=job['id'];key=job['vendor_result_key'];now=time.time()
     started=job.get('cloud_import_started_at') or now
     deadline=min(job['deadline'],started+WAIT_SECONDS)
-    m.jobs.update(jid,cloud_import_started_at=started,provider='worldcodes',stage='store_cos')
+    packet=job.get('cloud_request') or {}
+    provider=packet.get('gateway_id') or job.get('provider') or ('text_generation' if job.get('input_mode')=='text' else 'worldcodes')
+    name=packet.get('gateway_name') or job.get('provider_name') or provider
+    m.jobs.update(jid,cloud_import_started_at=started,provider=provider,provider_name=name,stage='store_cos')
     m.cleanup.schedule('cos',key,job['deadline']+3600)
     attempts=job.get('import_trigger_attempts',0)
     try:

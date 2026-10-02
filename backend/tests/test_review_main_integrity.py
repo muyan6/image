@@ -53,7 +53,8 @@ class MainIntegrityTests(WorkflowTests):
                 raise RuntimeError('fixture post-delivery retention error')
             return schedule(kind, key, due)
 
-        with patch.object(m.cleanup, 'schedule', side_effect=transient_failure):
+        provider=SimpleNamespace(configured=True,enhance=lambda src,dst,**kw:Path(dst).write_bytes(self.image()))
+        with patch.object(m.cleanup, 'schedule', side_effect=transient_failure),patch.object(m,'_get_client',return_value=provider):
             m._run_pipeline(jid, 'light', 'clear')
         job = m.jobs.get(jid)
         self.assertEqual(job['status'], 'succeeded')
@@ -62,8 +63,10 @@ class MainIntegrityTests(WorkflowTests):
         self.assertIsNotNone(m._job_media_url(job, 'result'))
 
     def test_uncertain_paid_request_stops_provider_fallback(self):
-        m.settings.update({'chain': ['worldcodes', 'fal', 'local'],
-                           'providers': {'worldcodes': {'enabled': True}, 'fal': {'enabled': True}}})
+        fallback='gw_'+'b'*32
+        m.settings.update({'chain': ['worldcodes',fallback],
+                           'providers': {'worldcodes': {'enabled': True},fallback:{'name':'备用夹具','enabled':True,
+                               'base_url':'https://fallback.invalid','api_key':'fallback-fixture','model_light':'fixture','model_fine':'fixture'}}})
         jid = self.register()
         calls = []
 
@@ -99,8 +102,10 @@ class MainIntegrityTests(WorkflowTests):
         self.assertEqual(stopped.exception.code, 1)
 
     def test_invalid_paid_result_does_not_start_another_provider(self):
-        m.settings.update({'chain': ['worldcodes', 'fal', 'local'],
-                           'providers': {'worldcodes': {'enabled': True}, 'fal': {'enabled': True}}})
+        fallback='gw_'+'b'*32
+        m.settings.update({'chain': ['worldcodes',fallback],
+                           'providers': {'worldcodes': {'enabled': True},fallback:{'name':'备用夹具','enabled':True,
+                               'base_url':'https://fallback.invalid','api_key':'fallback-fixture','model_light':'fixture','model_fine':'fixture'}}})
         jid = self.register()
         calls = []
 

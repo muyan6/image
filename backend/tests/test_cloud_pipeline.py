@@ -13,7 +13,7 @@ class CloudTests(WorkflowTests):
         super().setUp()
         m.settings.update({'cloud_pipeline':{'enabled':True,'audit_mode':'ci_sync'},'quota':{'daily':1000,'per_minute':1000},
                            'tencent':{'secret_id':'fixture','secret_key':'fixture','cos_bucket':'fixture-123456','cos_region':'ap-guangzhou'},
-                           'providers':{'worldcodes':{'enabled':True,'base_url':'https://fixture.invalid','api_key':'fixture'}}})
+                           'providers':{'worldcodes':{'enabled':True,'base_url':'https://fixture.invalid','api_key':'fixture','request_mode':'async'}}})
         self.cloud=m.cloud;self.cloud.busy.clear()
         self.ready=patch.object(self.cloud,'ready',return_value=True);self.ready.start()
         self.source={'key':'incoming/owned.jpg','ext':'.jpg','openid':'sample_user','created_at':time.time()}
@@ -151,6 +151,7 @@ class CloudTests(WorkflowTests):
         self.assertIn('results/',job['result_cos'])
 
     def test_cloud_text_job_uses_same_queue_and_has_no_original(self):
+        m.settings.update({'text_generation':{'enabled':True,'model':'fixture','base_url':'https://text.invalid','api_key':'text-fixture'}})
         r=self.cloud.admit('sample_user',text={'prompt':'水彩森林','model':'fixture','endpoint':'/v1/images/generations','size':'1024x1024','price':40})
         jid=r['job_id'];self.step(jid,'prepare')
         with patch.object(AsyncImages,'submit',return_value='imgtask_fixture') as submit:self.step(jid,'submit')

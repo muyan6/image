@@ -67,8 +67,9 @@ class AsyncImages:
         except requests.RequestException:raise GatewayAsyncError('供应商请求结果待核对',uncertain=method=='POST')
         except (ValueError,TypeError):raise GatewayAsyncError('供应商未返回有效元数据',uncertain=method=='POST')
     def submit(self,model,prompt,image_url=None,size=None,endpoint=None):
-        path=endpoint or self.conf.get('endpoint') or '/v1/images/edits'
-        path=path.rstrip('/')+'/async'
+        path=self.conf.get('async_endpoint') or endpoint or self.conf.get('endpoint') or '/v1/images/edits'
+        if not self.conf.get('async_endpoint') and not path.rstrip('/').endswith('/async'):
+            path=path.rstrip('/')+'/async'
         body={'model':model,'prompt':prompt,'n':1}
         if image_url:body['images']=[{'image_url':image_url}]
         if size and size!='auto':body['size']=size

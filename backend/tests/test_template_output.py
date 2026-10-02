@@ -80,7 +80,7 @@ class OutputTests(WorkflowTests):
 
     def test_output_unavailable_prompt_engine_does_not_charge(self):
         single=select_template_output(self.template(),'single')
-        with patch.object(m,'_get_client',return_value=None),patch.object(m.users,'reserve_job') as reserve:
+        with patch.object(m.settings,'gateway_candidates',return_value=[]),patch.object(m.users,'reserve_job') as reserve:
             with self.assertRaises(m.HTTPException) as caught:
                 m._register_job('sample_user','fine','clear','unused.jpg','.jpg',template=single)
         self.assertEqual(caught.exception.status_code,503);reserve.assert_not_called()

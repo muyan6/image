@@ -14,7 +14,7 @@ class ProfileTests(WorkflowTests):
         super().tearDown()
 
     def config_tiers(self):
-        m.settings.update({'providers':{'worldcodes':{'enabled':True,'base_url':'https://legacy.invalid','api_key':'legacy-secret-7890',
+        m.settings.update({'providers':{'worldcodes':{'enabled':True,'request_mode':'async','base_url':'https://legacy.invalid','api_key':'legacy-secret-7890',
             'tiers':{'light':{'base_url':'https://light.invalid','api_key':'light-secret-1234','endpoint':'/v2/edits','model':'light-model','timeout':60,'price_cny':.03},
                      'fine':{'base_url':'https://fine.invalid','api_key':'fine-secret-5678','endpoint':'/custom/edits','model':'fine-model','timeout':300,'price_cny':.2}}}}})
     def test_profile_old_shared_settings_remain_compatible(self):
@@ -71,7 +71,7 @@ class ProfileTests(WorkflowTests):
             self.assertEqual(r.status_code,400,r.text);self.assertEqual(m.settings.snapshot(),before)
     def test_profile_one_page_settings_put_saves_all_sections_together(self):
         self.config_tiers()
-        p={'chain':['worldcodes','local'],'providers':{'worldcodes':{'tiers':{'fine':{'model':'new'}}}},
+        p={'chain':['worldcodes'],'providers':{'worldcodes':{'tiers':{'fine':{'model':'new'}}}},
            'prompts':{'light':'自然优化'},'text_generation':{'enabled':True,'model':'text-model','price':50}}
         self.assertEqual(self.admin.put('/admin/api/settings',json=p).status_code,200)
         self.assertEqual(m.settings.chain(),p['chain']);self.assertEqual(m.settings.prompt_for('light'),'自然优化')

@@ -113,6 +113,7 @@ class AuditTests(CloudTests):
         self.assertEqual(m.users.get_balance('sample_user'),100)
 
     def test_output_audit_waits_without_reprocessing_or_delivery(self):
+        m.settings.update({'text_generation':{'enabled':True,'model':'fixture','base_url':'https://text.invalid','api_key':'text-fixture'}})
         # Prepare without input; output still needs its own audit.
         from gateway_async import AsyncImages
         jid=self.cloud.admit('sample_user',text={'prompt':'fixture','model':'fixture','price':40})['job_id']
@@ -161,6 +162,7 @@ class AuditTests(CloudTests):
         self.assertEqual(self.cloud.audits.row(jid,'input')['state'],'waiting')
 
     def test_output_cos_reject_refunds_without_user_penalty(self):
+        m.settings.update({'text_generation':{'enabled':True,'model':'fixture','base_url':'https://text.invalid','api_key':'text-fixture'}})
         from gateway_async import AsyncImages
         jid=self.cloud.admit('sample_user',text={'prompt':'fixture','model':'fixture','price':40})['job_id']
         self.step(jid,'prepare')

@@ -44,7 +44,7 @@ test('actual_cost_and_dollar_estimates_are_distinct',()=>{
 });
 test('admin_job_table_and_daily_stats_explain_reference_cost',()=>{
  assert(html.includes('const cost = jobCostText(j)'));
- assert(html.includes('今日网关参考成本'));assert(html.includes('历史成本未记录'));
+ assert(html.includes('今日中转网关参考成本'));assert(html.includes('累计中转网关参考成本'));assert(html.includes('历史成本未记录'));
 });
 fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'community_action_cost_display_results.json'),JSON.stringify({cases:rows},null,2));
 const failed=rows.filter(x=>!x.passed).length;console.log(`COMMUNITY_COST_DISPLAY_SUMMARY total=${rows.length} passed=${rows.length-failed} failed=${failed}`);process.exitCode=failed?1:0;

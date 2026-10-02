@@ -24,18 +24,14 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile
 
 from settings_store import SettingsStore, AnnouncementStore
-from gateway_profiles import tier_fields
+from gateway_profiles import tier_fields, gateway_profile
+from gateway_registry import profile_ready
 from templates_store import covers_dir, resolve_cover, resolve_covers
 from community_store import CommunityStore, MEDIA_PREFIX
 
 # 需要打码的密钥字段: (节路径) -> 字段列表
 _MASK_SCHEMA = {
     ('text_generation',): ('api_key',),
-    ("providers", "worldcodes"): ("api_key",),
-    ("providers", "worldcodes", "tiers", "light"): ("api_key",),
-    ("providers", "worldcodes", "tiers", "fine"): ("api_key",),
-    ("providers", "fal"): ("api_key",),
-    ("providers", "baidu"): ("api_key", "secret_key"),
     ("wechat",): ("app_secret",),
     ("payment",): ("sandbox_app_key", "production_app_key"),
     ("tencent",): ("secret_id", "secret_key"),
@@ -153,12 +149,23 @@ def mask_secret(value: str) -> str:
     return "••••" + value[-4:] if len(value) > 4 else "••••"
 
 
+def _secret_schema(*docs):
+    schema = dict(_MASK_SCHEMA)
+    for doc in docs:
+        providers = doc.get('providers',{})
+        if not isinstance(providers,dict):continue
+        for gateway_id in providers:
+            schema[('providers',gateway_id)]=('api_key',)
+            for quality in ('light','fine'):
+                schema[('providers',gateway_id,'tiers',quality)]=('api_key',)
+    return schema
+
+
 def _masked_settings(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     doc = json.loads(json.dumps(snapshot))  # 深拷贝
-    wc=doc.get('providers',{}).get('worldcodes')
-    if isinstance(wc,dict):
-        wc['tiers']={q:tier_fields(snapshot['providers']['worldcodes'],q) for q in ('light','fine')}
-    for path, fields in _MASK_SCHEMA.items():
+    for gateway_id,conf in doc.get('providers',{}).items():
+        if isinstance(conf,dict):conf['tiers']={q:tier_fields(snapshot['providers'][gateway_id],q) for q in ('light','fine')}
+    for path, fields in _secret_schema(doc).items():
         node = doc
         for part in path:
             node = node.get(part) if isinstance(node, dict) else None
@@ -173,7 +180,7 @@ def _masked_settings(snapshot: Dict[str, Any]) -> Dict[str, Any]:
 def _unmask_secrets(patch: Dict[str, Any], current: Dict[str, Any]) -> Dict[str, Any]:
     """打码值回传 = 保持原值;空字符串 = 清空;其余 = 新密钥。"""
     patch = json.loads(json.dumps(patch))
-    for path, fields in _MASK_SCHEMA.items():
+    for path, fields in _secret_schema(current,patch).items():
         patch_node = patch
         cur_node = current
         for part in path:
@@ -186,8 +193,9 @@ def _unmask_secrets(patch: Dict[str, Any], current: Dict[str, Any]) -> Dict[str,
                 continue
             value = patch_node[field]
             if value is None or (isinstance(value, str) and value.startswith("••••")):
-                if len(path)==4 and path[:3]==('providers','worldcodes','tiers'):
-                    patch_node[field]=tier_fields(current['providers']['worldcodes'],path[3]).get(field,'')
+                if len(path)==4 and path[0]=='providers' and path[2]=='tiers':
+                    source=(current.get('providers',{}) or {}).get(path[1],{})
+                    patch_node[field]=tier_fields(source,path[3]).get(field,'')
                 else:patch_node[field] = (cur_node or {}).get(field, "")
     return patch
 
@@ -252,14 +260,13 @@ def make_admin_router(*, settings: SettingsStore,
     def overview(request: Request) -> Dict[str, Any]:
         _guard(request)
         snapshot = settings.snapshot()
-        configured = {
-            "worldcodes": any(bool(settings.gateway_for(q).get('api_key')) for q in ('light','fine')),
-            "fal": bool(snapshot["providers"]["fal"].get("api_key"))
-                   or bool(os.environ.get("FAL_KEY", "").strip()),
-            "baidu": bool(snapshot["providers"]["baidu"].get("api_key")
-                          and snapshot["providers"]["baidu"].get("secret_key")),
-            "local": True,
-        }
+        configured={};providers={}
+        for gateway_id in snapshot['chain']:
+            conf=snapshot['providers'][gateway_id]
+            profiles={q:gateway_profile(conf,q) for q in ('light','fine')}
+            configured[gateway_id]=any(profile_ready({**p,'enabled':True},q) for q,p in profiles.items())
+            providers[gateway_id]={'name':conf['name'],'enabled':conf['enabled'],'configured':configured[gateway_id],
+                'light_ready':profile_ready(profiles['light'],'light'),'fine_ready':profile_ready(profiles['fine'],'fine')}
         return {
             "stats": stats_fn(),
             "chain": snapshot["chain"],
@@ -286,6 +293,7 @@ def make_admin_router(*, settings: SettingsStore,
                               and snapshot.get("tencent", {}).get("secret_key")
                               and snapshot.get("tencent", {}).get("cos_bucket")),
             "configured": configured,
+            "providers": providers,
         }
 
     @router.post("/test_wechat")

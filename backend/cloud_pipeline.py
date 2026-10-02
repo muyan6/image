@@ -20,6 +20,7 @@ from gateway_profiles import text_gateway
 from image_processing import normalization_rule
 from cloud_audit import CloudAudit
 from template_share_rewards import reward_snapshot
+from gateway_runtime import gateway_snapshots, resolve_gateway, selected_gateway_packet, explicitly_rejected, text_configuration_snapshot
 
 
 class CloudPipeline:
@@ -52,11 +53,16 @@ class CloudPipeline:
         return self.runtime().jobs.pending_cloud()
 
     def ready(self,quality='light',*,text=False):
-        m = self.runtime(); conf = text_gateway(m.settings) if text else m.settings.gateway_for(quality)
-        enabled=conf.get('enabled') if text else m.settings.provider_enabled('worldcodes')
-        if not (m.settings.cos_ready() and enabled
-                and conf.get('api_key') and urlsplit(conf.get('base_url', '')).scheme == 'https'):
+        m = self.runtime()
+        candidates=gateway_snapshots(m.settings,quality,text=text)
+        if not (m.settings.cos_ready() and candidates):
             return False
+        if candidates[0].get('request_mode')=='sync':return True
+        if urlsplit(candidates[0]['base']).scheme!='https':return False
+        return self.origin_ready()
+
+    def origin_ready(self):
+        m=self.runtime()
         tc=m.settings.tencent()
         fingerprint=hashlib.sha256(repr(sorted(tc.items())).encode()).hexdigest()
         if self.ready_cache[0] == fingerprint and time.time() < self.ready_cache[1]:
@@ -107,9 +113,26 @@ class CloudPipeline:
                 text_rule(1024, 1536, template or {}, dict(text_values))
             except ValueError as exc:
                 raise HTTPException(400, detail=str(exc)) from exc
-        provider=text_gateway(m.settings) if text else m.settings.gateway_for(quality)
-        model=(text or {}).get('model') or provider.get('model_'+quality)
-        if not model:raise HTTPException(503,detail='生成模型尚未配置')
+        if text:
+            try:
+                current_text=text_configuration_snapshot(m.settings,quality=quality)
+                if text.get('connection_snapshot') is not None and text['connection_snapshot']!=current_text:
+                    raise ValueError('文字生图配置已变更，请重新创建任务')
+                # These overrides are trusted internal inputs, not TextBody
+                # fields. Freeze the actual POST while comparing the original
+                # configured model/path when a queued task reaches submission.
+                model=text.get('model') or current_text['model']
+                endpoint=text.get('endpoint') or current_text['endpoint']
+                if (not isinstance(model,str) or not model.strip()
+                        or not isinstance(endpoint,str) or not endpoint.startswith('/')
+                        or endpoint.startswith('//') or '?' in endpoint or '#' in endpoint):
+                    raise ValueError('文字生图模型或接口路径无效')
+                candidates=[{**current_text,'config_model':current_text['model'],
+                             'config_endpoint':current_text['endpoint'],'model':model,'endpoint':endpoint}]
+            except ValueError as exc:raise HTTPException(503,detail=str(exc)) from exc
+        else:candidates=gateway_snapshots(m.settings,quality)
+        if not candidates:raise HTTPException(503,detail='没有启用且配置有效的生成网关')
+        selected=candidates[0];model=selected['model']
         prompt=(text or {}).get('prompt') or str((template or {}).get('prompt') or m.settings.prompt_for(quality))
         if custom_prompt and not template:prompt+='\n用户修复需求：'+custom_prompt
         price=text['price'] if text else m._effective_price(quality,template)
@@ -119,6 +142,10 @@ class CloudPipeline:
         # Admission and queue capacity are checked together before reserving balance.
         with self.lock:
             cfg=self.config()
+            if text and text.get('connection_snapshot') is not None:
+                try:unchanged=text_configuration_snapshot(m.settings,quality=quality)==text['connection_snapshot']
+                except ValueError:unchanged=False
+                if not unchanged:raise HTTPException(503,detail='文字生图配置已变更，本次未预扣光子，请重新创建任务')
             if len(self.pending())>=cfg['max_queued']+cfg['generation_concurrency']:
                 raise HTTPException(429,detail='云端任务队列已满，请稍后重试')
             deadline = time.time() + cfg['timeout_seconds']
@@ -131,17 +158,17 @@ class CloudPipeline:
             try:balance=m.users.reserve_job(openid,jid,charged,m.settings.quota(),free,**share_kwargs)
             except m.AdmissionError as exc:raise HTTPException(exc.status,detail=str(exc)) from exc
             packet={'prompt':prompt,'model':model,'size':(text or {}).get('size',''),
-                    'endpoint':(text or {}).get('endpoint') or provider.get('endpoint') or '/v1/images/edits',
-                    'base':provider['base_url'],'key_fingerprint':key_fingerprint(provider),
                     'template':copy.deepcopy(template or {}),'text_values':dict(text_values or {}),
                     'source':dict(source or {}),'normalize_long_side':m.settings.normalize_long_side()}
             # Photon sale price and provider CNY cost are separate units. Freeze
             # the selected connection's reference price before queueing work.
-            packet['estimated_cost_cny']=provider.get('price_light_cny' if text else 'price_'+quality+'_cny',0)
+            packet['gateway_candidates']=copy.deepcopy(candidates)
+            packet=selected_gateway_packet(packet,selected,0)
             prefix=openid[:8]+'/'+jid
             try:
                 m.jobs.create(jid,openid=openid,status='processing',stage='queued',cloud_pipeline=True,
                     cloud_phase='queued',cloud_request=packet,quality=quality,style=style,aspect_ratio=aspect_ratio,
+                    provider=selected['gateway_id'],provider_name=selected['gateway_name'],
                     template_id=(template or {}).get('id',''),template_name=(template or {}).get('name','文字生图' if text else ''),
                     template_output_mode=(template or {}).get('output_mode',''),price=price,charged_amount=charged,
                     input_mode='text' if text else 'photo',recipe=recipe or (
@@ -184,7 +211,7 @@ class CloudPipeline:
         try:
             for _ in range(8):
                 job=self.runtime().jobs.get(jid)
-                if (not job or job.get('deleted_at') or job['status']!='processing'
+                if (not job or not job.get('cloud_pipeline') or job.get('deleted_at') or job['status']!='processing'
                         or time.time()<job.get('cloud_next_at',0)):
                     break
                 phase=job['cloud_phase']
@@ -254,9 +281,9 @@ class CloudPipeline:
         m.jobs.update(jid,cloud_phase='submit',stage='enhance')
 
     def submit(self,job):
-        m=self.runtime();p=job['cloud_request'];provider=text_gateway(m.settings) if job.get('input_mode')=='text' else m.settings.gateway_for(job['quality'])
-        if provider['base_url']!=p['base'] or key_fingerprint(provider)!=p['key_fingerprint']:
-            raise ValueError('供应商配置已变更，本次未提交生成，请重新创建任务')
+        m=self.runtime();p=job['cloud_request'];provider=resolve_gateway(m.settings,job['quality'],p,text=job.get('input_mode')=='text')
+        if p.get('request_mode')=='sync' and job.get('input_mode')!='text':
+            m._queue_sync_gateway_job(job['id'],p);return
         url=cos.presign(m.settings,'get',job['norm_cos'],ttl_seconds=3600) if job.get('norm_cos') else None
         size=p['size']
         if not size and p['template']:
@@ -276,12 +303,13 @@ class CloudPipeline:
             self.require_live(job['id'])
             return  # Another worker already marked this paid POST; never send twice.
         task=client.submit(p['model'],p['prompt'],url,size,p['endpoint'])
-        m.jobs.update(job['id'],vendor_task_id=task,cloud_phase='generating',stage='enhance',cloud_next_at=time.time()+self.config()['poll_interval'])
+        m.jobs.update(job['id'],vendor_task_id=task,cloud_phase='generating',stage='enhance',
+                      provider=p.get('gateway_id') or ('text_generation' if job.get('input_mode')=='text' else 'worldcodes'),
+                      provider_name=p.get('gateway_name') or ('文字生图' if job.get('input_mode')=='text' else 'worldcodes'),
+                      cloud_next_at=time.time()+self.config()['poll_interval'])
 
     def poll(self,job):
-        m=self.runtime();p=job['cloud_request'];provider=text_gateway(m.settings) if job.get('input_mode')=='text' else m.settings.gateway_for(job['quality'])
-        if provider['base_url']!=p['base'] or key_fingerprint(provider)!=p['key_fingerprint']:
-            raise ValueError('供应商配置已变更，旧任务状态待核对')
+        m=self.runtime();p=job['cloud_request'];provider=resolve_gateway(m.settings,job['quality'],p,text=job.get('input_mode')=='text',accepted=True)
         data=AsyncImages(provider).poll(job['vendor_task_id']);state=data.get('status')
         if state=='failed':
             detail=failure_diagnostic(data,provider.get('api_key',''))
@@ -293,7 +321,9 @@ class CloudPipeline:
             raise ValueError('供应商生成失败：'+reason+'；本次光子退回')
         if state not in ('completed','succeeded'):
             m.jobs.update(job['id'],cloud_next_at=time.time()+self.config()['poll_interval']);return
-        completed={'provider':'worldcodes','provider_completed_at':job.get('provider_completed_at') or time.time()}
+        completed={'provider':p.get('gateway_id') or ('text_generation' if job.get('input_mode')=='text' else 'worldcodes'),
+                   'provider_name':p.get('gateway_name') or ('文字生图' if job.get('input_mode')=='text' else 'worldcodes'),
+                   'provider_completed_at':job.get('provider_completed_at') or time.time()}
         if 'estimated_cost_cny' in p and job.get('cost_cny') is None:
             # Completion confirms generation, not delivery. Retain this clearly
             # estimated expense even if import, geometry or output audit fails.
@@ -355,7 +385,9 @@ class CloudPipeline:
         timings={**(m.jobs.get(job['id']).get('timings') or {}),'queue_ms':round((job.get('started_at',now)-job['created_at'])*1000),
                  'provider_ms':round((job.get('provider_completed_at',now)-job.get('submitted_at',now))*1000),
                  'processing_ms':round((now-job.get('started_at',now))*1000)}
-        m.jobs.update(job['id'],status='succeeded',stage='done',cloud_phase='done',provider='worldcodes',
+        m.jobs.update(job['id'],status='succeeded',stage='done',cloud_phase='done',
+                      provider=p.get('gateway_id') or ('text_generation' if job.get('input_mode')=='text' else 'worldcodes'),
+                      provider_name=p.get('gateway_name') or ('文字生图' if job.get('input_mode')=='text' else 'worldcodes'),
                       width=final['width'],height=final['height'],completed_at=now,timings=timings,processing_mode='cloud_only')
         if 'estimated_cost_cny' in p and job.get('cost_cny') is None:
             m.jobs.update(job['id'],cost_cny=p['estimated_cost_cny'],cost_estimated=True)
@@ -392,6 +424,17 @@ class CloudPipeline:
         for key in (job.get('result_cos'),job.get('norm_cos'),job.get('orig_cos'),job['cloud_request']['source'].get('key'),*(job.get('cloud_layout_keys') or [])):
             if key:m.cleanup.schedule('cos',key,time.time())
 
+    def advance_rejected(self,job,error):
+        """Never advance unknown/accepted jobs; only explicit unaccepted HTTP responses."""
+        if job.get('input_mode')=='text' or job.get('vendor_task_id') or not explicitly_rejected(error):return False
+        packet=job['cloud_request'];candidates=packet.get('gateway_candidates') or []
+        index=int(packet.get('gateway_index',0))+1
+        if index>=len(candidates):return False
+        next_packet=selected_gateway_packet(packet,candidates[index],index)
+        # A disabled/changed queued candidate fails rather than borrowing another live host.
+        resolve_gateway(self.runtime().settings,job['quality'],next_packet)
+        return self.runtime().jobs.advance_rejected_gateway(job['id'],packet.get('gateway_id','worldcodes'),next_packet,error.status)
+
     def wait_audit(self,job):
         self.audits.wait(job)
 
@@ -406,12 +449,22 @@ class CloudPipeline:
             else:getattr(self,{'prepare':'prepare','submit':'submit','generating':'poll','import':'import_result','finalize':'finalize','wait_audit':'wait_audit'}[phase])(job)
         except GatewayAsyncError as exc:
             current=m.jobs.get(jid)
+            if phase=='submit' and explicitly_rejected(exc):
+                refused=m.jobs.clear_cloud_rejection(jid,(job.get('cloud_request') or {}).get('gateway_id','worldcodes'),exc.status)
+                if refused and refused.get('deleted_at'):
+                    m.users.refund_job(refused['openid'],jid)
+                    current=refused
             if not current or current.get('deleted_at') or current.get('status')!='processing':
                 pass  # A late vendor response cannot refund or revive a cancelled job.
             elif exc.uncertain:
                 m.jobs.update(jid,cloud_phase='unknown',stage='submission_unknown',cloud_next_at=time.time()+30)
             elif job and job.get('cloud_phase')=='generating' and exc.retryable:
                 m.jobs.update(jid,cloud_next_at=time.time()+15,last_poll_error=str(exc)[:200])
+            elif phase=='submit' and explicitly_rejected(exc):
+                try:advanced=self.advance_rejected(current,exc)
+                except ValueError as changed:
+                    self.fail(current,str(changed));advanced=True
+                if not advanced:self.fail(current,str(exc))
             elif job:
                 m.jobs.update(jid,last_poll_error=str(exc)[:200],vendor_http_status=exc.status)
                 self.fail(job,str(exc))

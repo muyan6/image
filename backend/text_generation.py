@@ -7,6 +7,7 @@ from experience_api import idempotent_submit
 from gateway_ai import OpenAIImagesEnhance
 from image_processing import QueueFull
 from gateway_profiles import text_gateway
+from gateway_runtime import text_configuration_snapshot
 
 SIZES={'1:1':'1024x1024','3:2':'1536x1024','2:3':'1024x1536'}
 
@@ -33,7 +34,7 @@ def run_text_job(m,jid,conf,provider,prompt,size):
         # The queued provider mapping is a snapshot, not a current price lookup.
         # Generation has completed; a later audit/storage failure still incurred
         # this reference expense, but an ambiguous/rejected submit records none.
-        m.jobs.update(jid,provider='worldcodes',cost_cny=provider.get('price_light_cny',0),cost_estimated=True)
+        m.jobs.update(jid,provider='text_generation',provider_name='文字生图',cost_cny=provider.get('price_light_cny',0),cost_estimated=True)
         timings['provider_ms']=round((time.monotonic()-phase)*1000);phase=time.monotonic()
         m._finalize(temp,out);width,height=m._validate_output(out)
         with open(out,'rb') as f:rejected=m._moderate_or_reject(f.read(),jid,job['openid'])
@@ -48,7 +49,7 @@ def run_text_job(m,jid,conf,provider,prompt,size):
         current=m.jobs.get(jid)
         if not current or current.get('deleted_at'):raise RuntimeError('作品已删除，停止交付')
         timings.update(storage_ms=round((time.monotonic()-phase)*1000),processing_ms=round((time.monotonic()-started)*1000))
-        m.jobs.update(jid,status='succeeded',stage='done',provider='worldcodes',width=width,height=height,completed_at=time.time(),timings=timings)
+        m.jobs.update(jid,status='succeeded',stage='done',provider='text_generation',provider_name='文字生图',width=width,height=height,completed_at=time.time(),timings=timings)
         current=m.jobs.get(jid)
         if not current or current.get('deleted_at') or current['status']!='succeeded':
             raise RuntimeError('作品已删除，停止交付')
@@ -96,8 +97,10 @@ def admit_text_job(m,payload,request,job_id=None):
     if payload.expected_price is not None and payload.expected_price!=charged:
         raise HTTPException(409,detail='生成价格已更新，请刷新价格后重新确认')
     if m.cloud.enabled():
+        try:connection_snapshot=text_configuration_snapshot(m.settings,conf)
+        except ValueError as exc:raise HTTPException(503,detail='文字生图连接未就绪') from exc
         return m.cloud.admit(user['openid'],aspect_ratio=payload.aspect_ratio,
-            text={**conf,'prompt':prompt,'size':SIZES[payload.aspect_ratio]},
+            text={**conf,'prompt':prompt,'size':SIZES[payload.aspect_ratio],'connection_snapshot':connection_snapshot},
             expected_price=payload.expected_price,job_id=job_id,recipe=recipe)
     jid=job_id or uuid.uuid4().hex[:12]
     try:balance=m.users.reserve_job(user['openid'],jid,charged,m.settings.quota(),free)

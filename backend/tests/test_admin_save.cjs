@@ -5,11 +5,12 @@ const output=path.resolve(process.env.REVIEW_OUTPUT||path.join(root,'audit/admin
 fs.mkdirSync(output,{recursive:true});
 const html=fs.readFileSync(path.join(root,'backend/admin.html'),'utf8');
 const script=[...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map(x=>x[1]).join('\n');
+const SECONDARY='gw_'+'b'.repeat(32);
 const defaults={providers:{worldcodes:{enabled:true,base_url:'https://legacy.invalid',api_key:'••••0000',endpoint:'/v1/images/edits',model_light:'light',model_fine:'fine',timeout:180,tiers:{
  light:{base_url:'https://light.invalid',api_key:'••••1234',endpoint:'/light/edits',model:'light',timeout:60,price_cny:.04},
  fine:{base_url:'https://fine.invalid',api_key:'••••5678',endpoint:'/fine/edits',model:'fine',timeout:300,price_cny:.15}}},
- fal:{enabled:false,api_key:''},baidu:{enabled:false,api_key:'',secret_key:''},local:{enabled:true}},
- chain:['worldcodes','local','fal','baidu'],prompts:{light:'light prompt',fine:'fine prompt'},prices:{light:40,fine:100},
+ [SECONDARY]:{name:'备用网关',enabled:false,base_url:'https://backup.invalid',api_key:'••••2222',endpoint:'/custom/edits',model_light:'backup-light',model_fine:'backup-fine',timeout:180,request_mode:'sync',async_endpoint:'',tiers:{light:{},fine:{}}}},
+ chain:['worldcodes',SECONDARY],prompts:{light:'light prompt',fine:'fine prompt'},prices:{light:40,fine:100},
  text_generation:{enabled:true,model:'text-model',endpoint:'/v1/images/generations',price:40,base_url:'https://text.invalid',api_key:'••••9012',timeout:45,price_cny:0.12},processing:{ci_enabled:true},
  cloud_pipeline:{enabled:true,generation_concurrency:32,max_queued:256,ci_biz_type:''},rewards:{},maintenance:{enabled:false},free_mode:false,ads:{},moderation:{enabled:true},wechat:{},payment:{},tencent:{},quota:{}};
 function setup(){
@@ -24,6 +25,7 @@ function setup(){
   querySelectorAll(){return [...nodes.values()].filter(n=>n.id.startsWith('wc-')||n.id.startsWith('tg-'));}
   closest(){return this.section||null;}
   addEventListener(){}
+  setAttribute(name,value){this[name]=String(value);}
  }
  const get=id=>{if(!nodes.has(id))nodes.set(id,new E(id));return nodes.get(id);};
  const document={getElementById:get,createElement:()=>new E('generated'),querySelector:()=>slot,
@@ -51,17 +53,17 @@ const rows=[];async function test(name,fn){try{await fn();rows.push({case:name,p
  });
  await test('provider_page_one_put_saves_tiers_prompts_chain_text_together',async()=>{
   const t=setup();t.ctx.showPage('prov');t.get('wc-light-base').value='https://changed-light.invalid';t.get('wc-fine-key').value='new-fine-key';
-  t.ctx.toggleProv('fal',{checked:true});t.ctx.moveProv(0,1);
+  t.ctx.toggleProv(SECONDARY,{checked:true});t.ctx.moveProv(0,1);
   assert.equal(t.calls.length,0);await t.ctx.saveCurrentPage();assert.equal(t.calls.length,1);
   const body=t.calls[0].body;assert.equal(body.providers.worldcodes.tiers.light.base_url,'https://changed-light.invalid');
-  assert.equal(body.providers.worldcodes.tiers.fine.api_key,'new-fine-key');assert(body.providers.fal.enabled);
-  assert.equal(body.chain[0],'local');assert.equal(body.text_generation.model,'text-model');assert.equal(body.prompts.light,'light prompt');
+  assert.equal(body.providers.worldcodes.tiers.fine.api_key,'new-fine-key');assert(body.providers[SECONDARY].enabled);
+  assert.equal(body.chain[0],SECONDARY);assert.equal(body.text_generation.model,'text-model');assert.equal(body.prompts.light,'light prompt');
   assert.equal(body.text_generation.base_url,'https://text.invalid');assert.equal(body.text_generation.api_key,'••••9012');
   assert.equal(body.text_generation.timeout,45);assert.equal(body.text_generation.price_cny,0.12);
  });
- await test('text_gateway_card_is_immediately_after_fine_and_before_other_keys',()=>{
+ await test('text_gateway_card_stays_after_fine_without_retired_provider_keys',()=>{
   assert(html.indexOf('精细生成 · 独立网关配置')<html.indexOf('文生图 · 独立网关配置'));
-  assert(html.indexOf('文生图 · 独立网关配置')<html.indexOf('其它供应商密钥'));
+  assert(!html.includes('其它供应商密钥'));for(const id of ['fal-key','bd-key','bd-sk'])assert(!html.includes('id="'+id+'"'));
   for(const id of ['tg-base','tg-key','tg-endpoint','tg-model','tg-timeout','tg-cost','tg-price','tg-enabled'])assert.equal((html.match(new RegExp('id="'+id+'"','g'))||[]).length,1);
   assert(!html.includes('沿用轻量档的 URL 与密钥'));
  });
@@ -96,10 +98,10 @@ const rows=[];async function test(name,fn){try{await fn();rows.push({case:name,p
   t.ctx.openAnnModal(null);const bar=t.get('page-save-bar');assert.equal(bar.parentNode.id,'slot');
   await t.ctx.saveCurrentPage();assert(saved);t.ctx.closeModal();assert.equal(bar.parentNode.id,'page-save-home');assert(bar.hidden);
  });
- await test('latest_mode_is_fixed_and_legacy_controls_removed',()=>{
+ await test('mode_summary_follows_gateway_choice_and_retired_engine_controls_stay_removed',()=>{
   const t=setup();t.ctx.showPage('conf');
   for(const id of ['ci-enabled','cloud-enabled','cloud-biz-type','cloud-audit-mode'])assert(!html.includes('id="'+id+'"'));
-  assert(t.get('processing-mode-summary').textContent.includes('固定使用云端异步生成'));
+  assert(t.get('processing-mode-summary').textContent.includes('网关'));
  });
  await test('general_page_save_includes_rewards_ads_and_cloud_settings_once',async()=>{
   const t=setup();t.ctx.showPage('conf');await t.ctx.saveCurrentPage();assert.equal(t.calls.length,1);
