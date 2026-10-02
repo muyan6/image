@@ -202,11 +202,12 @@
   right: 0;
   padding: 20rpx 32rpx 40rpx;
   background: rgba(245, 242, 235, 0.95);
-  backdrop-filter: blur(8px);
   border-top: 1rpx solid var(--paper-border);
   z-index: 100;
 }
 
 .invite-main-btn {
-  width: 100%;
+  display:flex;align-items:center;justify-content:center;
+  width:auto;max-width:300rpx;min-height:80rpx;margin:0 0 0 auto;
+  padding:16rpx 28rpx;line-height:1.3;border-radius:0;
 }

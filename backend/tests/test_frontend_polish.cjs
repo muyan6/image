@@ -61,12 +61,13 @@ async function test(name,fn){try{await fn();rows.push({case:name,passed:true});c
   assert.equal(p.data.workFilters.find(f=>f.id==='all').count,3);
   p.setWorks([{jobId:'a',status:'succeeded',result:'a'},{jobId:'b',status:'failed'}]);assert.equal(p.data.filteredWorks[0].jobId,'a');assert.equal(p.data.filteredWorks[0].sourceIndex,0);
  });
- await test('works_photo_opens_preview_and_more_opens_menu',async()=>{
-  let preview,menus=0;const p=page('works',{downloadJobMedia:async()=> 'wxfile://result.jpg'},
-    {previewImage:o=>preview=o.current,showActionSheet:()=>menus++});
+ await test('works_photo_and_more_open_menu_and_preview_requires_explicit_choice',async()=>{
+  let preview,menus=0,downloads=0,menu;const p=page('works',{downloadJobMedia:async()=>{downloads++;return 'wxfile://result.jpg';}},
+    {previewImage:o=>preview=o.current,showActionSheet:o=>{menus++;menu=o;}});
   p._visible=true;p.setWorks([{jobId:'a',status:'succeeded',result:'https://cos.invalid/a'}]);p.refreshWork=async x=>x;
-  p.onTapWork({currentTarget:{dataset:{index:0}}});await tick();assert.equal(preview,'wxfile://result.jpg');assert.equal(menus,0);
-  p.onMoreWork({currentTarget:{dataset:{index:0}}});assert.equal(menus,1);
+  p.onTapWork({currentTarget:{dataset:{index:0}}});await tick();assert.equal(preview,undefined);assert.equal(menus,1);assert.equal(downloads,0);
+  p.onMoreWork({currentTarget:{dataset:{index:0}}});assert.equal(menus,2);assert.equal(downloads,0);
+  menu.success({tapIndex:0});await tick();assert.equal(preview,'wxfile://result.jpg');assert.equal(downloads,1);
   assert(xml('works').includes('catchtap="onMoreWork"'));assert(xml('works').includes('data-index="{{ item.sourceIndex }}"'));
  });
  await test('works_filter_empty_is_distinct_from_no_works',()=>{

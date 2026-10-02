@@ -288,9 +288,12 @@ Page({
   },
 
   onTapWork(e) {
-    const index = e.currentTarget.dataset.index;
-    const item = this.data.works[index];
-    if (!item) return;
+    this.onMoreWork(e);
+  },
+
+  onMoreWork(e) {
+    const index=Number(e.currentTarget.dataset.index),item=this.data.works[index];
+    if(!item)return;
     if (item.status === 'failed') {
       wx.showActionSheet({
         itemList: ['查看失败原因', '删除此件作品'].concat(item.violation?['提交误判反馈']:[]),
@@ -303,43 +306,27 @@ Page({
       return;
     }
 
-    // 如果该作品还在后台运算中
-    if (item.status === 'processing' || item.status === 'failed' || !item.result) {
-      wx.showLoading({ title: '检查最新进度…' });
-      this.refreshWork(item).then((fresh) => {
-        wx.hideLoading();
-        if (fresh && fresh.result && fresh.status === 'succeeded') {
-          this.openWorkPreview(fresh);
-        } else if (fresh && fresh.status === 'failed') {
-          wx.showModal({
-            title: '生成未完成',
-            content: (fresh.error || '该照片生成未成功')+'\n'+this.settlementLabel(fresh),
-            showCancel: false
-          });
-        } else {
-          if (fresh && fresh.status === 'succeeded')
-            wx.showModal({title:'图片暂不可用',content:fresh.error || '请稍后再试',showCancel:false});
-          else wx.showToast({title:'AI 仍在云端运算中，请稍候下拉刷新~',icon:'none',duration:2500});
-        }
-      });
+    if (item.status === 'processing' || !item.result) {
+      wx.showActionSheet({itemList:['查看最新进度','删除此件作品'],itemColor:'#1a1917',success:r=>{
+        if(r.tapIndex===1){this.deleteSingleWork(index,item);return;}
+        if(r.tapIndex!==0)return;
+        wx.showLoading({title:'检查最新进度…'});
+        this.refreshWork(item).then(fresh=>{
+          if(fresh&&fresh.status==='failed')wx.showModal({title:'生成未完成',content:(fresh.error||'生成失败')+'\n'+this.settlementLabel(fresh),showCancel:false});
+          else if(fresh&&fresh.status==='succeeded'&&!fresh.result)wx.showModal({title:'图片暂不可用',content:fresh.error||'请稍后再试',showCancel:false});
+          else wx.showToast({title:fresh&&fresh.status==='succeeded'?'已完成，请从更多操作中查看':'仍在云端处理中，请稍后刷新',icon:'none'});
+        }).finally(()=>wx.hideLoading());
+      }});
       return;
     }
-
-    this.refreshWork(item).then(fresh => this.openWorkPreview(fresh));
-  },
-
-  onMoreWork(e) {
-    const index=Number(e.currentTarget.dataset.index),item=this.data.works[index];
-    if(!item)return;
-    if(item.status==='failed'){this.onTapWork(e);return;}
-    if(item.status==='processing'||!item.result){this.onTapWork(e);return;}
     this.showWorkActions(item,index);
   },
 
   openWorkPreview(item) {
-    if(!item||!item.result)return;
+    if(!item||!item.result||item.status&&item.status!=='succeeded')return;
     if(!item.jobId){
-      if(typeof api.isJobCosUrl==='function'&&!api.isJobCosUrl(item.result)&&/^https?:|^\/api\//i.test(item.result)){
+      const local=/^(wxfile:|https?:\/\/(tmp|usr)\/)/i.test(item.result);
+      if(!local&&typeof api.isJobCosUrl==='function'&&!api.isJobCosUrl(item.result)&&/^https?:|^\/api\//i.test(item.result)){
         wx.showModal({title:'图片暂不可用',content:'旧记录的图片链接已失效，请查看其他作品。',showCancel:false});return;
       }
       wx.previewImage({current:item.result,urls:[item.result]});return;
@@ -353,38 +340,21 @@ Page({
   },
 
   showWorkActions(item, index) {
+    if(!item||!item.result||item.status&&item.status!=='succeeded')return;
+    const actions=[
+      {label:'全屏高清查看',run:()=>this.openWorkPreview(item)},
+      {label:'对比原图模式',run:()=>{
+        if(!item.jobId){wx.showModal({title:'图片暂不可用',content:'旧记录没有任务编号，无法刷新 COS 图片。',showCancel:false});return;}
+        wx.navigateTo({url:`/pages/compare/compare?result=${encodeURIComponent(item.result)}&original=${encodeURIComponent(item.original||'')}&job=${encodeURIComponent(item.jobId)}`});
+      }},
+      {label:'删除此件作品',run:()=>this.deleteSingleWork(index,item)},
+      {label:'沿用参数再创作',run:()=>this.recreateWork(item)},
+      {label:'保存到相册',run:()=>this.saveWork(item)}
+    ];
     wx.showActionSheet({
-      itemList: ['全屏高清查看并保存', '对比原图模式', '删除此件作品', '投稿到社区', '沿用参数再创作'],
+      itemList: actions.map(action=>action.label),
       itemColor: '#1a1917',
-      success: (res) => {
-        if (res.tapIndex === 0) {
-          if (!item.jobId) {
-            if (typeof api.isJobCosUrl === 'function' && !api.isJobCosUrl(item.result) &&
-                (/^https?:\/\//i.test(item.result || '') || /^\/api\//.test(item.result || ''))) {
-              wx.showModal({title:'图片暂不可用',content:'旧记录没有任务编号，无法安全地从 COS 获取原图。',showCancel:false});
-              return;
-            }
-            wx.previewImage({current:item.result, urls:[item.result].filter(Boolean)});
-            return;
-          }
-          wx.showLoading({title:'正在读取作品…'});
-          api.downloadJobMedia(item.jobId, 'result', item.result).then(path => {
-            wx.previewImage({current:path, urls:[path]});
-          }).catch(err => wx.showModal({title:'图片暂不可用',content:err.message || 'COS 下载失败',showCancel:false}))
-            .finally(() => wx.hideLoading());
-        } else if (res.tapIndex === 1) {
-          if (!item.jobId) {
-            wx.showModal({title:'图片暂不可用',content:'旧记录没有任务编号，无法刷新 COS 图片。',showCancel:false});
-            return;
-          }
-          wx.navigateTo({
-            url: `/pages/compare/compare?result=${encodeURIComponent(item.result)}&original=${encodeURIComponent(item.original || '')}&job=${encodeURIComponent(item.jobId || '')}`
-          });
-        } else if (res.tapIndex === 2) {
-          this.deleteSingleWork(index,item);
-        } else if(res.tapIndex===3){this.openSubmission(item);}
-        else if(res.tapIndex===4){this.recreateWork(item);}
-      }
+      success:res=>{const action=actions[res.tapIndex];if(action)action.run();}
     });
   },
 
@@ -398,11 +368,14 @@ Page({
     catch(e){wx.showToast({title:e.message||'参数读取失败，请重试',icon:'none'});}
     finally{this._recreating=false;}
   },
-  async onSaveWork(e){
-    const item=this.data.works[e.currentTarget.dataset.index];if(!item||!item.result||this.data.savingJobId)return;
+  onSaveWork(e){return this.saveWork(this.data.works[e.currentTarget.dataset.index]);},
+  async saveWork(item){
+    if(!item||!item.result||item.status&&item.status!=='succeeded'||this.data.savingJobId)return;
+    const local=/^(wxfile:|https?:\/\/(tmp|usr)\/)/i.test(item.result);
+    if(!item.jobId&&!local&&(/^\/api\//.test(item.result)||/^https?:\/\//i.test(item.result)&&typeof api.isJobCosUrl==='function'&&!api.isJobCosUrl(item.result))){wx.showModal({title:'图片暂不可用',content:'旧记录的图片链接已失效，请查看其他作品。',showCancel:false});return;}
     update(this,{savingJobId:item.jobId||'local'});wx.showLoading({title:'正在保存照片…'});
     try{
-      const path=item.jobId?await api.downloadJobMedia(item.jobId,'result',item.result):item.result;
+      const path=item.jobId?await api.downloadJobMedia(item.jobId,'result',item.result):!local&&/^https?:\/\//i.test(item.result)?await new Promise((resolve,reject)=>wx.getImageInfo({src:item.result,success:r=>resolve(r.path),fail:reject})):item.result;
       await new Promise((resolve,reject)=>wx.saveImageToPhotosAlbum({filePath:path,success:resolve,fail:reject}));
       wx.showToast({title:'已保存到相册',icon:'success'});
     }catch(e){

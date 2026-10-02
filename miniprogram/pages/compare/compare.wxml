@@ -10,9 +10,6 @@
       <text class="spec-label">{{ label }}</text>
     </view>
 
-    <view class="quick-export" bindtap="onDownload">
-      <text class="compare-label">保存</text>
-    </view>
   </view>
 
   <!-- 艺术画廊观览台 (Core Stage) -->

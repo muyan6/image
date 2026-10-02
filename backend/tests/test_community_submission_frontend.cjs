@@ -13,10 +13,11 @@ function page(name,api={},wx={}){
 const job={id:'abc123abc123',status:'succeeded',result_url:'https://cos.invalid/result',orig_url:'https://cos.invalid/comparison',template_name:'胶片'};
 async function test(name,fn){try{await fn();rows.push({case:name,passed:true});}catch(e){console.error(name,e);rows.push({case:name,passed:false,error:e.stack});}}
 (async()=>{
- await test('submission_route_registered_and_visible_on_work_cards',()=>{
+ await test('submission_route_registered_with_explicit_community_picker_not_work_card_button',()=>{
   assert(JSON.parse(fs.readFileSync(path.join(root,'miniprogram/app.json'))).pages.includes('pages/community-submit/community-submit'));
-  const xml=fs.readFileSync(path.join(root,'miniprogram/pages/works/works.wxml'),'utf8');assert(xml.includes('投稿到社区'));assert(xml.includes('catchtap="onSubmitWork"'));
-  const t=page('works');t.p.data.works=[{jobId:job.id,status:'succeeded'}];t.p.onSubmitWork({currentTarget:{dataset:{index:0}}});assert(t.messages[0].url.endsWith('?job='+job.id));
+  const xml=fs.readFileSync(path.join(root,'miniprogram/pages/works/works.wxml'),'utf8');assert(!xml.includes('投稿到社区'));assert(!xml.includes('catchtap="onSubmitWork"'));
+  const picker=fs.readFileSync(path.join(root,'miniprogram/pages/community-submit/community-submit.wxml'),'utf8');assert(picker.includes('onSelectWork'));assert(picker.includes('workChoices'));
+  const t=page('community-submit');assert.equal(typeof t.p.loadWorkChoices,'function');assert.equal(typeof t.p.onSelectWork,'function');
  });
  await test('unfinished_work_has_no_submission_navigation',()=>{
   const t=page('works');t.p.openSubmission({jobId:job.id,status:'processing'});assert(!t.messages.some(x=>x.url));

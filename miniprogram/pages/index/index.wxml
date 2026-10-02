@@ -54,12 +54,12 @@
 
     <text class="generation-warning">请勿上传违规内容：审核违规不予生图并扣除本次点数；7天内累计3次将永久封禁账号，剩余点数不予退还。</text>
 
-    <!-- 最近上新 · 艺术画廊精选卡卷 -->
+    <!-- 热门风格 · 当前启用模板 -->
     <view class="showcase-section">
       <view class="showcase-header">
         <view class="showcase-title-wrap">
-          <text class="showcase-title">最近上新 · 新风格展</text>
-          <text class="showcase-subtitle">精选画廊配方</text>
+          <text class="showcase-title">热门风格</text>
+          <text class="showcase-subtitle">按使用热度排序</text>
         </view>
         <view class="showcase-link" bindtap="onGoToTemplates">
           <text>查看全部风格</text>
@@ -96,6 +96,7 @@
           </view>
         </view>
       </scroll-view>
+      <view wx:if="{{!featuredTemplates.length}}" class="showcase-empty">{{templateError || '暂无可用风格，稍后再来看看'}}</view>
     </view>
     <view class="text-generation-entry" bindtap="onOpenTextGeneration">
       <view class="entry-copy"><text class="entry-label">文字生图</text><text class="entry-note">从一句描述开始创作</text></view>

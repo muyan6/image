@@ -208,7 +208,7 @@ export async function mountLibrary(ctx,root,route,params={}) {
     });
   } else if(route==='community'){
     const head=heading('灵感沙龙','发现喜欢的效果，保存灵感，再试试同款风格。');const toolbar=actions();toolbar.append(link('投稿我的作品','works'),link('我的投稿','submissions'));head.append(toolbar);
-    let category='all',liked=false;const filters=actions();root.append(filters);
+    let category='all',liked=false,categories=CATEGORIES;const filters=actions();root.append(filters);
     const renderPost=post=>{
       const card=el('article','lib-card community-card');card.dataset.id=post.id;
       const photo=button('',()=>navigate('post',{id:post.id}),'lib-photo-button');photo.append(thumbnailImage(post,'post',post.title||'社区作品'));card.append(photo);
@@ -216,8 +216,8 @@ export async function mountLibrary(ctx,root,route,params={}) {
       const bar=actions(),like=button((post.liked?'♥ 已喜欢':'♡ 喜欢')+' '+(post.likes||0),()=>write(like,async()=>{const r=await ctx.api('/api/community/posts/'+encode(post.id)+'/like',{method:'PUT',data:{liked:!post.liked}});if(valid()){Object.assign(post,r);p.draw();if(liked)await p.load(false);}}),'lib-link');like.dataset.action='like-post';
       bar.append(like,link('留言 '+(post.comments||0),'post',{id:post.id}));if(post.templateId)bar.append(link('做同款风格 →','create',{templateId:post.templateId}));content.append(bar);card.append(content);return card;
     };
-    const p=pager(root,(offset,limit)=>`/api/community?limit=${limit}&offset=${offset}&category=${category}`+(liked?'&liked_only=true':''),renderPost,{empty:'当前展区暂无作品'});p.list.classList.add('lib-work-grid');
-    function drawFilters(){filters.replaceChildren(...CATEGORIES.map(([id,label])=>button(label,()=>{if(category===id&&!liked)return;category=id;liked=false;p.reset();drawFilters();p.load(false);},'lib-filter'+(!liked&&category===id?' lib-filter-active':''))));
+    const p=pager(root,(offset,limit)=>`/api/community?limit=${limit}&offset=${offset}&category=${category}`+(liked?'&liked_only=true':''),renderPost,{empty:'当前展区暂无作品',onData:d=>{if(Array.isArray(d.categories)){categories=[['all','全部展品'],...d.categories.filter(x=>x&&x.id!=='all').map(x=>[x.id,x.name])];drawFilters();}}});p.list.classList.add('lib-work-grid');
+    function drawFilters(){filters.replaceChildren(...categories.map(([id,label])=>button(label,()=>{if(category===id&&!liked)return;category=id;liked=false;p.reset();drawFilters();p.load(false);},'lib-filter'+(!liked&&category===id?' lib-filter-active':''))));
       const favorites=button('我喜欢的',()=>write(favorites,async()=>{if(liked)return;liked=true;category='all';p.reset();drawFilters();await p.load(false);}),'lib-filter'+(liked?' lib-filter-active':''));favorites.dataset.action='liked-filter';filters.append(favorites);}
     drawFilters();p.load(false,false);
   } else if(route==='post'){
@@ -269,7 +269,9 @@ export async function mountLibrary(ctx,root,route,params={}) {
         const job=await ctx.api('/api/jobs/'+encode(params.jobId));if(!valid())return;
         if(job.status!=='succeeded'||!job.result_url||job.expires_at&&job.expires_at*1000<=Date.now())throw new Error('请选择已完成且未过期的作品');job.result_url=await privateUrl(job,'result');if(!valid())return;if(job.orig_url)try{job.orig_url=await privateUrl(job,'orig');}catch(e){job.orig_url='';}if(!valid())return;host.replaceChildren();host.append(image(job.result_url,'本次投稿的成品'));
         const form=el('form','lib-submit-form'),title=el('input','lib-input'),story=el('textarea','lib-input'),category=el('select','lib-input');title.maxLength=60;title.required=true;title.value=preset.title||job.template_name||'我的新生作品';title.setAttribute('aria-label','作品标题');story.maxLength=500;story.rows=5;story.value=preset.story||'';story.setAttribute('aria-label','创作故事');
-        CATEGORIES.forEach(([id,name])=>{const option=el('option','',id==='all'?'其它':name);option.value=id;category.append(option);});category.value=preset.category||'all';category.setAttribute('aria-label','投稿展区');
+        let submissionCategories=CATEGORIES;try{const feed=await ctx.api('/api/community/submissions/mine?limit=1&offset=0');if(Array.isArray(feed.categories))submissionCategories=[['all','按模板自动分组'],...feed.categories.filter(x=>x&&x.id!=='all').map(x=>[x.id,x.name])];}catch(e){if(e.status&&e.status!==404)throw e;}if(!valid())return;
+        if(preset.category&&!submissionCategories.some(([id])=>id===preset.category))submissionCategories=[...submissionCategories,[preset.category,'原分类（保留）']];
+        submissionCategories.forEach(([id,name])=>{const option=el('option','',id==='all'?'按模板自动分组':name);option.value=id;category.append(option);});category.value=preset.category||'all';category.setAttribute('aria-label','投稿展区');
         const share=el('input');share.type='checkbox';share.checked=!!(preset.share_original&&job.orig_url);share.disabled=!job.orig_url;share.dataset.action='share-original';const shareLabel=el('label','lib-checkbox');shareLabel.append(share,el('span','','同时公开修护前原图（默认关闭）'));
         const before=el('div'),summary=el('p','lib-consent-summary'),consent=el('input');consent.type='checkbox';consent.dataset.action='consent';const consentLabel=el('label','lib-checkbox');consentLabel.append(consent,el('span','','我确认有权公开所选图片与文字，并同意审核通过后在社区展示和被访客分享。'));
         const renderPrivacy=()=>{before.replaceChildren();if(share.checked&&job.orig_url)before.append(image(job.orig_url,'本次公开的修护前原图'));summary.textContent=share.checked?'本次公开：成品 + 修护前原图':'本次公开：仅成品，不公开原图';consent.checked=false;};share.addEventListener('change',renderPrivacy);renderPrivacy();

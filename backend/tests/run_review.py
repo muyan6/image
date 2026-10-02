@@ -128,6 +128,13 @@ if not args.legacy:
         ('test_web_ui_alignment.cjs', 'web_ui_alignment_results.json'),
         ('test_admin_ui_theme.cjs', 'admin_ui_theme_results.json'),
         ('test_mini_template_entry_layout.cjs', 'mini_template_entry_layout_results.json'),
+        ('test_mini_catalog_simplify.cjs', 'mini_catalog_simplify_results.json'),
+        ('test_mini_work_actions.cjs', 'mini_work_actions_results.json'),
+        ('test_mini_credit_history.cjs', 'mini_credit_history_results.json'),
+        ('test_community_work_picker.cjs', 'community_work_picker_results.json'),
+        ('test_dynamic_community_frontend.cjs', 'dynamic_community_frontend_results.json'),
+        ('test_mini_discovery.cjs', 'mini_discovery_results.json'),
+        ('test_community_catalog_groups.py', 'community_catalog_group_results.json'),
     ):
         path = Path(__file__).with_name(script)
         if path.is_file():

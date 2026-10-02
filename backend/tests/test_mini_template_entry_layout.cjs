@@ -22,18 +22,18 @@ async function test(name,fn){try{await fn();cases.push({case:name,passed:true});
 (async()=>{
  await test('catalog_header_has_no_contribution_actions_or_orphan_handlers',()=>{
   for(const ext of ['js','wxml','wxss'])assert(!/catalog-contribute|onSubmitTemplate|onMyTemplates/.test(source('templates',ext)));
-  const xml=source('templates','wxml');assert(xml.includes('template-search'));assert(xml.includes('category-bar'));
+  const xml=source('templates','wxml');assert(xml.includes('template-search'));assert(xml.includes('catalog-filters'));
  });
- await test('profile_menu_contains_two_distinct_actions_and_regular_dividers',()=>{
+ await test('profile_menu_has_one_owner_entry_with_regular_divider_and_create_stays_in_listing',()=>{
   const xml=source('my','wxml');assert(!xml.includes('我的分享模板'));
-  assert(/class="menu-item" bindtap="onShareTemplate"><text class="menu-label">分享我的模板<\/text>/.test(xml));
+  assert(!xml.includes('onShareTemplate'));assert(!source('my','js').includes('onShareTemplate'));
   assert(/class="menu-item" bindtap="onGoTemplates"><text class="menu-label">我的模板<\/text>/.test(xml));
-  assert(/bindtap="onShareTemplate">[\s\S]*?<\/view>\s*<view class="menu-divider"><\/view>\s*<view class="menu-item" bindtap="onGoTemplates">/.test(xml));
   assert(/bindtap="onGoTemplates">[\s\S]*?<\/view>\s*<view class="menu-divider"><\/view>\s*<view class="menu-item" bindtap="onGoCredits">/.test(xml));
  });
- await test('new_actions_use_real_create_and_owner_listing_routes',()=>{
-  const {p,navigations}=page('my');p.onShareTemplate();p.onGoTemplates();
-  assert.equal(navigations.join('|'),'/pages/template-share/template-share|/pages/template-shares/template-shares');
+ await test('owner_entry_uses_listing_route_and_listing_keeps_real_create_route',()=>{
+  const {p,navigations}=page('my');p.onGoTemplates();
+  assert.equal(navigations.join('|'),'/pages/template-shares/template-shares');
+  assert(source('template-shares','wxml').includes('bindtap="onCreate"'));assert(source('template-shares','js').includes("url:'/pages/template-share/template-share'"));
  });
  await test('share_entries_are_not_inserted_into_balance_or_stat_areas',()=>{
   const xml=source('my','wxml'),beforeMenu=xml.slice(0,xml.indexOf('class="menu-card gallery-card"'));
@@ -46,20 +46,20 @@ async function test(name,fn){try{await fn();cases.push({case:name,passed:true});
   assert.equal(contact['font-size'],label['font-size']);assert.equal(contact['line-height'],label['line-height']);
   assert.equal(style(css,'.menu-arrow')['flex-shrink'],'0');
  });
- await test('search_preference_category_and_sort_controls_have_consistent_touch_capsules',()=>{
+ await test('search_scope_and_filter_controls_have_consistent_square_touch_areas',()=>{
   const css=source('templates','wxss');
-  for(const selector of ['.preference-chip','.cat-chip','.sort-chip']){
-   const s=style(css,selector);assert.equal(s['box-sizing'],'border-box');assert.equal(s.display,'inline-flex');assert.equal(s['align-items'],'center');
-   assert.equal(s['font-size'],'24rpx');assert.equal(s['border-radius'],'36rpx');assert.equal(s['min-height'],'72rpx');
+  for(const selector of ['.preference-chip','.catalog-picker-trigger','.sort-shuffle']){
+   const s=style(css,selector);assert.equal(s['box-sizing'],'border-box');assert(/^(inline-)?flex$/.test(s.display));assert.equal(s['align-items'],'center');
+   assert.equal(s['font-size'],'24rpx');assert.equal(s['border-radius'],'0');assert.equal(s['min-height'],'72rpx');
   }
   assert.equal(style(css,'.template-search')['box-sizing'],'border-box');assert(rpx(style(css,'.template-search')['min-height'])>=80);
   assert(rpx(style(css,'.search-clear')['min-height'])>=68);assert(rpx(style(css,'.sort-shuffle')['min-height'])>=68);
  });
  await test('filter_rows_use_regular_positive_spacing_not_overlapping_negative_margins',()=>{
   const css=source('templates','wxss');assert.equal(style(css,'.template-search').margin,'0 0 16rpx');
-  assert.equal(style(css,'.preference-bar').margin,'0 0 16rpx');assert.equal(style(css,'.category-bar')['margin-bottom'],'16rpx');
-  assert.equal(style(css,'.catalog-sort').margin,'0 0 24rpx');assert.equal(style(css,'.preference-bar').gap,'12rpx');
-  assert.equal(style(css,'.catalog-sort').gap,'12rpx');
+  assert.equal(style(css,'.preference-bar').margin,'0 0 16rpx');assert.equal(style(css,'.preference-bar')['flex-wrap'],'nowrap');
+  assert.equal(style(css,'.catalog-filters').margin,'0 0 24rpx');assert.equal(style(css,'.preference-bar').gap,'12rpx');
+  assert.equal(style(css,'.catalog-filters').gap,'12rpx');
  });
  await test('preference_404_is_explained_without_faking_success_or_erasing_saved_ids',async()=>{
   const {p}=page('templates',{load:async()=>{throw Object.assign(new Error('Not Found'),{status:404});}});

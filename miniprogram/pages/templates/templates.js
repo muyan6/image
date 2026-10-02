@@ -13,6 +13,7 @@ Page({
       { id: 'all', name: '全部风格', count: 0 }
     ],
     activeCategory: 'all',
+    categoryIndex: 0, categoryLabel: '全部分类', sortIndex: 0, sortLabel: '按热度',
     sortMode: 'hot',
     sortModes: [{id:'hot',name:'按热度'},{id:'latest',name:'按最新'},{id:'random',name:'随机逛逛'}],
     searchQuery: '',
@@ -195,15 +196,28 @@ Page({
 
   onSelectCategory(e) {
     const cid = e.currentTarget.dataset.id;
+    if(this.data.preferenceMode!=='all'||!this.data.categories.some(x=>x.id===cid))return;
     if (cid === this.data.activeCategory) return;
     update(this,{ activeCategory: cid });
     this.filterByCategory(cid);
   },
+  onCategoryChange(e){
+    const index=Number(e.detail&&e.detail.value);
+    if(!Number.isInteger(index)||index<0||index>=this.data.categories.length)return;
+    this.onSelectCategory({currentTarget:{dataset:{id:this.data.categories[index].id}}});
+  },
+  onSortChange(e){
+    if(this.data.preferenceMode!=='all'||this.data.activeCategory!=='all')return;
+    const index=Number(e.detail&&e.detail.value);
+    if(!Number.isInteger(index)||index<0||index>=this.data.sortModes.length)return;
+    this.onSortMode({currentTarget:{dataset:{id:this.data.sortModes[index].id}}});
+  },
 
   filterByCategory(cid) {
+    const category=this.data.preferenceMode==='all'?cid:'all';
     const words = this.data.searchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const list = this.data.allTemplates.filter(item => {
-      if (cid !== 'all' && item.group_id !== cid) return false;
+      if (category !== 'all' && item.group_id !== category) return false;
       if(this.data.preferenceMode==='favorites'&&!this.data.favoriteIds.includes(item.id))return false;
       if(this.data.preferenceMode==='recent'&&!this.data.recentIds.includes(item.id))return false;
       const text = [item.name, item.subtitle, item.group_name, item.id,
@@ -211,14 +225,19 @@ Page({
       return words.every(word => text.includes(word));
     });
     if(this.data.preferenceMode==='recent')list.sort((a,b)=>this.data.recentIds.indexOf(a.id)-this.data.recentIds.indexOf(b.id));
-    else if(cid!=='all')list.sort((a,b)=>(Number(a.sort)||0)-(Number(b.sort)||0)||(a.catalogOrder||0)-(b.catalogOrder||0));
+    else if(this.data.preferenceMode==='favorites')list.sort((a,b)=>this.data.favoriteIds.indexOf(a.id)-this.data.favoriteIds.indexOf(b.id));
+    else if(category!=='all')list.sort((a,b)=>(Number(a.sort)||0)-(Number(b.sort)||0)||(a.catalogOrder||0)-(b.catalogOrder||0));
     else if(this.data.sortMode==='latest')list.sort((a,b)=>Number(b.published_at||b.created_at||0)-Number(a.published_at||a.created_at||0)||(a.catalogOrder||0)-(b.catalogOrder||0));
     else if(this.data.sortMode==='random'){
       this._randomRanks=this._randomRanks||{};
       for(const item of list)if(this._randomRanks[item.id]===undefined)this._randomRanks[item.id]=Math.random();
       list.sort((a,b)=>this._randomRanks[a.id]-this._randomRanks[b.id]||(a.catalogOrder||0)-(b.catalogOrder||0));
     }else list.sort((a,b)=>Number(b.usage_count||0)-Number(a.usage_count||0)||(a.catalogOrder||0)-(b.catalogOrder||0));
-    update(this,{ filteredTemplates: list });
+    const categoryIndex=Math.max(0,this.data.categories.findIndex(x=>x.id===this.data.activeCategory));
+    const sortIndex=Math.max(0,this.data.sortModes.findIndex(x=>x.id===this.data.sortMode));
+    update(this,{ filteredTemplates: list, categoryIndex, sortIndex,
+      categoryLabel:this.data.activeCategory==='all'?'全部分类':this.data.categories[categoryIndex].name,
+      sortLabel:this.data.activeCategory==='all'?this.data.sortModes[sortIndex].name:'分类顺序' });
   },
 
   onSortMode(e){

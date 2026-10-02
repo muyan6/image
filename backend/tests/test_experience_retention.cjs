@@ -23,11 +23,11 @@ function fixture(name,overrides={},wxOverrides={},prefOverrides={},creationOverr
 async function test(name,fn){try{await fn();cases.push({case:name,passed:true});console.log('PASS '+name);}catch(e){cases.push({case:name,passed:false,error:e.stack});console.error('FAIL '+name+': '+e.message);}}
 const xml=name=>fs.readFileSync(path.join(root,`miniprogram/pages/${name}/${name}.wxml`),'utf8');
 (async()=>{
- await test('credits_read_real_signed_records_and_paginate_without_duplicates',async()=>{
+ await test('credits_read_real_signed_records_and_replace_bounded_pages_without_duplicates',async()=>{
   const urls=[];const t=fixture('credits',{request:async url=>{urls.push(url);return url.includes('offset=0')?{items:[{id:'d',title:'生成扣款',amount:-40,created_at:now/1000,job_id:'j'}],total:2,has_more:true,next_offset:1}:
     {items:[{id:'d',title:'生成扣款',amount:-40,created_at:now/1000,job_id:'j'},{id:'r',title:'失败退回',amount:40,created_at:now/1000,job_id:'j'}],total:2,has_more:false,next_offset:2};}});
   await t.p.loadRecords();assert.equal(t.p.data.records[0].amountText,'-40');assert(t.p.data.recordsLoaded);await t.p.onMoreRecords();
-  assert.equal(t.p.data.records.length,2);assert.equal(t.p.data.records[1].amountText,'+40');assert.equal(urls.length,2);assert(urls[1].includes('offset=1'));
+  assert.equal(t.p.data.records.length,2);assert.equal(t.p.data.records[1].amountText,'+40');assert.equal(t.p.data.recordsPage,2);assert.equal(t.p.data.visibleRecords.length,2);assert.equal(urls.length,2);assert(urls[1].includes('offset=1'));assert(urls.every(x=>x.includes('limit=20')));
  });
  await test('credits_error_is_not_empty_and_retry_preserves_then_recovers',async()=>{
   let fail=true;const t=fixture('credits',{request:async()=>{if(fail)throw Error('offline');return {items:[],total:0,has_more:false};}});
@@ -90,10 +90,11 @@ const xml=name=>fs.readFileSync(path.join(root,`miniprogram/pages/${name}/${name
  await test('works_recreate_delegates_to_single_shared_recipe_helper',async()=>{
   let id;const t=fixture('works',{}, {}, {},{recreateFromJob:async value=>{id=value;return true;}});await t.p.recreateWork({jobId:'recipe'});assert.equal(id,'recipe');assert(!t.p._recreating);
  });
- await test('community_paginates_first_screen_and_preserves_category_route',async()=>{
-  const urls=[];const t=fixture('community',{request:async url=>{urls.push(url);return url.includes('offset=0')?{enabled:true,items:[{id:'one',category:'film',resultUrl:'one.jpg'}],total:2,has_more:true,next_offset:1}:
-    {enabled:true,items:[{id:'one',category:'film',resultUrl:'one.jpg'},{id:'two',category:'film',resultUrl:'two.jpg'}],total:2,has_more:false,next_offset:3};}});
-  await t.p.onSelectFilter({currentTarget:{dataset:{id:'film'}}});assert.equal(urls.length,1);assert(urls[0].includes('category=film'));await t.p.onReachBottom();assert.equal(t.p.data.items.length,2);assert.equal(urls.length,2);
+ await test('community_paginates_first_screen_and_preserves_dynamic_category_route',async()=>{
+  const urls=[],categories=[{id:'g_film',name:'当前胶片分组'}];const t=fixture('community',{request:async url=>{urls.push(url);return url.includes('offset=0')?{enabled:true,categories,items:[{id:'one',category:'g_film',resultUrl:'one.jpg'}],total:2,has_more:true,next_offset:1}:
+    {enabled:true,categories,items:[{id:'one',category:'g_film',resultUrl:'one.jpg'},{id:'two',category:'g_film',resultUrl:'two.jpg'}],total:2,has_more:false,next_offset:3};}});
+  t.p.setData({filters:[{id:'all',name:'全部展品'},...categories]});
+  await t.p.onSelectFilter({currentTarget:{dataset:{id:'g_film'}}});assert.equal(urls.length,1);assert(urls[0].includes('category=g_film'));await t.p.onReachBottom();assert.equal(t.p.data.items.length,2);assert.equal(urls.length,2);assert(urls[1].includes('offset=1'));
  });
  await test('community_liked_filter_is_server_side_and_cannot_reuse_another_filter_response',async()=>{
   const finishes=[],urls=[];const t=fixture('community',{request:url=>{urls.push(url);return new Promise(r=>finishes.push(r));}});

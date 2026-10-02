@@ -12,13 +12,8 @@ Page({
     priceLight: 40,
     priceFine: 40,
     notice: null,
-    featuredTemplates: [
-      { id: "t_anime_dots", name: "日漫错彩网点", subtitle: "复古日漫彩页肖像，荧光波普风格", engine: "fine", price: 0, coverUrl: "/images/logo.jpg" },
-      { id: "t_clarity", name: "冷白通透", subtitle: "去黄除暗，高光清爽，冷白皮质感", engine: "light", price: 0, coverUrl: "/images/logo.jpg" },
-      { id: "t_felt", name: "毛毡旅行档案", subtitle: "定格动画毛毡质感，复古手作肌理", engine: "fine", price: 0, coverUrl: "/images/logo.jpg" },
-      { id: "t_fuji", name: "富士胶片", subtitle: "微暖复古，温润通透，街拍人像百搭", engine: "light", price: 0, coverUrl: "/images/logo.jpg" },
-      { id: "t_poster", name: "复古电影海报", subtitle: "戏剧光影底图 + 中文标题排版", engine: "fine", price: 0, coverUrl: "/images/logo.jpg" }
-    ],
+    featuredTemplates: [],
+    templateError: '',
     activeTemplate: null,
     historyCount: 0, pendingCount: 0, pendingSummary: '', taskError: '', finishedJobId: '', finishedText: '', draftSummary: ''
   },
@@ -29,13 +24,13 @@ Page({
       try { wx.setStorageSync('pendingInvite', options.invite); } catch (e) {}
     }
     this.loadNotice();
-    this.loadTemplates();
     this.bindPendingInvite();
   },
 
   onShow() {
     this._visible=true;
     this.loadConfig();
+    this.loadTemplates();
     const draft=typeof creationDraft.readDraft==='function'?creationDraft.readDraft():null;
     update(this,{draftSummary:draft ? (draft.input_mode==='text'?'继续上次文字创作':draft.imageMissing?'继续草稿 · 请重新选择照片':'继续上次照片创作') : ''});
     this.loadPendingTasks();
@@ -54,7 +49,7 @@ Page({
   },
 
   onHide() {this._visible=false;this._taskVersion=(this._taskVersion||0)+1;if(this._taskTimer)clearTimeout(this._taskTimer);this._taskTimer=null;},
-  onUnload() {this.onHide();},
+  onUnload() {this._unloaded=true;this.onHide();},
   async loadPendingTasks() {
     if(!this._visible || this._taskLoading || typeof api.myJobs!=='function')return;
     this._taskLoading=true;const version=(this._taskVersion||0)+1;this._taskVersion=version;
@@ -109,27 +104,39 @@ Page({
       });
   },
 
-  loadTemplates() {
-    // 1. 尝试读本地缓存，保证秒开
+  onPullDownRefresh() {
+    return this.loadTemplates(true).finally(()=>wx.stopPullDownRefresh());
+  },
+
+  loadTemplates(force = false) {
+    if(this._loadingTemplates)return this._loadingTemplates;
+    // Only a recent, catalog-checked snapshot may paint the home gallery.
     try {
-      const cached = wx.getStorageSync('cached_templates_items');
-      if (Array.isArray(cached) && cached.length > 0) {
-        this._lastTemplates = cached;
-        this._renderFeatured(cached);
+      const cached=wx.getStorageSync('cached_templates_items'),meta=wx.getStorageSync('home_template_catalog_meta');
+      if(Array.isArray(cached)&&meta&&Array.isArray(meta.groups)&&Date.now()-meta.at>=0&&Date.now()-meta.at<30000){
+        this._lastTemplates=cached;this._templateGroups=meta.groups;this._renderFeatured(cached);
       }
     } catch (e) {}
-
-    // 2. 异步拉取服务端最新模板
-    api.templates()
-      .then((d) => {
-        const items = (d && d.items) || [];
-        this._lastTemplates = items;
-        try { wx.setStorageSync('cached_templates_items', items); } catch (e) {}
-        this._renderFeatured(items);
-      })
-      .catch((err) => {
-        console.warn('获取服务端模板失败，使用预设模板', err);
-      });
+    if(!force&&Number.isFinite(this._lastTemplatesAt)&&Date.now()-this._lastTemplatesAt>=0&&Date.now()-this._lastTemplatesAt<30000){
+      if(this._lastTemplates)this._renderFeatured(this._lastTemplates);
+      return Promise.resolve();
+    }
+    const task=api.templates().then(d=>{
+      if(this._unloaded)return;
+      if(!d||!Array.isArray(d.items))throw new Error('模板列表数据异常');
+      this._lastTemplates=d.items;this._templateGroups=Array.isArray(d.groups)?d.groups:null;
+      this._lastTemplatesAt=Date.now();
+      try {
+        wx.setStorageSync('cached_templates_items',d.items);
+        wx.setStorageSync('home_template_catalog_meta',{at:this._lastTemplatesAt,groups:this._templateGroups});
+      }catch(e){}
+      if(this._visible!==false){this._renderFeatured(d.items);update(this,{templateError:''});}
+    }).catch(()=>{
+      if(this._unloaded)return;
+      this._lastTemplates=[];this._templateGroups=[];
+      if(this._visible!==false){this._renderFeatured([]);update(this,{templateError:'风格暂未加载，请下拉刷新重试'});}
+    }).finally(()=>{if(this._loadingTemplates===task)this._loadingTemplates=null;});
+    this._loadingTemplates=task;return task;
   },
 
   _renderFeatured(items) {
@@ -137,15 +144,21 @@ Page({
     const pFine = this.data.priceFine != null ? this.data.priceFine : 40;
     const pLight = this.data.priceLight != null ? this.data.priceLight : 40;
     const prior=new Map(this.data.featuredTemplates.map(x=>[x.id,x]));this._featuredSources={};
-    const featured = items.slice(0, 6).map((t) => {
+    const groups=Array.isArray(this._templateGroups)?new Set(this._templateGroups.filter(g=>g.enabled!==false).map(g=>g.id)):null;
+    const heat=t=>Number.isFinite(Number(t.usage_count))?Math.max(0,Number(t.usage_count)):0;
+    const eligible=(Array.isArray(items)?items:[]).filter(t=>t&&t.id&&t.enabled!==false&&
+      (!groups||!t.group_id||t.group_id==='all'||groups.has(t.group_id)));
+    const ranked=[...new Map(eligible.map(t=>[t.id,t])).values()].sort((a,b)=>heat(b)-heat(a)||(a.id<b.id?-1:a.id>b.id?1:0));
+    const featured = ranked.slice(0, 6).map((t) => {
       const low=Math.min(pLight,pFine),high=Math.max(pLight,pFine);
       let cost = free ? '免扣费' : ('✦ '+(low===high?low:low+'–'+high)+' 光子');
       const old=prior.get(t.id),urls=(t.covers&&t.covers.length?t.covers:[t.cover]).filter(Boolean);
-      this._featuredSources[t.id]={url:t.cover,version:t.cover_version};
+      const preview=t.thumbnail||t.thumbnailUrl||t.cover;
+      this._featuredSources[t.id]={url:preview,version:t.cover_version};
       const covers=urls.map((url,i)=>typeof api.stableImageUrl==='function'?api.stableImageUrl(url,old&&old.covers&&old.covers[i],t.cover_version,old&&old.cover_version):api.absolute(url));
-      const coverUrl=covers[0]||'/images/logo.jpg';
+      const coverUrl=(typeof api.stableImageUrl==='function'?api.stableImageUrl(preview,old&&old.coverUrl,t.cover_version,old&&old.cover_version):api.absolute(preview))||'/images/logo.jpg';
       return Object.assign({}, t, {
-        cover:coverUrl,covers,coverUrl,
+        cover:coverUrl,covers,coverUrl,thumbnail:coverUrl,thumbnailUrl:coverUrl,
         costText: cost
       });
     });

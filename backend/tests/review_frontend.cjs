@@ -146,14 +146,16 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     await apiModule(wx,appFixture()).submitJob('/local.jpg',{quality:'fine',template_id:'poster',template_output_mode:'single'});
     return [body?.template_output_mode==='single',{mode:body?.template_output_mode,uploadId:body?.upload_id}];
   });
-  await test('community_empty_category_keeps_filter_navigation',()=>{
+  await test('community_empty_server_category_keeps_dynamic_filter_navigation',async()=>{
     const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/community/community.wxml'),'utf8');
     const empty=xml.match(/<scroll-view\s+wx:if="([^"]+)"\s+class="salon-filter-bar"/);
-    const {page}=loadPage('community');
-    page.setData({items:[{id:'p1',category:'portrait'}],activeFilter:'film'});
-    page.filterItems('film');
-    return [empty?.[1].includes('items.length') && !empty[1].includes('filteredItems') && page.data.filteredItems.length===0,
-      {guard:empty?.[1],items:page.data.items.length,filtered:page.data.filteredItems.length}];
+    let requested='';const categories=[{id:'fixture_group',name:'当前分组'}];
+    const {page}=loadPage('community',{request:async url=>{requested=url;return{enabled:true,categories,items:[],total:0,has_more:false,next_offset:0};}});
+    page._visible=true;page.setData({enabled:true,items:[{id:'p1',category:'portrait'}],filters:[{id:'all',name:'全部展品'},...categories]});
+    await page.onSelectFilter({currentTarget:{dataset:{id:'fixture_group'}}});
+    return [empty?.[1].includes('enabled') && empty[1].includes('items.length') && !empty[1].includes('filteredItems') &&
+      page.data.filteredItems.length===0 && page.data.filters.some(x=>x.id==='fixture_group') && requested.includes('category=fixture_group'),
+      {guard:empty?.[1],items:page.data.items.length,filtered:page.data.filteredItems.length,requested,filters:page.data.filters.map(x=>x.id)}];
   });
   await test('javascript_syntax_and_wxml_handlers',()=>{
     const errors=[];let count=0;let bindings=0;

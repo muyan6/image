@@ -192,5 +192,3 @@
 .work-card-focused { outline:3rpx solid #9e4b3c; outline-offset:4rpx; }
 .work-expiry { display:block; margin:12rpx 16rpx 0; font-size:22rpx; line-height:1.5; color:#9e4b3c; }
 .work-settlement { display:block; margin:12rpx 16rpx 0; font-size:21rpx; line-height:1.5; color:#77736b; }
-.work-save { margin:12rpx 16rpx 0; height:56rpx; line-height:56rpx; font-size:23rpx; color:#1a1917; background:#eee8dc; border-radius:8rpx; }
-.work-save::after { border:none; }

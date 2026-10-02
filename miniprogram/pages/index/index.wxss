@@ -186,7 +186,11 @@
   width: 100%;
   background: var(--ink-title);
   color: #f7f4ed;
-  padding: 26rpx;
+  height: 96rpx;
+  min-height: 96rpx;
+  padding: 0 26rpx;
+  box-sizing: border-box;
+  line-height: 1.4;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -199,14 +203,20 @@
   font-size: 30rpx;
   font-weight: 700;
   letter-spacing: 3rpx;
-  display: block;
-  line-height: 42rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 42rpx;
+  line-height: 1;
 }
 
 .portal-btn-arrow {
   font-size: 32rpx;
-  display: block;
-  line-height: 42rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 42rpx;
+  line-height: 1;
   flex-shrink: 0;
 }
 
@@ -640,7 +650,7 @@
   padding: 2rpx 8rpx;
 }
 
-/* ================= 最近上新 · 风格精选展 ================= */
+/* ================= 热门风格 · 当前启用模板 ================= */
 .showcase-section {
   width: 100%;
   margin-top: 16rpx;
@@ -710,6 +720,7 @@
   padding-bottom: 12rpx;
   flex-shrink: 0;
 }
+.showcase-empty { padding:30rpx 20rpx; text-align:center; color:var(--ink-muted); font-size:24rpx; }
 
 .showcase-card {
   display: inline-flex;

@@ -82,7 +82,7 @@
       <view class="history-item" wx:if="{{ recordsLoaded && !recordsLoading && !recordsError && records.length === 0 }}">
         <text class="hist-title">暂无光子明细；余额以服务端为准。</text>
       </view>
-      <view class="history-item" wx:for="{{ records }}" wx:key="id" bindtap="onOpenRecord" data-id="{{item.id}}">
+      <view class="history-item" wx:for="{{ visibleRecords }}" wx:key="id" bindtap="onOpenRecord" data-id="{{item.id}}">
         <view class="hist-info">
           <text class="hist-title">{{ item.title }}</text>
           <text class="hist-time">{{ item.time }}</text>
@@ -92,7 +92,8 @@
       </view>
     </view>
     <view wx:if="{{recordsError}}" class="ui-inline-state"><text>{{recordsError}}</text><button class="ui-state-action" bindtap="onRetryRecords">重试</button></view>
-    <button wx:if="{{recordsHasMore}}" class="ui-state-action" loading="{{recordsLoading}}" bindtap="onMoreRecords">更多明细</button>
+    <view class="record-controls" wx:if="{{recordsLoaded && records.length}}"><button wx:if="{{records.length > 5}}" class="record-fold" bindtap="onToggleRecords" disabled="{{recordsLoading}}">{{recordsExpanded ? '收起本页明细' : '展开本页明细'}}</button><text class="record-page">第 {{recordsPage}} 页 · 每页最多20条</text></view>
+    <view class="record-pagination" wx:if="{{recordsLoaded && (recordsPage > 1 || recordsHasMore)}}"><button class="ui-state-action" bindtap="onPrevRecords" disabled="{{recordsLoading || recordsPage <= 1}}">上一页</button><button class="ui-state-action" loading="{{recordsLoading}}" bindtap="onMoreRecords" disabled="{{recordsLoading || !recordsHasMore}}">下一页</button></view>
   </view>
 
   <!-- 5. 使用说明 -->

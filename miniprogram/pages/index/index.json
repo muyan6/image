@@ -1,4 +1,5 @@
 {
   "usingComponents": {},
-  "navigationBarTitleText": "废片新生所"
+  "navigationBarTitleText": "废片新生所",
+  "enablePullDownRefresh": true
 }

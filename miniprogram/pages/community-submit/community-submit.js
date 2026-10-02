@@ -3,12 +3,13 @@ const app=getApp();
 const labels={uploading:'保存中，可继续提交',pending:'等待审核',published:'已发布',rejected:'未通过 / 已下架',withdrawn:'已撤回'};
 Page({
   data:{jobId:'',job:null,jobLoading:false,jobError:'',title:'',story:'',categoryIndex:0,
-    categories:[{id:'all',name:'其它'},{id:'portrait',name:'冷白人像'},{id:'film',name:'复古胶片'},{id:'old_photo',name:'老照片复苏'},{id:'anime',name:'动漫重绘'}],
+    categories:[{id:'all',name:'按模板自动分组'}],
+    showWorkPicker:false,workChoices:[],workPickerLoading:false,workPickerError:'',workPickerHasMore:false,
     shareOriginal:false,consent:false,submitting:false,submitError:'',items:[],loading:false,loadError:'',hasMore:false},
-  onLoad(options){if(options.job)this.loadJob(decodeURIComponent(options.job));},
+  onLoad(options){if(options&&options.job)this.loadJob(decodeURIComponent(options.job));},
   onShow(){this._visible=true;this.loadMine();},
   onHide(){this._visible=false;},
-  onUnload(){this._unloaded=true;this._mineVersion=(this._mineVersion||0)+1;this._jobVersion=(this._jobVersion||0)+1;},
+  onUnload(){this._unloaded=true;this._mineVersion=(this._mineVersion||0)+1;this._jobVersion=(this._jobVersion||0)+1;this._workPickerVersion=(this._workPickerVersion||0)+1;},
   async loadJob(id,preset){
     const version=(this._jobVersion||0)+1;this._jobVersion=version;
     this.setData({jobId:id,job:null,jobLoading:true,jobError:'',shareOriginal:false,consent:false,submitError:''});
@@ -18,7 +19,7 @@ Page({
       if(job.status!=='succeeded'||!job.result_url)throw new Error('请选择已完成且未过期的作品');
       this.setData({job:{...job,result_url:api.absolute(job.result_url),orig_url:api.absolute(job.orig_url||'')},
         title:preset?preset.title:(job.template_name||'我的新生作品'),story:preset?preset.story:'',
-        categoryIndex:preset?Math.max(0,this.data.categories.findIndex(c=>c.id===preset.category)):0,
+        categoryIndex:preset?this.categoryIndexFor(preset.category):0,
         shareOriginal:!!(preset&&preset.share_original&&job.orig_url)});
     }catch(e){if(!this._unloaded&&version===this._jobVersion)this.setData({jobError:e.message||'作品读取失败'});}
     finally{if(!this._unloaded&&version===this._jobVersion)this.setData({jobLoading:false});}
@@ -29,7 +30,22 @@ Page({
   onCategory(e){this.setData({categoryIndex:Number(e.detail.value)});},
   onOriginal(e){this.setData({shareOriginal:!!e.detail.value,consent:false});},
   onConsent(e){this.setData({consent:e.detail.value.includes('publish')});},
-  onChooseWork(){wx.navigateTo({url:'/pages/works/works'});},
+  categoryIndexFor(id){const index=this.data.categories.findIndex(c=>c.id===id);if(index>=0)return index;if(id&&id!=='all'){this.setData({categories:[...this.data.categories,{id,name:'原分类（保留）'}]});return this.data.categories.length-1;}return 0;},
+  onChooseWork(){this.setData({showWorkPicker:true});return this.loadWorkChoices();},
+  onCloseWorkPicker(){this._workPickerVersion=(this._workPickerVersion||0)+1;this.setData({showWorkPicker:false,workPickerLoading:false});},
+  async loadWorkChoices(more=false){
+    more=more===true;if(more&&(this.data.workPickerLoading||!this.data.workPickerHasMore))return;
+    const version=(this._workPickerVersion||0)+1;this._workPickerVersion=version;const offset=more?this._workNextOffset||0:0;
+    this.setData({workPickerLoading:true,workPickerError:''});
+    try{const r=await api.request('/api/my/jobs?limit=24&offset='+offset+'&status=succeeded');if(this._unloaded||version!==this._workPickerVersion||!this.data.showWorkPicker)return;
+      const hasMore=!!r.has_more,nextOffset=r.next_offset;
+      if(hasMore&&(!Number.isSafeInteger(nextOffset)||nextOffset<=offset))throw new Error('作品分页信息异常，请重试');
+      const items=(r.jobs||[]).filter(x=>x.status==='succeeded'&&x.result_url).map(x=>({...x,preview:api.absolute(x.thumb_url||x.result_url),label:x.template_name||'我的创作'}));
+      this._workNextOffset=nextOffset;this.setData({workChoices:[...new Map((more?[...this.data.workChoices,...items]:items).map(x=>[x.id,x])).values()],workPickerHasMore:hasMore});
+    }catch(e){if(!this._unloaded&&version===this._workPickerVersion)this.setData({workPickerError:e.message||'作品列表读取失败，请重试'});}finally{if(!this._unloaded&&version===this._workPickerVersion)this.setData({workPickerLoading:false});}
+  },
+  onMoreWorkChoices(){return this.loadWorkChoices(true);},
+  onSelectWork(e){const id=e.currentTarget.dataset.id;if(!this.data.workChoices.some(x=>x.id===id))return;this.onCloseWorkPicker();return this.loadJob(id);},
   onCommunity(){wx.switchTab({url:'/pages/community/community'});},
   async onSubmit(){
     if(this.data.submitting||!this.data.job)return;
@@ -56,7 +72,10 @@ Page({
       if(this._unloaded||version!==this._mineVersion)return;
       const items=(r.items||[]).map(x=>({...x,statusLabel:labels[x.status]||x.status}));
       const merged=more?[...this.data.items,...items]:items;
-      this._nextOffset=r.next_offset;this.setData({items:[...new Map(merged.map(x=>[x.id,x])).values()],hasMore:!!r.has_more});
+      const current=this.data.categories[this.data.categoryIndex]||{id:'all'};
+      const categories=[{id:'all',name:'按模板自动分组'},...(Array.isArray(r.categories)?r.categories:[]).filter(x=>x&&x.id!=='all')];
+      if(current.id!=='all'&&!categories.some(x=>x.id===current.id))categories.push({id:current.id,name:'原分类（保留）'});
+      this._nextOffset=r.next_offset;this.setData({items:[...new Map(merged.map(x=>[x.id,x])).values()],hasMore:!!r.has_more,categories,categoryIndex:Math.max(0,categories.findIndex(x=>x.id===current.id))});
     }catch(e){if(!this._unloaded&&version===this._mineVersion)this.setData({loadError:e.message||'投稿列表读取失败'});}
     finally{if(!this._unloaded&&version===this._mineVersion)this.setData({loading:false});}
   },

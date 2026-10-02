@@ -26,7 +26,7 @@
       wx:for="{{ filteredWorks }}"
       wx:key="jobId"
       id="work-{{item.jobId}}" class="work-card gallery-card {{focusJobId === item.jobId ? 'work-card-focused' : ''}}"
-      bindtap="onTapWork"
+      bindtap="onMoreWork"
       data-index="{{ item.sourceIndex }}"
     >
       <view class="work-photo-box">
@@ -41,10 +41,8 @@
         </view>
         <view class="work-processing-badge" wx:if="{{ item.status === 'failed' }}"><text>生成失败</text></view>
       </view>
-      <view wx:if="{{ item.status === 'succeeded' }}" class="work-submit" catchtap="onSubmitWork" data-index="{{ item.sourceIndex }}">投稿到社区 ↗</view>
       <text wx:if="{{item.expiryLabel}}" class="work-expiry">{{item.expiryLabel}}</text>
       <text wx:if="{{item.status === 'failed'}}" class="work-settlement">{{item.settlementLabel || '扣退明细请到光子中心核对'}}</text>
-      <button wx:if="{{item.status === 'succeeded' && item.result}}" class="work-save" catchtap="onSaveWork" data-index="{{item.sourceIndex}}" loading="{{savingJobId === item.jobId}}" disabled="{{!!savingJobId}}">保存到相册</button>
       <view class="work-info">
         <text class="work-date">{{ item.time || '近期拯救' }}</text>
         <view class="work-more-btn" catchtap="onMoreWork" data-index="{{ item.sourceIndex }}" aria-label="更多操作">···</view>

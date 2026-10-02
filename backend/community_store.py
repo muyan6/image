@@ -76,7 +76,10 @@ class CommunityStore:
                     except (TypeError, ValueError, OverflowError): item[field] = default
                 for field in ("title", "story", "template_name", "result_url", "orig_url"):
                     item[field] = str(item.get(field) or "")
-                item["category"] = item.get("category") if item.get("category") in CATEGORIES else "all"
+                # Keep historical category IDs; display taxonomy is a read-only
+                # catalog projection, not a destructive category migration.
+                category = item.get('category')
+                item["category"] = category if isinstance(category,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,64}',category) else 'all'
                 item["quality"] = "light" if item.get("quality") == "light" else "fine"
                 item.setdefault("created_at", time.time())
                 item.setdefault("updated_at", item["created_at"])
@@ -91,14 +94,16 @@ class CommunityStore:
         deletion and edits invalidate before the next read. Submission visibility,
         account bans, likes and comments are deliberately never cached here.
         """
+        def published():
+            return self.list(status='published',limit=None)['items']
         if not hasattr(self.settings, "section_revision"):
-            return self.list(status="published", limit=200)["items"]
+            return copy.deepcopy(published())
         with self.settings._lock:
             revision = self.settings.section_revision("community")
             cached = getattr(self.settings, "_community_public_cache", None)
             now = time.time()
             if not cached or cached[0] != revision or not 0 <= now - cached[1] < 30:
-                rows = self.list(status="published", limit=200)["items"]
+                rows = published()
                 # Normalization can atomically replace the legacy source.
                 revision = self.settings.section_revision("community")
                 cached = (revision, now, rows)
@@ -159,10 +164,15 @@ class CommunityStore:
         items = [p for p in all_items if (status == "all" or p["status"] == status) and
                  (not needle or needle in " ".join(str(p.get(k) or "") for k in ("title", "story", "author_name", "template_name")).lower())]
         items.sort(key=lambda p: (not p["pinned"], p["sort"], -float(p.get("created_at") or 0), p["id"]))
-        return {"items": copy.deepcopy(items[max(0, offset):max(0, offset) + max(1, min(200, limit))]),
+        end = None if limit is None else max(0,offset) + max(1,min(200,limit))
+        return {"items": copy.deepcopy(items[max(0, offset):end]),
                 "total": len(items), "stats": stats}
 
-    def _validated(self, data, existing=None):
+    def _category_labels(self):
+        provider = getattr(self.settings,'_community_category_provider',None)
+        return {**CATEGORIES, **(provider() if provider else {})}
+
+    def _validated(self, data, existing=None, category_labels=None):
         allowed = ("title", "story", "author_name", "author_avatar", "date", "category", "category_name",
                    "template_id", "template_name", "quality", "result_url", "orig_url", "likes", "status", "pinned", "sort")
         item = copy.deepcopy(existing or {"title": "", "story": "", "status": "paused", "pinned": False,
@@ -179,8 +189,12 @@ class CommunityStore:
         if not item["title"]: raise ValueError("请填写帖子标题")
         if item["status"] not in ("published", "paused"): raise ValueError("帖子状态只能是发布或暂停展示")
         if item["quality"] not in ("light", "fine"): raise ValueError("画质档位无效")
-        if item["category"] not in CATEGORIES: raise ValueError("请选择有效的帖子分类")
-        item["category_name"] = item["category_name"] or CATEGORIES[item["category"]]
+        labels = category_labels if category_labels is not None else (CATEGORIES if existing else self._category_labels())
+        unchanged = bool(existing and item.get('category') == existing.get('category'))
+        category = item.get('category')
+        if not isinstance(category,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',category) or (category not in labels and not unchanged):
+            raise ValueError("请选择有效的帖子分类")
+        item["category_name"] = item["category_name"] or labels.get(category,'未分组')
         if type(item["pinned"]) is not bool: raise ValueError("置顶标记必须是布尔值")
         for key, maximum in (("likes", 1_000_000_000), ("sort", 99999)):
             if type(item[key]) is not int or not 0 <= item[key] <= maximum:
@@ -207,11 +221,12 @@ class CommunityStore:
 
     def update(self, post_id, data):
         self._normalize()
+        labels = self._category_labels()
         result = {}
         def edit(doc):
             for index, current in enumerate(doc["items"]):
                 if current["id"] == post_id:
-                    result.update(self._validated(data, current))
+                    result.update(self._validated(data, current, labels))
                     doc["items"][index] = result
                     return
             raise KeyError("帖子不存在")
@@ -243,7 +258,8 @@ class CommunityStore:
 
     def _cleanup_deleted_media(self, removed):
         with self.settings._lock:
-            kept = {p.get(key) for p in self.settings.community()["items"] for key in ("result_url", "orig_url", "author_avatar")}
+            conf = (self.settings.community_snapshot() if hasattr(self.settings,'community_snapshot') else self.settings.snapshot().get('community',{}))
+            kept = {p.get(key) for p in conf.get('items',[]) for key in ("result_url", "orig_url", "author_avatar") if isinstance(p,dict)}
             for post in removed:
                 for key in ("result_url", "orig_url", "author_avatar"):
                     url = post.get(key) or ""

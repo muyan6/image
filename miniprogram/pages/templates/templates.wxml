@@ -13,25 +13,18 @@
     <view class="search-clear" wx:if="{{ searchQuery }}" bindtap="onClearSearch">清除</view>
   </view>
 
-  <!-- 分类筛选项 (艺术纸本印泥胶囊) -->
+  <!-- 范围切换；收藏与最近不受目录分类限制 -->
   <view class="preference-bar"><view class="preference-chip {{preferenceMode === 'all' ? 'preference-active' : ''}}" data-id="all" bindtap="onPreferenceFilter">全部模板</view><view class="preference-chip {{preferenceMode === 'favorites' ? 'preference-active' : ''}}" data-id="favorites" bindtap="onPreferenceFilter">我的收藏</view><view class="preference-chip {{preferenceMode === 'recent' ? 'preference-active' : ''}}" data-id="recent" bindtap="onPreferenceFilter">最近使用</view></view>
   <view wx:if="{{preferencesError}}" class="ui-inline-state catalog-state"><text class="catalog-state-message">{{preferencesError}}</text><button class="ui-state-action catalog-retry" bindtap="loadPreferences">重试</button></view>
   <view wx:if="{{preferencesLoading && preferenceMode !== 'all'}}" class="ui-inline-state"><text>正在同步收藏与最近使用…</text></view>
-  <scroll-view class="category-bar" scroll-x enable-flex show-scrollbar="{{ false }}">
-    <view
-      wx:for="{{ categories }}"
-      wx:key="id"
-      class="cat-chip {{ activeCategory === item.id ? 'cat-chip-active' : '' }}"
-      bindtap="onSelectCategory"
-      data-id="{{ item.id }}"
-    >
-      <text class="cat-chip-text">{{ item.id === 'all' ? '全部' : item.name }}</text>
-      <text class="cat-chip-count" wx:if="{{ item.count > 0 }}">({{ item.count }})</text>
-    </view>
-  </scroll-view>
-  <view class="catalog-sort" wx:if="{{activeCategory === 'all' && preferenceMode !== 'recent'}}">
-    <view wx:for="{{sortModes}}" wx:key="id" class="sort-chip {{sortMode === item.id ? 'sort-active' : ''}}" bindtap="onSortMode" data-id="{{item.id}}">{{item.name}}</view>
-    <button wx:if="{{sortMode === 'random'}}" class="sort-shuffle" bindtap="onShuffleTemplates">换一批</button>
+  <view class="catalog-filters" wx:if="{{preferenceMode === 'all'}}">
+    <picker class="catalog-picker" mode="selector" range="{{categories}}" range-key="name" value="{{categoryIndex}}" bindchange="onCategoryChange" aria-label="选择模板分类">
+      <view class="catalog-picker-trigger"><text class="picker-label">{{categoryLabel}}</text><text class="picker-indicator">⌄</text></view>
+    </picker>
+    <picker class="catalog-picker {{activeCategory !== 'all' ? 'catalog-picker-disabled' : ''}}" mode="selector" range="{{sortModes}}" range-key="name" value="{{sortIndex}}" disabled="{{activeCategory !== 'all'}}" bindchange="onSortChange" aria-label="{{activeCategory === 'all' ? '选择模板排序' : '本分类按后台顺序展示'}}">
+      <view class="catalog-picker-trigger"><text class="picker-label">{{sortLabel}}</text><text class="picker-indicator" wx:if="{{activeCategory === 'all'}}">⌄</text></view>
+    </picker>
+    <button wx:if="{{activeCategory === 'all' && sortMode === 'random'}}" class="sort-shuffle" bindtap="onShuffleTemplates">换一批</button>
   </view>
 
   <!-- 模板展柜卡片流 (双列艺术画框网格) -->
@@ -49,6 +42,7 @@
       wx:for="{{ filteredTemplates }}"
       wx:key="id"
       class="template-card gallery-card"
+      aria-label="{{item.name}}，查看模板详情"
       bindtap="onOpenDetail"
       data-template="{{ item }}"
     >
@@ -68,10 +62,9 @@
 
       <view class="card-content">
         <view class="card-name-row">
-          <text class="card-name">{{ item.name }}</text>
+          <text class="card-name" aria-label="{{item.name}}">{{ item.name }}</text>
           <button class="favorite-btn {{item.favorite ? 'favorite-active' : ''}}" catchtap="onFavorite" data-id="{{item.id}}" aria-label="{{item.favorite ? '取消收藏模板' : '收藏模板'}}">{{item.favorite ? '★' : '☆'}}</button>
         </view>
-        <text class="card-subtitle">{{ item.subtitle }}</text>
         
         <view class="card-action-bar">
           <text class="card-cost">{{ item.costText || '按档位' }}</text>

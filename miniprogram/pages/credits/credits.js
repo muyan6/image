@@ -23,7 +23,7 @@ Page({
     paymentBusy: false,
     catalogLoading:true, catalogError:'', catalogStale:false,
     packages: [],
-    records: [], recordsLoading:false, recordsLoaded:false, recordsError:'', recordsHasMore:false, recordTotal:0,
+    records: [], visibleRecords:[], recordsExpanded:false, recordsPage:1, recordsLoading:false, recordsLoaded:false, recordsError:'', recordsHasMore:false, recordTotal:0,
     balanceLoaded:false, balanceError:''
   },
 
@@ -111,14 +111,15 @@ Page({
     }).catch(() => {if(!this._unloaded&&version===this._balanceVersion)this.setData({balanceError:'余额更新失败，请重试'});});
   },
 
-  async loadRecords(more=false) {
-    more=more===true;
-    if(more&&(this.data.recordsLoading||!this.data.recordsHasMore))return;
+  async loadRecords(mode=false) {
+    const next=mode===true||mode==='next',prev=mode==='prev',retry=mode==='retry';
+    if((next||prev)&&this.data.recordsLoading||next&&!this.data.recordsHasMore||prev&&this.data.recordsPage<=1)return;
     const version=(this._recordsVersion||0)+1;this._recordsVersion=version;
-    const offset=more?(this._recordsOffset||0):0;
+    const starts=this._recordPageStarts||[0];
+    const offset=next?(this._recordsOffset||0):prev?starts[starts.length-2]:retry?(this._recordCurrentStart||0):0;
     this.setData({recordsLoading:true,recordsError:''});
     try {
-      const d=await api.request('/api/me/credits?limit=30&offset='+offset);
+      const d=await api.request('/api/me/credits?limit=20&offset='+offset);
       if(this._unloaded||version!==this._recordsVersion)return;
       if(!d||!Array.isArray(d.items))throw new Error('光子明细数据异常');
       const items=d.items.map(item=>{
@@ -126,14 +127,19 @@ Page({
         return {...item, amountText:(item.amount>0?'+':'')+item.amount,
           time:`${date.getFullYear()}.${pad(date.getMonth()+1)}.${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`};
       });
-      this._recordsOffset=d.next_offset;
-      this.setData({records:[...new Map((more?this.data.records.concat(items):items).map(x=>[x.id,x])).values()],
+      if(items.length>20||d.has_more&&(!Number.isInteger(d.next_offset)||d.next_offset<=offset))throw new Error('光子明细分页数据异常，请重试');
+      this._recordsOffset=d.next_offset;this._recordCurrentStart=offset;
+      this._recordPageStarts=next?starts.concat(offset):prev?starts.slice(0,-1):retry?starts:[0];
+      const records=[...new Map(items.map(x=>[x.id,x])).values()];
+      this.setData({records,visibleRecords:records.slice(0,5),recordsExpanded:false,recordsPage:this._recordPageStarts.length,
         recordTotal:d.total,recordsHasMore:!!d.has_more,recordsLoaded:true});
     }catch(e){if(!this._unloaded&&version===this._recordsVersion)this.setData({recordsError:e.message||'光子明细读取失败，请重试'});}
     finally{if(!this._unloaded&&version===this._recordsVersion)this.setData({recordsLoading:false});}
   },
   onMoreRecords(){return this.loadRecords(true);},
-  onRetryRecords(){return this.loadRecords();},
+  onPrevRecords(){return this.loadRecords('prev');},
+  onRetryRecords(){return this.loadRecords('retry');},
+  onToggleRecords(){const expanded=!this.data.recordsExpanded;this.setData({recordsExpanded:expanded,visibleRecords:expanded?this.data.records:this.data.records.slice(0,5)});},
   onOpenRecord(e){
     const row=this.data.records.find(x=>String(x.id)===String(e.currentTarget.dataset.id));if(!row)return;
     if(row.order_id)wx.navigateTo({url:'/pages/orders/orders?id='+encodeURIComponent(row.order_id)});

@@ -11,14 +11,7 @@ const update=(page,patch)=>typeof api.setDataStable==='function'?api.setDataStab
  */
 Page({
   data: {
-    filters: [
-      { id: 'all', name: '全部展品' },
-      { id: 'liked', name: '我喜欢的' },
-      { id: 'portrait', name: '冷白人像' },
-      { id: 'film', name: '复古胶片' },
-      { id: 'old_photo', name: '老照片复苏' },
-      { id: 'anime', name: '动漫重绘' }
-    ],
+    filters: [{id:'all',name:'全部展品'},{id:'liked',name:'我喜欢的'}],
     activeFilter: 'all',
     items: [],
     filteredItems: [],
@@ -64,10 +57,21 @@ Page({
     update(this,{loading:!more&&!this.data.items.length,loadingMore:more,loadError:''});
     const task=(async()=>{
       const offset=more?(this._nextOffset||0):0,fid=this.data.activeFilter;
-      const query='?limit=24&offset='+offset+(fid==='liked'?'&liked_only=true':fid!=='all'?'&category='+encodeURIComponent(fid):'');
+      const selected=this.data.filters.find(f=>f.id===fid),category=selected&&selected.categoryId||fid;
+      const query='?limit=24&offset='+offset+(fid==='liked'?'&liked_only=true':fid!=='all'?'&category='+encodeURIComponent(category):'');
       const d=await api.request('/api/community'+query,{timeout:8000});
       if(this._unloaded||this._visible===false||version!==this._loadVersion)return;
       if(!d||!Array.isArray(d.items))throw new Error('社区列表数据异常');
+      if(Array.isArray(d.categories)){
+        const groups=d.categories.filter(g=>g&&typeof g.id==='string'&&g.id!=='all');
+        const filters=[{id:'all',name:'全部展品'},{id:'liked',name:'我喜欢的'},...groups.map(g=>({id:g.id==='liked'?'category:liked':g.id,categoryId:g.id,name:g.name}))];
+        update(this,{filters});
+        if(!filters.some(f=>f.id===fid)){
+          update(this,{activeFilter:'all',items:[],filteredItems:[],loaded:false,hasMore:false});
+          this._nextOffset=0;this._lastLoadedAt=0;this._loadingCommunity=null;this._loadingFilter=null;
+          return this.loadCommunity(true);
+        }
+      }
       if(d.has_more&&(!Number.isInteger(Number(d.next_offset))||Number(d.next_offset)<=offset))throw new Error('社区分页异常');
       let items=d.items;
       items=items.map(item=>{
@@ -92,7 +96,15 @@ Page({
         items:[...new Map((more?this.data.items.concat(items):items).map(x=>[x.id,x])).values()],loading:false,
         loaded:true,total:Number(d.total)||items.length,hasMore:!!d.has_more});
       this.filterItems(this.data.activeFilter);this._lastLoadedAt=Date.now();
-    })().catch(()=>{if(!this._unloaded&&this._visible!==false&&version===this._loadVersion)update(this,{loading:false,loadError:'社区加载失败，请重试'});}).finally(()=>{
+    })().catch(err=>{
+      if(this._unloaded||this._visible===false||version!==this._loadVersion)return;
+      if(err&&err.status===400&&this.data.activeFilter!=='all'&&this.data.activeFilter!=='liked'){
+        update(this,{activeFilter:'all',items:[],filteredItems:[],loaded:false,hasMore:false});
+        this._nextOffset=0;this._lastLoadedAt=0;this._loadingCommunity=null;this._loadingFilter=null;
+        return this.loadCommunity(true);
+      }
+      update(this,{loading:false,loadError:'社区加载失败，请重试'});
+    }).finally(()=>{
       if(this._loadingCommunity===task)this._loadingCommunity=null;
       if(!this._unloaded&&this._visible!==false&&version===this._loadVersion)update(this,{loading:false,loadingMore:false});
     });
@@ -102,7 +114,7 @@ Page({
   onMorePosts(){return this.loadCommunity(true,true);},
   onRetry(){return this.loadCommunity(true);},
   onUnload(){this._unloaded=true;this._loadVersion=(this._loadVersion||0)+1;},
-  onContribute(){wx.navigateTo({url:'/pages/works/works'});},
+  onContribute(){wx.navigateTo({url:'/pages/community-submit/community-submit'});},
   onMySubmissions(){wx.navigateTo({url:'/pages/community-submit/community-submit'});},
 
   onSelectFilter(e) {
@@ -115,14 +127,9 @@ Page({
   },
 
   filterItems(fid) {
-    const all = this.data.items;
-    if (fid === 'all') {
-      update(this,{ filteredItems: all });
-    } else {
-      update(this,{
-        filteredItems: all.filter((x) => fid==='liked'?x.liked:x.category === fid)
-      });
-    }
+    // Category selection has already happened over the full source in SQL.
+    // Only a just-unliked item needs immediate local removal from this view.
+    update(this,{filteredItems:fid==='liked'?this.data.items.filter(x=>x.liked):this.data.items});
   },
 
   async onLikeItem(e) {

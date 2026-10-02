@@ -53,10 +53,6 @@ page {
   letter-spacing: 2rpx;
 }
 
-.quick-export {
-  padding: 6rpx 18rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.3);
-}
 
 /* 观览台主体 */
 .gallery-stage {
@@ -303,7 +299,7 @@ page {
 .nav-back .compare-label { font-size: 28rpx; font-weight: 500; }
 .nav-spec { min-width: 0; min-height: 56rpx; flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; }
 .spec-label { display: block; font-size: 24rpx; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.quick-export { width: 112rpx; min-height: 72rpx; padding: 0 18rpx; display: flex; align-items: center; justify-content: center; text-align: center; flex: 0 0 112rpx; }
+.gallery-nav::after { content: ''; width: 112rpx; flex: 0 0 112rpx; pointer-events: none; }
 .tag-serif { font-size: 26rpx; line-height: 1.5; }
 .floating-tag .compare-label { font-size: 24rpx; line-height: 1.5; }
 .hold-capsule .compare-label { font-size: 26rpx; }

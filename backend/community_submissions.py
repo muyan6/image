@@ -55,6 +55,14 @@ class SubmissionStore:
         with self.users._lock:
             return self._row('SELECT * FROM community_submissions WHERE id=?', (sid,))
 
+    def category_for_job(self, owner, job_id):
+        """Keep an unchanged historical category legal after catalog removal."""
+        with self.users._lock:
+            owners = aliases_unlocked(self.users,owner)
+            row = self.users._conn.execute('SELECT payload FROM community_submissions WHERE owner IN ('+marks(owners)+') AND job_id=? '
+                'ORDER BY updated DESC LIMIT 1',(*owners,job_id)).fetchone()
+        return json.loads(row[0]).get('category','all') if row else None
+
     def reserve(self, owner, job, content):
         now = time.time()
         with self.users._lock, self.users._conn:
@@ -165,8 +173,9 @@ class SubmissionStore:
         for row in rows:row['payload']=json.loads(row['payload'])
         return rows,total
 
-    def public_page(self, editorial, *, offset=0, limit=24, category='all', liked_viewer=None, cos_ready=True):
-        """Merge at most 200 editorial candidates with indexed public submissions.
+    def public_page(self, editorial, *, offset=0, limit=24, category='all', liked_viewer=None, cos_ready=True,
+                    template_groups=None, catalog_groups=None, legacy_category=False):
+        """Merge retained editorial candidates with indexed public submissions.
 
         Only a bounded page of IDs/sort metadata is cached. SQLite source tokens
         include both local writes and other connections, including bans/aliases.
@@ -174,12 +183,14 @@ class SubmissionStore:
         """
         offset=max(0,int(offset));limit=max(1,min(200,int(limit)))
         editorial=tuple((p['id'],int(bool(p.get('pinned'))),int(p.get('sort',100)),float(p.get('created_at') or 0))
-                        for p in editorial[:200])
+                        for p in editorial)
+        mapping = tuple(sorted((template_groups or {}).items())) if template_groups is not None else None
+        group_ids = tuple(sorted(catalog_groups or ()))
         with self.users._lock:
             db=self.users._conn
             token=(db.total_changes,db.execute('PRAGMA data_version').fetchone()[0])
             viewer=canonical_unlocked(self.users,liked_viewer) if liked_viewer else None
-            key=(token,editorial,offset,limit,category,viewer,bool(cos_ready))
+            key=(token,editorial,offset,limit,category,viewer,bool(cos_ready),mapping,group_ids,bool(legacy_category))
             cached=self._public_pages.get(key)
             if cached is not None:return copy.deepcopy(cached)
             if self._json_available is None:
@@ -198,26 +209,37 @@ class SubmissionStore:
                 selected=[(eid,pinned,sort,submitted,'editorial') for eid,pinned,sort,submitted in editorial]
                 for sid,featured,submitted,payload in rows:
                     p=json.loads(payload)
-                    if not p.get('result_key') or category!='all' and p.get('category','all')!=category:continue
+                    effective = p.get('category','all') if legacy_category or mapping is None else (
+                        p.get('category') if p.get('category') in group_ids else (template_groups or {}).get(p.get('template_id'),'all'))
+                    if not p.get('result_key') or category!='all' and effective!=category:continue
                     if viewer and not db.execute("SELECT 1 FROM community_likes l LEFT JOIN account_aliases a ON a.alias_openid=l.owner WHERE l.post_id=? AND COALESCE(a.canonical_openid,l.owner)=?",(sid,viewer)).fetchone():continue
                     selected.append((sid,featured,100,submitted,'submission'))
                 selected.sort(key=lambda p:(not p[1],p[2],-p[3],p[0]))
                 total=len(selected);selected=selected[offset:offset+limit]
             else:
-                values=','.join('(?,?,?,?)' for _ in editorial)
-                prefix=("WITH editorial(id,pinned,sort,submitted) AS (VALUES "+values+") " if editorial else
-                        "WITH editorial(id,pinned,sort,submitted) AS (SELECT '',0,0,0 WHERE 0) ")
-                args=[value for row in editorial for value in row]
+                # One JSON parameter avoids the SQL variable ceiling even when
+                # legacy editorial data/catalogs exceed their current edit caps.
+                prefix="WITH editorial(id,pinned,sort,submitted) AS (SELECT json_extract(value,'$[0]'),json_extract(value,'$[1]'),json_extract(value,'$[2]'),json_extract(value,'$[3]') FROM json_each(?))"
+                args=[json.dumps(editorial,separators=(',',':'))]
+                joins=''
+                if mapping is not None and not legacy_category:
+                    prefix+=", catalog_groups(id) AS (SELECT value FROM json_each(?)), template_groups(id,group_id) AS (SELECT json_extract(value,'$[0]'),json_extract(value,'$[1]') FROM json_each(?))"
+                    args.extend((json.dumps(group_ids,separators=(',',':')),json.dumps(mapping,separators=(',',':'))))
+                    joins=" LEFT JOIN catalog_groups cg ON cg.id=json_extract(s.payload,'$.category') LEFT JOIN template_groups tg ON tg.id=json_extract(s.payload,'$.template_id')"
+                prefix+=' '
                 condition="s.status='published' AND u.banned=0 AND ? AND COALESCE(json_extract(s.payload,'$.result_key'),'')<>''"
                 args.append(int(bool(cos_ready)))
-                if category!='all':condition+=" AND json_extract(s.payload,'$.category')=?";args.append(category)
+                if category!='all':
+                    condition+=(" AND COALESCE(cg.id,tg.group_id,'all')=?" if mapping is not None and not legacy_category else
+                                " AND json_extract(s.payload,'$.category')=?")
+                    args.append(category)
                 if viewer:
                     condition+=" AND EXISTS(SELECT 1 FROM community_likes l LEFT JOIN account_aliases la ON la.alias_openid=l.owner WHERE l.post_id=s.id AND COALESCE(la.canonical_openid,l.owner)=?)"
                     args.append(viewer)
                 candidates=("SELECT id,pinned,sort,submitted,'editorial' AS source FROM editorial UNION ALL "
                     "SELECT s.id,s.featured,100,s.submitted,'submission' FROM community_submissions s "
                     "LEFT JOIN account_aliases a ON a.alias_openid=s.owner "
-                    "JOIN users u ON u.openid=COALESCE(a.canonical_openid,s.owner) WHERE "+condition)
+                    "JOIN users u ON u.openid=COALESCE(a.canonical_openid,s.owner)"+joins+" WHERE "+condition)
                 total=db.execute(prefix+'SELECT COUNT(*) FROM ('+candidates+')',args).fetchone()[0]
                 selected=db.execute(prefix+candidates+' ORDER BY pinned DESC,sort ASC,submitted DESC,id ASC LIMIT ? OFFSET ?',(*args,limit,offset)).fetchall()
             result=([{'id':r[0],'source':r[4]} for r in selected],total)

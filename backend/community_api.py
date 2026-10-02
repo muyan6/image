@@ -12,6 +12,34 @@ from account_links import owns, aliases_unlocked, marks
 from tencent_cs import moderate_text, ModerationError
 
 
+def catalog_context(m):
+    """Public taxonomy follows the currently enabled, visible template catalog."""
+    templates = getattr(m,'templates',None)
+    groups = templates.list_groups(enabled_only=True) if templates and hasattr(templates,'list_groups') else []
+    categories = [{'id':g['id'],'name':g['name']} for g in groups if g.get('id') != 'all']
+    names = {g['id']:g['name'] for g in categories}
+    rows = templates.list_templates(enabled_only=True) if templates and hasattr(templates,'list_templates') else []
+    mapping = {t['id']:t['group_id'] for t in rows if t.get('group_id') in names}
+    if templates and hasattr(templates,'list_groups'):
+        # Existing administrative CommunityStore(settings) objects see current
+        # groups too; this provider is not persisted or exposed in settings JSON.
+        m.settings._community_category_provider = lambda: {
+            g['id']:g['name'] for g in m.templates.list_groups(enabled_only=True) if g.get('id') != 'all'}
+    return {'categories':categories,'names':names,'template_groups':mapping}
+
+
+def category_fields(m, payload, context=None, legacy=False):
+    context = context or catalog_context(m)
+    raw = payload.get('category','all')
+    if not isinstance(raw,str):raw='all'
+    template_id = payload.get('template_id')
+    group = raw if raw in context['names'] else context['template_groups'].get(template_id if isinstance(template_id,str) else '', 'all')
+    name = context['names'].get(group,'未分组')
+    return {'category':raw if legacy else group,
+            'categoryName':CATEGORIES.get(raw,payload.get('category_name') or name) if legacy else name,
+            'group_id':group,'group_name':name,'legacyCategory':raw}
+
+
 class SubmissionBody(BaseModel):
     job_id: str = Field(min_length=6,max_length=32)
     title: str = Field(min_length=1,max_length=60)
@@ -67,6 +95,7 @@ def visible_comment(m, cid):
 
 
 def admin_posts(m, status='all', q='', offset=0, limit=30):
+    context = catalog_context(m)
     result=CommunityStore(m.settings).list(status,q,0,200)
     all_submissions=store_for(m.users).list(status='published',limit=200)[0]
     stats=result['stats'];stats['total']+=len(all_submissions);stats['published']+=len(all_submissions)
@@ -76,8 +105,8 @@ def admin_posts(m, status='all', q='', offset=0, limit=30):
         for row in all_submissions:
             p=row['payload']
             if q.strip().lower() not in ' '.join(str(p.get(k,'')) for k in ('title','story','author_name','template_name')).lower():continue
-            items.append(dict(owner_view(m,row),source='submission',status='published',
-                              category_name=CATEGORIES[p['category']],template_name=p['template_name'],
+            items.append(dict(owner_view(m,row,context),source='submission',status='published',
+                              category_name=category_fields(m,p,context)['categoryName'],template_name=p['template_name'],
                               pinned=bool(row['featured']),sort=100,created_at=row['submitted'],updated_at=row['updated']))
     items.sort(key=lambda p:(not p.get('pinned'),p.get('sort',100),-p.get('created_at',0),p['id']))
     offset=max(0,offset);limit=max(1,min(200,limit))
@@ -104,10 +133,12 @@ def signed(m, key, *, thumbnail=False):
     return cos.presign(m.settings,'get',key,ttl_seconds=300)
 
 
-def owner_view(m, row):
+def owner_view(m, row, context=None):
     p=row['payload'];visible=row['status'] in ('pending','published')
+    fields = category_fields(m,p,context)
     return {'id':row['id'],'job_id':row['job_id'],'revision':row['revision'],'status':row['status'],
             'title':p['title'],'story':p['story'],'category':p['category'],'author_name':p['author_name'],
+            **{key:fields[key] for key in ('categoryName','group_id','group_name','legacyCategory')},
             'share_original':p['share_original'],'reason':row['reason'],'featured':bool(row['featured']),
             'reward':row['reward'],'rewarded':store_for(m.users).rewarded(row['id']),'submitted_at':row['submitted'],
             'result_url':signed(m,p['result_key']) if visible else '',
@@ -136,6 +167,7 @@ def community_user(m,request):
 
 def make_community_router(runtime):
     router=APIRouter()
+    catalog_context(runtime())
 
     @router.get('/api/community/media/{filename}/thumbnail')
     def editorial_media_thumbnail(filename:str):
@@ -150,10 +182,14 @@ def make_community_router(runtime):
         if not body.consent:raise HTTPException(400,detail='请先确认社区公开展示授权')
         if m.settings.maintenance().get('enabled'):raise HTTPException(503,detail='服务维护中，请稍后投稿')
         title=body.title.strip();story=body.story.strip()
-        if not title or body.category not in CATEGORIES:raise HTTPException(400,detail='请填写标题并选择有效分类')
+        if not title:raise HTTPException(400,detail='请填写标题并选择有效分类')
         job=m.jobs.get(m._safe_job_id(body.job_id))
         if not job or not owns(m.users,job.get('openid'),user['openid']) or job.get('deleted_at'):
             raise HTTPException(404,detail='作品不存在')
+        context = catalog_context(m)
+        if body.category not in CATEGORIES and body.category not in context['names']:
+            previous = store_for(m.users).category_for_job(user['openid'],job['id'])
+            if previous != body.category:raise HTTPException(400,detail='请选择有效分类；已停用分类可改为自动分组')
         if job.get('status')!='succeeded' or time.time()>=m._media_expires_at(job,'result'):
             raise HTTPException(409,detail='只能投稿已完成且未过期的作品')
         if not job.get('result_cos') or not m.settings.cos_ready():raise HTTPException(409,detail='作品尚未保存到云端')
@@ -207,8 +243,9 @@ def make_community_router(runtime):
         m=runtime();u=m._current_user(request);s=store_for(m.users)
         with s.flow_lock:
             s.maintenance();rows,total=s.list(owner=u['openid'],offset=offset,limit=limit)
-            return {'items':[owner_view(m,r) for r in rows],'total':total,'next_offset':max(0,offset)+len(rows),
-                    'has_more':max(0,offset)+len(rows)<total}
+            context = catalog_context(m)
+            return {'items':[owner_view(m,r,context) for r in rows],'total':total,'next_offset':max(0,offset)+len(rows),
+                    'has_more':max(0,offset)+len(rows)<total,'categories':context['categories']}
 
     @router.post('/api/community/submissions/{sid}/withdraw')
     def withdraw(sid:str,body:RevisionBody,request:Request):
@@ -315,7 +352,10 @@ def make_community_router(runtime):
 
 
 def public_feed(m,request,offset=0,limit=200,liked_only=False,category='all'):
-    if category not in CATEGORIES:raise HTTPException(400,detail='社区分类无效')
+    context = catalog_context(m)
+    if category != 'all' and category not in context['names'] and category not in CATEGORIES:
+        raise HTTPException(400,detail='社区分类无效')
+    legacy = category != 'all' and category not in context['names'] and category in CATEGORIES
     viewer=None
     if request.headers.get('authorization') or getattr(request,'cookies',{}).get('site_session'):
         try:viewer=m._current_user(request)['openid']
@@ -330,18 +370,20 @@ def public_feed(m,request,offset=0,limit=200,liked_only=False,category='all'):
             liked_ids={r[0] for r in m.users._conn.execute('SELECT post_id FROM community_likes WHERE owner IN ('+marks(viewers)+')',viewers)}
     for p in CommunityStore(m.settings).public_items():
         if liked_ids is not None and p['id'] not in liked_ids:continue
-        if category!='all' and p.get('category','all')!=category:continue
+        fields = category_fields(m,p,context,legacy)
+        if category!='all' and fields['category']!=category:continue
         editorial_candidates.append(p)
         items.append({'id':p['id'],'title':p.get('title',''),'story':p.get('story',''),
             'authorName':p.get('author_name',''),'authorAvatar':p.get('author_avatar',''),'date':p.get('date',''),
-            'category':p.get('category','all'),'categoryName':p.get('category_name',''),
+            **fields,
             'templateId':p.get('template_id',''),'templateName':p.get('template_name',''),
             'quality':p.get('quality','light'),'resultUrl':p.get('result_url',''),'origUrl':p.get('orig_url',''),
             'thumbnailUrl':p.get('result_url',''),
             'likes':m._community_likes(p.get('likes')),'liked':False,'pinned':bool(p.get('pinned')),
             'featured':False,'_sort':(not p.get('pinned'),p.get('sort',100),-float(p.get('created_at') or 0),p['id'])})
     candidates,total=s.public_page(editorial_candidates,offset=offset,limit=limit,category=category,
-        liked_viewer=viewer if liked_only else None,cos_ready=m.settings.cos_ready())
+        liked_viewer=viewer if liked_only else None,cos_ready=m.settings.cos_ready(),
+        template_groups=context['template_groups'],catalog_groups=context['names'],legacy_category=legacy)
     editorial_views={p['id']:p for p in items}
     submission_rows=s.public_rows([p['id'] for p in candidates if p['source']=='submission'])
     items=[]
@@ -351,11 +393,12 @@ def public_feed(m,request,offset=0,limit=200,liked_only=False,category='all'):
         row=submission_rows.get(candidate['id'])
         if not row:continue
         p=row['payload']
-        if category!='all' and p.get('category','all')!=category:continue
+        fields = category_fields(m,p,context,legacy)
+        if category!='all' and fields['category']!=category:continue
         if not p.get('result_key'):continue
         items.append({'id':row['id'],'title':p['title'],'story':p['story'],'authorName':p['author_name'],'authorAvatar':'',
             'date':datetime.fromtimestamp(row['submitted'],timezone(timedelta(hours=8))).strftime('%Y.%m.%d'),
-            'category':p['category'],'categoryName':CATEGORIES[p['category']],'templateId':p['template_id'],
+            **fields,'templateId':p['template_id'],
             'templateName':p['template_name'],'quality':p['quality'],'resultUrl':'','origUrl':'',
             '_media_keys':(p['result_key'],p['orig_key'] if p['share_original'] else ''),
             'likes':0,'liked':False,'pinned':bool(row['featured']),'featured':bool(row['featured']),
@@ -371,7 +414,8 @@ def public_feed(m,request,offset=0,limit=200,liked_only=False,category='all'):
         count,liked=likes.get(p['id'],(0,False));p['likes']+=count;p['liked']=liked;p.pop('_sort',None)
         p['comments']=counts.get(p['id'],0)
     return {'enabled':True,'items':items,'featured_reward':m.settings.rewards()['community_featured'],
-            'has_more':offset+len(items)<total,'next_offset':offset+len(items),'total':total,'submissions_enabled':True}
+            'has_more':offset+len(candidates)<total,'next_offset':offset+len(candidates),'total':total,'submissions_enabled':True,
+            'categories':context['categories'],'category_semantics':'legacy' if legacy else 'template_group','legacySemantics':legacy}
 
 
 def post_view(m,row):
@@ -379,7 +423,7 @@ def post_view(m,row):
         p=row['payload']
         return {'id':row['id'],'title':p['title'],'story':p['story'],'authorName':p['author_name'],'authorAvatar':'',
                 'date':datetime.fromtimestamp(row['submitted'],timezone(timedelta(hours=8))).strftime('%Y.%m.%d'),
-                'category':p['category'],'categoryName':CATEGORIES[p['category']],
+                **category_fields(m,p),
                 'templateId':p['template_id'],'templateName':p['template_name'],'quality':p['quality'],
                 'resultUrl':signed(m,p['result_key']),'origUrl':signed(m,p['orig_key']) if p['share_original'] else '',
                 'thumbnailUrl':signed(m,p['result_key'],thumbnail=True),
@@ -387,7 +431,7 @@ def post_view(m,row):
     fields={'authorName':'author_name','authorAvatar':'author_avatar','categoryName':'category_name',
             'templateId':'template_id','templateName':'template_name','resultUrl':'result_url','origUrl':'orig_url'}
     return {**{k:row.get(k,'') for k in ('id','title','story','date','category','quality')},
-            **{k:row.get(v,'') for k,v in fields.items()},'likes':m._community_likes(row.get('likes')),
+            **{k:row.get(v,'') for k,v in fields.items()},**category_fields(m,row),'likes':m._community_likes(row.get('likes')),
             'thumbnailUrl':editorial_thumbnail(m.settings,row.get('result_url','')),
             'liked':False,'featured':False,'pinned':bool(row.get('pinned'))}
 
@@ -427,7 +471,8 @@ def install_admin_routes(router,guard,runtime):
         try:
             with s.flow_lock:
                 s.maintenance();rows,total=s.list(status=status,offset=offset,limit=limit)
-                return {'items':[owner_view(m,r) for r in rows],'total':total,'reward':m.settings.rewards()['community_featured']}
+                context=catalog_context(m)
+                return {'items':[owner_view(m,r,context) for r in rows],'total':total,'reward':m.settings.rewards()['community_featured']}
         except ValueError as exc:raise HTTPException(400,detail=str(exc)) from exc
 
     @router.post('/community/submissions/{sid}/review')

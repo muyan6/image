@@ -216,7 +216,7 @@ def make_admin_router(*, settings: SettingsStore,
     def submission_runtime():
         from types import SimpleNamespace
         import main as runtime
-        return SimpleNamespace(settings=settings,users=users,jobs=jobs,cleanup=runtime.cleanup)
+        return SimpleNamespace(settings=settings,users=users,jobs=jobs,cleanup=runtime.cleanup,templates=templates)
     install_admin_routes(router,_guard,submission_runtime)
 
     @router.post("/login")
