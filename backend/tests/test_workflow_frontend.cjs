@@ -24,14 +24,17 @@ async function test(name,fn) {
 const job={id:'abcdef123456',status:'succeeded',orig_url:'https://cos.invalid/orig?signature=fresh',
   result_url:'https://cos.invalid/result?signature=fresh',width:90,height:160};
 (async()=>{
-  await test('homepage_copy_and_history_follow_all_creation_entries',()=>{
+  await test('homepage_copy_and_equal_shortcuts_live_inside_photo_card',()=>{
     const xml=fs.readFileSync(path.join(root,'miniprogram/pages/index/index.wxml'),'utf8');
     assert(xml.includes('旧日瞬间 · 重现眼前'));
-    assert.equal((xml.match(/class="history-entry"/g)||[]).length,1);
-    assert(xml.indexOf('class="history-entry"')>xml.indexOf('class="text-generation-entry"'));
+    assert.equal((xml.match(/catchtap="onOpenHistory"/g)||[]).length,1);
+    assert.equal((xml.match(/catchtap="onOpenTextGeneration"/g)||[]).length,1);
+    assert(xml.indexOf('home-quick-actions')>xml.indexOf('portal-specs'));
+    assert(xml.indexOf('home-quick-actions')<xml.indexOf('generation-warning'));
     assert(xml.includes('wx:if="{{ historyCount > 0 }}"'));
     const p=page('index');assert.equal(typeof p.onOpenHistory,'function');
-    assert(!xml.slice(xml.indexOf('class="history-entry"')).includes('bindtap="onOpenTextGeneration"'));
+    assert(!xml.includes('history-entry'));assert(!xml.includes('text-generation-entry'));
+    assert(!/<button[^>]*home-work-action[^>]*wx:if/.test(xml));
     const creation=fs.readFileSync(path.join(root,'backend/static/web/creation.js'),'utf8');assert(creation.includes('旧日瞬间')&&creation.includes('重现眼前'));
   });
   await test('invite_button_uses_shorter_label_and_keeps_share_handler',()=>{

@@ -58,11 +58,12 @@ function loadPage(name, api={}, app=appFixture(), extraWx={}, clock={}) {
     page.onSelectQuality({currentTarget:{dataset:{quality:'fine'}}});
     return [light===20&&page.data.currentQualityCost===80,{light,fine:page.data.currentQualityCost}];
   });
-  await test('text_entry_is_compact_and_after_style_showcase',()=>{
+  await test('home_quick_entries_are_compact_inside_photo_card_before_style_showcase',()=>{
     const xml=fs.readFileSync(path.join(ROOT,'miniprogram/pages/index/index.wxml'),'utf8');
     const css=fs.readFileSync(path.join(ROOT,'miniprogram/pages/index/index.wxss'),'utf8');
-    return [xml.indexOf('text-generation-entry')>xml.indexOf('showcase-scroll') && xml.includes('entry-label')&&css.includes('min-height:88rpx'),
-      {afterShowcase:xml.indexOf('text-generation-entry')>xml.indexOf('showcase-scroll'),compact:css.includes('min-height:88rpx')}];
+    return [xml.indexOf('home-quick-actions')>xml.indexOf('portal-specs') && xml.indexOf('home-quick-actions')<xml.indexOf('generation-warning') &&
+      xml.includes('catchtap="onOpenTextGeneration"')&&xml.includes('catchtap="onOpenHistory"')&&css.includes('min-height:88rpx'),
+      {insidePhotoCard:xml.indexOf('home-quick-actions')<xml.indexOf('generation-warning'),compact:css.includes('min-height:88rpx')}];
   });
   await test('text_generation_separate_page_uses_server_price_and_no_photo',async()=>{
     let sent,route;

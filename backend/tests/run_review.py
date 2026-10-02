@@ -138,6 +138,7 @@ if not args.legacy:
         ('test_web_library_layout.cjs', 'web_library_layout_results.json'),
         ('test_web_sharing_layout.cjs', 'web_sharing_layout_results.json'),
         ('test_web_catalog_layout.cjs', 'web_catalog_layout_results.json'),
+        ('test_mini_home_shortcuts.cjs', 'mini_home_shortcuts_results.json'),
     ):
         path = Path(__file__).with_name(script)
         if path.is_file():

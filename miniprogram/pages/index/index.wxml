@@ -49,6 +49,14 @@
         </view>
         <text class="portal-desc">点击从手机相册选择，或现场拍照</text>
         <text class="portal-specs">支持 JPG / PNG / WebP · 自动适配超清</text>
+        <view class="home-quick-actions">
+          <button class="home-quick-action home-text-action" catchtap="onOpenTextGeneration">
+            <text class="quick-action-label">文字生图</text><text class="quick-action-arrow" aria-hidden="true">→</text>
+          </button>
+          <button class="home-quick-action home-work-action" catchtap="onOpenHistory">
+            <text class="quick-action-label">我的作品<text wx:if="{{ historyCount > 0 }}">（{{ historyCount }}）</text></text><text class="quick-action-arrow" aria-hidden="true">→</text>
+          </button>
+        </view>
       </view>
     </view>
 
@@ -97,18 +105,6 @@
         </view>
       </scroll-view>
       <view wx:if="{{!featuredTemplates.length}}" class="showcase-empty">{{templateError || '暂无可用风格，稍后再来看看'}}</view>
-    </view>
-    <view class="text-generation-entry" bindtap="onOpenTextGeneration">
-      <view class="entry-copy"><text class="entry-label">文字生图</text><text class="entry-note">从一句描述开始创作</text></view>
-      <text class="entry-arrow">→</text>
-    </view>
-    <!-- 历史记录置于所有创作入口之后 -->
-    <view
-      class="history-entry"
-      wx:if="{{ historyCount > 0 }}"
-      bindtap="onOpenHistory"
-    >
-      <text>查看过往修复记录 ({{ historyCount }})</text>
     </view>
   </view>
 </view>
