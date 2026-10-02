@@ -66,6 +66,10 @@ export class CreationSession {
   }
   active(){return !this.closed&&this.ctx.accountVersion===this.version;}
   assertActive(){if(!this.active())throw problem('页面或登录状态已变化，请在当前页面继续',0,'INACTIVE');}
+  async mediaFetch(url,options,phase){
+    try{return await this.fetch(url,options);}
+    catch(e){this.assertActive();throw problem(phase+'连接失败，请检查网络后重试',0,'MEDIA_NETWORK');}
+  }
   close(){this.closed=true;this.visibility.close();if(this.pollController)this.pollController.abort();if(this.timer){clearTimeout(this.timer);this.timerResolve&&this.timerResolve();}}
   async login(){const ok=await this.ctx.requireLogin();if(!ok)return false;this.assertActive();this.owner=account(this.ctx);if(!this.owner)throw problem('登录信息尚未就绪，请重新登录',401);return true;}
   async catalog(targetId='',force=false){
@@ -89,7 +93,7 @@ export class CreationSession {
     if(!recipe.orig_url)throw problem('原图已到保存期限，请重新选择照片',410);
     let url=recipe.orig_url;
     for(let attempt=0;attempt<2;attempt++){
-      const response=await this.fetch(directMedia(url),{credentials:'omit'});this.assertActive();
+      const response=await this.mediaFetch(directMedia(url),{credentials:'omit'},'原图下载');this.assertActive();
       if(response.ok){const blob=await imageBlob(await response.blob());this.assertActive();return blob;}
       if(attempt===0&&[401,403].includes(response.status)&&recipe.job_id){const refreshed=await this.ctx.api('/api/jobs/'+encodeURIComponent(recipe.job_id)+'/recipe');this.assertActive();if(!complete(refreshed)||!refreshed.orig_url)throw problem('原素材已到保存期限，请重新选择照片',410);url=refreshed.orig_url;continue;}
       throw problem(response.status===404?'原图已到保存期限，请重新选择照片':'原图下载失败，请稍后重试',response.status);
@@ -174,7 +178,7 @@ export class CreationSession {
       if(mode==='photo'){
         const ticket=await this.ctx.api('/api/uploads',{method:'POST',data:{filename:'photo.'+(source.blob.type==='image/png'?'png':'jpg'),byte_size:source.blob.size}});this.assertActive();
         if(!/^https:\/\//.test(ticket.url||'')||new URL(ticket.url).origin===globalThis.location.origin)throw problem('COS 上传地址异常，请稍后重试');
-        const uploaded=await this.fetch(ticket.url,{method:'PUT',body:source.blob,credentials:'omit',headers:{'content-type':'application/octet-stream'}});this.assertActive();
+        const uploaded=await this.mediaFetch(ticket.url,{method:'PUT',body:source.blob,credentials:'omit',headers:{'content-type':'application/octet-stream'}},'照片直传');this.assertActive();
         if(!uploaded.ok)throw problem('照片直传未完成，请重试',uploaded.status);
         await this.ctx.api('/api/uploads/'+encodeURIComponent(ticket.upload_id)+'/complete',{method:'POST',data:{}});this.assertActive();payload=Object.assign({},payload,{upload_id:ticket.upload_id});
       }
@@ -330,7 +334,7 @@ export async function mountCreation(ctx,root,route,params={}) {
   }
   async function wait(id){const job=await session.poll(id,j=>{if(active()){status=STAGES[j.stage]||'任务处理中，可以稍后到作品页查看';render();}});if(!active())return;if(job&&job.status==='succeeded')ctx.navigate('result',{jobId:id});else if(job&&job.status==='failed'){ctx.invalidateAccount();status=(job.error||'生成未完成')+'；请在额度流水中核对返还';render();}else{status='任务仍在云端处理，可到作品页查看，不需要再次提交';render();}}
   async function download(url,jobId){
-    let link=await session.resultMedia(jobId,'result',url);for(let i=0;i<2;i++){const response=await session.fetch(directMedia(link),{credentials:'omit'});session.assertActive();if(response.ok){const blob=await imageBlob(await response.blob());session.assertActive();const local=URL.createObjectURL(blob);urls.add(local);const anchor=node('a','');anchor.href=local;anchor.download=jobId+(blob.type==='image/png'?'.png':blob.type==='image/webp'?'.webp':'.jpg');anchor.click();return;}if(i===0&&[401,403].includes(response.status)){const fresh=await ctx.api('/api/jobs/'+encodeURIComponent(jobId));session.assertActive();if(!fresh.result_url)throw problem('作品已到保存期限');link=await session.resultMedia(jobId,'result',fresh.result_url);}else throw problem('图片下载未完成，请稍后重试',response.status);}
+    let link=await session.resultMedia(jobId,'result',url);for(let i=0;i<2;i++){const response=await session.mediaFetch(directMedia(link),{credentials:'omit'},'图片下载');session.assertActive();if(response.ok){const blob=await imageBlob(await response.blob());session.assertActive();const local=URL.createObjectURL(blob);urls.add(local);const anchor=node('a','');anchor.href=local;anchor.download=jobId+(blob.type==='image/png'?'.png':blob.type==='image/webp'?'.webp':'.jpg');anchor.click();return;}if(i===0&&[401,403].includes(response.status)){const fresh=await ctx.api('/api/jobs/'+encodeURIComponent(jobId));session.assertActive();if(!fresh.result_url)throw problem('作品已到保存期限');link=await session.resultMedia(jobId,'result',fresh.result_url);}else throw problem('图片下载未完成，请稍后重试',response.status);}
   }
   async function renderResult(){
     root.replaceChildren(node('p','creation-state','正在读取作品…'));if(!await login())return;const id=params.jobId;if(!id)throw problem('缺少作品编号，请重新打开作品');const job=await ctx.api('/api/jobs/'+encodeURIComponent(id));session.assertActive();
@@ -341,7 +345,8 @@ export async function mountCreation(ctx,root,route,params={}) {
       try{const originalUrl=await session.resultMedia(id,'orig',job.orig_url),before=node('img','creation-result-image creation-before-image');before.src=originalUrl;before.alt=job.comparison_compressed?'对比原图（压缩版）':'原图';before.style.clipPath='inset(0 50% 0 0)';stage.append(before);const slider=node('input','creation-comparison-slider');slider.type='range';slider.min='0';slider.max='100';slider.value='50';slider.setAttribute('aria-label','拖动查看原图和生成结果');slider.addEventListener('input',()=>before.style.clipPath='inset(0 '+(100-Number(slider.value))+'% 0 0)');root.append(note('左右拖动对比'+(job.comparison_compressed?' · 对比原图为压缩版':'')),slider);}
       catch(e){if(e.code==='INACTIVE')throw e;root.append(note('成品已显示；原图暂未提供 COS 直链：'+e.message));}
     }else root.append(note(job.input_mode==='text'?'文字生图成品':'原图已到期，当前仅展示成品'));
-    const dock=node('div','creation-result-actions');add(dock,button('高清预览',()=>{const dialog=node('dialog','creation-dialog creation-zoom-dialog'),image=node('img','creation-zoom-image');image.src=result.src;image.alt='高清成品预览';const scale=node('input','creation-input');scale.type='range';scale.min='100';scale.max='400';scale.value='100';scale.setAttribute('aria-label','调整高清预览放大比例');scale.addEventListener('input',()=>image.style.width=scale.value+'%');add(dialog,button('关闭预览',()=>dialog.close(),'creation-link-button'),scale,image);root.append(dialog);dialog.addEventListener('close',()=>dialog.remove());dialog.showModal();}),button('下载图片',run(async()=>{await download(job.result_url,id);ctx.toast('图片已开始下载');})),button('沿用参数再创作',run(async()=>{const recipe=await ctx.api('/api/jobs/'+encodeURIComponent(id)+'/recipe');session.assertActive();if(!complete(recipe))throw problem('旧作品参数不完整，请重新选图或填写描述');await session.newCreation();ctx.navigate(recipe.input_mode==='text'?'text':'create',{recipe});})));root.append(dock);
+    const downloadNotice=note('');downloadNotice.setAttribute('role','status');downloadNotice.hidden=true;
+    const dock=node('div','creation-result-actions');add(dock,button('高清预览',()=>{const dialog=node('dialog','creation-dialog creation-zoom-dialog'),image=node('img','creation-zoom-image');image.src=result.src;image.alt='高清成品预览';const scale=node('input','creation-input');scale.type='range';scale.min='100';scale.max='400';scale.value='100';scale.setAttribute('aria-label','调整高清预览放大比例');scale.addEventListener('input',()=>image.style.width=scale.value+'%');add(dialog,button('关闭预览',()=>dialog.close(),'creation-link-button'),scale,image);root.append(dialog);dialog.addEventListener('close',()=>dialog.remove());dialog.showModal();}),button('下载图片',async()=>{downloadNotice.hidden=true;try{await download(job.result_url,id);ctx.toast('图片已开始下载');}catch(e){if(!active()||e.code==='INACTIVE')return;downloadNotice.textContent=e.message||'图片下载未完成，请稍后重试';downloadNotice.hidden=false;ctx.toast(downloadNotice.textContent);}}),button('沿用参数再创作',run(async()=>{const recipe=await ctx.api('/api/jobs/'+encodeURIComponent(id)+'/recipe');session.assertActive();if(!complete(recipe))throw problem('旧作品参数不完整，请重新选图或填写描述');await session.newCreation();ctx.navigate(recipe.input_mode==='text'?'text':'create',{recipe});})));root.append(downloadNotice,dock);
     let imageRetry=0;result.addEventListener('error',run(async()=>{if(imageRetry++){ctx.toast('成品暂未加载，请返回作品页重试');return;}const fresh=await ctx.api('/api/jobs/'+encodeURIComponent(id));session.assertActive();if(!fresh.result_url)throw problem('作品已到保存期限');result.src=await session.resultMedia(id,'result',fresh.result_url);}));
   }
   function render(){if(!active())return;for(const url of urls)URL.revokeObjectURL(url);urls.clear();if(route==='templates')renderTemplates();else if(route!=='result')renderForm();}

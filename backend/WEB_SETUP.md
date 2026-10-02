@@ -46,6 +46,33 @@
 
 ## 本地验收
 
+### 网页选图后出现 `Failed to fetch`
+
+先在浏览器网络面板区分失败环节：`POST /api/uploads` 成功但 COS 的 `OPTIONS` 返回 403、没有 `Access-Control-Allow-Origin` 时，浏览器不会发送图片 PUT，生成任务尚未创建。`cos_ready=true` 只表示上传签名配置齐全，不代表浏览器跨域规则已通过。`free_mode=true` 时显示 0 光子是正常的免费模式，与上传失败无关。
+
+在当前图片存储桶的「安全管理 → 跨域访问 CORS 设置」添加网站规则，保留已有规则：
+
+| 字段 | 值 |
+|---|---|
+| 来源 Origin | `https://image.myil.top`（其他部署填写真实网站 Origin，不带路径） |
+| 操作 Methods | `PUT`、`GET`、`HEAD` |
+| Allow-Headers | `content-type`；模板投稿封面直传还使用 `x-cos-acl` |
+| Expose-Headers | `ETag`、`x-cos-request-id`（便于排查） |
+| Max-Age | `600` 秒 |
+
+使用 `/api/uploads` 返回的实际上传地址检查预检，不发送图片、不创建生成任务：
+
+```bash
+curl -i -X OPTIONS 'UPLOAD_URL' \
+  -H 'Origin: https://image.myil.top' \
+  -H 'Access-Control-Request-Method: PUT' \
+  -H 'Access-Control-Request-Headers: content-type'
+```
+
+通过条件：HTTP 2xx，响应允许本站 Origin、PUT 和 content-type。再检查投稿封面的 `content-type,x-cos-acl` 组合。若使用自定义域名，原生 COS 域名和实际自定义域名都应验收；CDN 场景还需检查 CDN 的 OPTIONS 转发与跨域响应头。普通 `<img>` 能显示，不代表 PUT 预检或 `fetch` 下载已获跨域允许；需另外使用实际成品签名 URL 发起带 `Origin` 的 GET，确认响应包含允许本站的 `Access-Control-Allow-Origin`。规则生效后重试一次选图 → 上传 → 提交 → 轮询 → 成品 → 下载，确认不会重复提交任务。
+
+配置参考：[腾讯云设置跨域访问](https://cloud.tencent.com/document/product/436/13318)、[跨域排障](https://cloud.tencent.com/document/product/436/56652)。
+
 后端测试使用合成图片、临时 SQLite 和模拟外部响应；不使用生产账号或收费调用。
 
 ```powershell
